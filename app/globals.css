@@ -1,0 +1,281 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  /* Accent color — default "Violet" preset (#6D5DF6 / #A78BFA / #443A99).
+     Settings → Appearance → Accent Color rewrites these three at runtime
+     via ThemePreferenceProvider; every bg-signal/text-signal-glow/etc.
+     class across the app reads from these three variables. */
+  --signal-rgb: 109 93 246;
+  --signal-glow-rgb: 167 139 250;
+  --signal-dim-rgb: 68 58 153;
+}
+
+/* Compact Mode (Settings → Appearance) — tightens the rhythm app-wide
+   without hand-editing padding on every card. Opt-in via [data-density="compact"]
+   on <html>, set by ThemePreferenceProvider from the saved preference. */
+html[data-density="compact"] .panel,
+html[data-density="compact"] .glow-card {
+  padding: 0.75rem !important;
+}
+html[data-density="compact"] main {
+  padding-top: 0.75rem !important;
+  padding-bottom: 0.75rem !important;
+}
+html[data-density="compact"] .space-y-5 > * + * {
+  margin-top: 0.875rem !important;
+}
+
+/* Animations toggle (Settings → Appearance) — a stronger, explicit opt-out
+   layered on top of (not replacing) the OS-level prefers-reduced-motion
+   handled further down. */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-image: radial-gradient(circle at 20% -10%, rgba(110, 91, 255, 0.1), transparent 40%),
+    radial-gradient(circle at 90% 10%, rgba(255, 176, 32, 0.05), transparent 35%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(110, 91, 255, 0.35);
+}
+
+/* thin, terminal-appropriate scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #23262f transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #23262f;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.panel {
+  @apply bg-bg-surface border border-line rounded-lg;
+}
+
+.mono-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+/* ---- Terminal-grade motion & surface primitives -------------------- */
+
+.glow-card {
+  @apply relative bg-bg-surface border border-line rounded-xl shadow-card transition-all duration-300;
+}
+.glow-card:hover {
+  @apply border-signal/40;
+  transform: translateY(-1px);
+}
+
+/* Faint dot-grid backdrop for zoom/pan canvases (Global Intelligence Map,
+   and any future map-like panel) — signals "this area is a pannable
+   canvas" the way Figma/Arkham-style graph explorers do, before the user
+   even touches it. Sits behind the transformed content, so it stays put
+   while the map itself pans/zooms over it. */
+.map-canvas-grid {
+  @apply bg-bg;
+  background-image: radial-gradient(rgba(139, 123, 255, 0.16) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #181b24;
+  border-radius: 6px;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(230, 232, 238, 0.06), transparent);
+  background-size: 400px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  background: inherit;
+  opacity: 0.35;
+  animation: pulseGlow 1.8s ease-in-out infinite;
+}
+
+.heat-cell {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, z-index 0.18s ease;
+}
+.heat-cell:hover {
+  transform: scale(1.04);
+  z-index: 10;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.text-gradient-signal {
+  background: linear-gradient(90deg, rgb(var(--signal-glow-rgb)), rgb(var(--signal-rgb)) 60%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- Phase 2 — UI/UX optimization primitives ----------------------- */
+
+/* Faint structural grid for "premium terminal" surfaces (dashboard hero,
+   Settings background). Deliberately subtle — a texture, not a pattern. */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(230, 232, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(230, 232, 238, 0.035) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+/* Bloomberg-style section separator: a hairline with a mono eyebrow label
+   breaking it, instead of a plain <hr>. */
+.terminal-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  color: theme("colors.ink.faint");
+}
+.terminal-divider::before,
+.terminal-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, theme("colors.line"), transparent);
+}
+
+/* Generic hover-glow lift for interactive rows/cards that aren't full GlowCards. */
+.hover-glow {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.hover-glow:hover {
+  border-color: rgb(var(--signal-rgb) / 0.4);
+  box-shadow: 0 0 0 1px rgb(var(--signal-rgb) / 0.25), 0 0 18px rgb(var(--signal-glow-rgb) / 0.16);
+  transform: translateY(-1px);
+}
+
+.card-float {
+  animation: cardFloat 4.5s ease-in-out infinite;
+}
+
+/* Circular gauge ring (AI Score / Confidence Meter / Fear&Greed compact).
+   Draw the track in one color and layer an animated arc on top via
+   stroke-dasharray/offset set inline per-instance. */
+.gauge-ring-track {
+  stroke: theme("colors.line");
+  fill: none;
+}
+.gauge-ring-value {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Three-dot "AI is thinking" typing indicator. */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.typing-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: typingDot 1.2s ease-in-out infinite;
+}
+.typing-dots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Tag for any panel showing placeholder/preview data because its real feed
+   isn't connected yet — keeps the "feels alive" panels honest about which
+   numbers are live vs. illustrative, the same way a real trading terminal
+   marks delayed/simulated data instead of quietly showing it as live. */
+.simulated-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 4px;
+  border: 1px solid theme("colors.amber.DEFAULT" / 30%);
+  background: theme("colors.amber.DEFAULT" / 10%);
+  color: theme("colors.amber.DEFAULT");
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+}
+
+/* Thin animated scanline sweep for "Scanning…" states. */
+.scan-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.scan-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, rgb(var(--signal-rgb) / 0.12), transparent);
+  animation: scanline 2.4s linear infinite;
+}
