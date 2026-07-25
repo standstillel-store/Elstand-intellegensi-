@@ -1,4 +1,4 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Everything a signed-in user reaches after Google login. The marketing
@@ -24,6 +24,14 @@ function isProtectedPath(pathname: string) {
 }
 
 export async function middleware(request: NextRequest) {
+  // Reassigned inside setAll below every time Supabase refreshes the
+  // session, so it always carries the newest cookies. This exact object —
+  // not a freshly-constructed NextResponse — is what every return path
+  // below must send back, redirects included. Building a plain
+  // `NextResponse.redirect(...)` instead would silently drop a
+  // just-refreshed session cookie, which is a classic way to end up in a
+  // login loop (browser and server disagree about the session on the very
+  // next request).
   let response = NextResponse.next({ request: { headers: request.headers } });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,22 +46,21 @@ export async function middleware(request: NextRequest) {
 
   const supabase = createServerClient(url, anonKey, {
     cookies: {
-      get(name: string) {
-        return request.cookies.get(name)?.value;
+      getAll() {
+        return request.cookies.getAll();
       },
-      set(name: string, value: string, options: CookieOptions) {
-        request.cookies.set({ name, value, ...options });
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request: { headers: request.headers } });
-        response.cookies.set({ name, value, ...options });
-      },
-      remove(name: string, options: CookieOptions) {
-        request.cookies.set({ name, value: "", ...options });
-        response = NextResponse.next({ request: { headers: request.headers } });
-        response.cookies.set({ name, value: "", ...options });
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
       },
     },
   });
 
+  // getUser() (not getSession()) — it revalidates the token against the
+  // Auth server on every request instead of just trusting what's in the
+  // cookie, and it's what actually triggers the auto-refresh above when the
+  // access token is close to expiring.
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -63,11 +70,15 @@ export async function middleware(request: NextRequest) {
   if (!user && isProtectedPath(pathname)) {
     const redirectUrl = new URL("/login", request.url);
     redirectUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(redirectUrl);
+    const redirect = NextResponse.redirect(redirectUrl);
+    response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+    return redirect;
   }
 
   if (user && pathname === "/login") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
+    response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+    return redirect;
   }
 
   return response;

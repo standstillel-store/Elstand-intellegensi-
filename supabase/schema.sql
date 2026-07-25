@@ -340,3 +340,180 @@ alter table bn_position_meta enable row level security;
 alter table bn_auto_trader_settings enable row level security;
 alter table bn_auto_trader_log enable row level security;
 alter table bn_emergency_stop enable row level security;
+
+-- ============================================================================
+-- Phase 3 — Google Auth & User Profile
+-- ============================================================================
+-- lib/auth/profile.ts, lib/energy.ts, lib/activityLog.ts, and the
+-- app/api/account/* + app/api/wallet/* routes already read/write the eight
+-- tables below (several of their comments literally say "see the Phase 3
+-- section of supabase/schema.sql") — this section is that migration, added
+-- because it was missing from this file even though the application code
+-- depended on it already. Same idempotent, safe-to-re-run style as the rest
+-- of this file.
+
+-- users — one row per signed-in account, 1:1 with auth.users. id is never
+-- generated here; it's always the same UUID Supabase Auth already assigned.
+create table if not exists users (
+  id uuid primary key references auth.users (id) on delete cascade,
+  email text not null,
+  last_login_at timestamptz,
+  last_active_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- profiles — Google-sourced display info (name/photo), kept separate from
+-- `users` so lib/auth/profile.ts's upsertUserProfile() can refresh this on
+-- every login without ever touching users.created_at.
+create table if not exists profiles (
+  user_id uuid primary key references users (id) on delete cascade,
+  username text,
+  avatar_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ai_token — one AI Energy balance row per user (lib/energy.ts). Phase 3.1's
+-- UI only shows a static "0" placeholder — this table exists purely because
+-- lib/energy.ts/lib/energyGate.ts already read and write it; no token system
+-- is being built here.
+create table if not exists ai_token (
+  user_id uuid primary key references users (id) on delete cascade,
+  balance numeric not null default 10,
+  last_reset_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ai_token_transactions — append-only ledger, one row per ai_token change.
+create table if not exists ai_token_transactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users (id) on delete cascade,
+  delta numeric not null,
+  reason text not null,
+  balance_after numeric not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists ai_token_transactions_user_idx on ai_token_transactions (user_id, created_at desc);
+
+-- user_settings — seeded empty on first login (upsertUserProfile). No
+-- columns are read anywhere yet; reserved for a future Settings phase.
+create table if not exists user_settings (
+  user_id uuid primary key references users (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- devices — "last seen" per device label, upserted on login + activity
+-- heartbeat (lib/activityLog.ts touchDevice). The composite unique below is
+-- what onConflict: "user_id,device_label" resolves against.
+create table if not exists devices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users (id) on delete cascade,
+  device_label text not null,
+  user_agent text,
+  last_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  unique (user_id, device_label)
+);
+
+-- activity_log — append-only audit trail (lib/activityLog.ts logActivity).
+create table if not exists activity_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users (id) on delete cascade,
+  event_type text not null,
+  metadata jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists activity_log_user_idx on activity_log (user_id, created_at desc);
+
+-- wallets — linked on-chain addresses (app/api/wallet/*, a pre-existing
+-- feature from before this phase). Not being built here — this table is
+-- only added so those already-written routes stop erroring against a
+-- missing table; Wallet Connect itself is explicitly out of scope for
+-- Phase 3.1.
+create table if not exists wallets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users (id) on delete cascade,
+  wallet_address text not null unique,
+  wallet_type text,
+  chain_id integer,
+  verified boolean not null default false,
+  last_connected_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists wallets_user_idx on wallets (user_id);
+
+-- ----------------------------------------------------------------------------
+-- Row Level Security — every policy below: a signed-in user may only
+-- read/write their own row(s). Unlike the tables above this section (which
+-- are only ever touched server-side with the service-role key), all Phase 3
+-- access goes through the anon-key, user-scoped client (lib/auth/server.ts)
+-- — see the comment at the top of lib/auth/profile.ts — so real policies
+-- (not just "RLS enabled, zero policies") are required for any of it to work.
+-- ----------------------------------------------------------------------------
+alter table users enable row level security;
+alter table profiles enable row level security;
+alter table ai_token enable row level security;
+alter table ai_token_transactions enable row level security;
+alter table user_settings enable row level security;
+alter table devices enable row level security;
+alter table activity_log enable row level security;
+alter table wallets enable row level security;
+
+drop policy if exists users_select_own on users;
+create policy users_select_own on users for select using (auth.uid() = id);
+drop policy if exists users_insert_own on users;
+create policy users_insert_own on users for insert with check (auth.uid() = id);
+drop policy if exists users_update_own on users;
+create policy users_update_own on users for update using (auth.uid() = id) with check (auth.uid() = id);
+
+drop policy if exists profiles_select_own on profiles;
+create policy profiles_select_own on profiles for select using (auth.uid() = user_id);
+drop policy if exists profiles_insert_own on profiles;
+create policy profiles_insert_own on profiles for insert with check (auth.uid() = user_id);
+drop policy if exists profiles_update_own on profiles;
+create policy profiles_update_own on profiles for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists ai_token_select_own on ai_token;
+create policy ai_token_select_own on ai_token for select using (auth.uid() = user_id);
+drop policy if exists ai_token_insert_own on ai_token;
+create policy ai_token_insert_own on ai_token for insert with check (auth.uid() = user_id);
+drop policy if exists ai_token_update_own on ai_token;
+create policy ai_token_update_own on ai_token for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists ai_token_transactions_select_own on ai_token_transactions;
+create policy ai_token_transactions_select_own on ai_token_transactions for select using (auth.uid() = user_id);
+drop policy if exists ai_token_transactions_insert_own on ai_token_transactions;
+create policy ai_token_transactions_insert_own on ai_token_transactions for insert with check (auth.uid() = user_id);
+
+drop policy if exists user_settings_select_own on user_settings;
+create policy user_settings_select_own on user_settings for select using (auth.uid() = user_id);
+drop policy if exists user_settings_insert_own on user_settings;
+create policy user_settings_insert_own on user_settings for insert with check (auth.uid() = user_id);
+drop policy if exists user_settings_update_own on user_settings;
+create policy user_settings_update_own on user_settings for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists devices_select_own on devices;
+create policy devices_select_own on devices for select using (auth.uid() = user_id);
+drop policy if exists devices_insert_own on devices;
+create policy devices_insert_own on devices for insert with check (auth.uid() = user_id);
+drop policy if exists devices_update_own on devices;
+create policy devices_update_own on devices for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists activity_log_select_own on activity_log;
+create policy activity_log_select_own on activity_log for select using (auth.uid() = user_id);
+drop policy if exists activity_log_insert_own on activity_log;
+create policy activity_log_insert_own on activity_log for insert with check (auth.uid() = user_id);
+
+drop policy if exists wallets_select_own on wallets;
+create policy wallets_select_own on wallets for select using (auth.uid() = user_id);
+drop policy if exists wallets_insert_own on wallets;
+create policy wallets_insert_own on wallets for insert with check (auth.uid() = user_id);
+drop policy if exists wallets_update_own on wallets;
+create policy wallets_update_own on wallets for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists wallets_delete_own on wallets;
+create policy wallets_delete_own on wallets for delete using (auth.uid() = user_id);

@@ -1,16 +1,24 @@
 "use client";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { Search, Settings, BookOpen, ChevronDown, CircleUser } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, ChevronDown, CircleUser, Zap, LogOut, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { useTokenAnalyzer } from "@/components/token-analyzer/TokenAnalyzerContext";
 import { AlertsBell } from "@/components/alerts/AlertsBell";
 import { formatUsd, formatPct } from "@/lib/format";
+import type { AppUser, AppProfile } from "@/lib/auth/profile";
 
 interface TickerRow {
   symbol: string;
   price: number | null;
   change24h: number | null;
+}
+
+interface AccountMeResponse {
+  signedIn: boolean;
+  user: AppUser | null;
+  profile: AppProfile | null;
 }
 
 export function TopNav() {
@@ -23,6 +31,9 @@ export function TopNav() {
   ]);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const [me, setMe] = useState<AccountMeResponse | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +61,39 @@ export function TopNav() {
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
+
+  // Powers the profile dropdown (avatar/name/email) — one round trip, see
+  // app/api/account/me/route.ts. AI Token stays a hardcoded "0" below on
+  // purpose (Phase 3.1 scope) — this response's energy balance isn't used.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/account/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setMe(data);
+      })
+      .catch(() => {
+        /* dropdown just falls back to its default labels below */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    setProfileOpen(false);
+    try {
+      const { createSupabaseBrowserClient } = await import("@/lib/auth/client");
+      const supabase = createSupabaseBrowserClient();
+      await supabase.auth.signOut();
+    } catch {
+      // Even if sign-out isn't configured, still send the user to /login
+      // below rather than leaving them stuck on this button.
+    } finally {
+      router.push("/login");
+    }
+  }
 
   function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -102,17 +146,56 @@ export function TopNav() {
               onClick={() => setProfileOpen((v) => !v)}
               className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-ink-muted hover:border-signal/40 hover:text-ink"
             >
-              <CircleUser size={16} />
+              {me?.profile?.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- external Google avatar URL, not worth next/image's domain allowlist config for one small round avatar
+                <img src={me.profile.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" referrerPolicy="no-referrer" />
+              ) : (
+                <CircleUser size={16} />
+              )}
               <ChevronDown size={12} className={clsx("transition-transform", profileOpen && "rotate-180")} />
             </button>
             {profileOpen && (
-              <div className="absolute right-0 top-[calc(100%+6px)] w-48 rounded-md border border-line bg-bg-raised py-1 shadow-2xl shadow-black/40">
-                <Link href="/settings" className="flex items-center gap-2 px-3 py-2 text-sm text-ink-muted hover:bg-bg-surface hover:text-ink">
-                  <Settings size={14} /> Settings
-                </Link>
-                <Link href="/methodology" className="flex items-center gap-2 px-3 py-2 text-sm text-ink-muted hover:bg-bg-surface hover:text-ink">
-                  <BookOpen size={14} /> Methodology
-                </Link>
+              <div className="absolute right-0 top-[calc(100%+6px)] w-64 rounded-md border border-line bg-bg-raised py-1.5 shadow-2xl shadow-black/40">
+                <div className="flex items-center gap-2.5 px-3 py-2">
+                  {me?.profile?.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- external Google avatar URL, not worth next/image's domain allowlist config for one small round avatar
+                    <img
+                      src={me.profile.avatarUrl}
+                      alt=""
+                      className="h-9 w-9 shrink-0 rounded-full border border-line"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-bg-surface text-ink-faint">
+                      <CircleUser size={18} />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{me?.profile?.username || "Trader"}</p>
+                    <p className="truncate text-xs text-ink-faint">{me?.user?.email ?? ""}</p>
+                  </div>
+                </div>
+
+                <div className="my-1 border-t border-line" />
+
+                <div className="flex items-center justify-between px-3 py-2 text-xs">
+                  <span className="flex items-center gap-1.5 text-ink-muted">
+                    <Zap size={12} className="text-signal-glow" /> AI Token
+                  </span>
+                  {/* Static placeholder per Phase 3.1 scope — real balance wiring is a later phase */}
+                  <span className="mono-num font-semibold text-ink">0</span>
+                </div>
+
+                <div className="my-1 border-t border-line" />
+
+                <button
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-down hover:bg-down/10 disabled:opacity-50"
+                >
+                  {loggingOut ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
+                  {loggingOut ? "Memproses…" : "Logout"}
+                </button>
               </div>
             )}
           </div>
