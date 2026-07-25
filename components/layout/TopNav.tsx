@@ -62,9 +62,6 @@ export function TopNav() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // Powers the profile dropdown (avatar/name/email) — one round trip, see
-  // app/api/account/me/route.ts. AI Token stays a hardcoded "0" below on
-  // purpose (Phase 3.1 scope) — this response's energy balance isn't used.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/account/me")
@@ -72,9 +69,7 @@ export function TopNav() {
       .then((data) => {
         if (!cancelled && data) setMe(data);
       })
-      .catch(() => {
-        /* dropdown just falls back to its default labels below */
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -88,8 +83,7 @@ export function TopNav() {
       const supabase = createSupabaseBrowserClient();
       await supabase.auth.signOut();
     } catch {
-      // Even if sign-out isn't configured, still send the user to /login
-      // below rather than leaving them stuck on this button.
+      // still redirect below even if sign-out itself failed
     } finally {
       router.push("/login");
     }
@@ -147,7 +141,7 @@ export function TopNav() {
               className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-ink-muted hover:border-signal/40 hover:text-ink"
             >
               {me?.profile?.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- external Google avatar URL, not worth next/image's domain allowlist config for one small round avatar
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={me.profile.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" referrerPolicy="no-referrer" />
               ) : (
                 <CircleUser size={16} />
@@ -158,7 +152,7 @@ export function TopNav() {
               <div className="absolute right-0 top-[calc(100%+6px)] w-64 rounded-md border border-line bg-bg-raised py-1.5 shadow-2xl shadow-black/40">
                 <div className="flex items-center gap-2.5 px-3 py-2">
                   {me?.profile?.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- external Google avatar URL, not worth next/image's domain allowlist config for one small round avatar
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={me.profile.avatarUrl}
                       alt=""
@@ -182,7 +176,6 @@ export function TopNav() {
                   <span className="flex items-center gap-1.5 text-ink-muted">
                     <Zap size={12} className="text-signal-glow" /> AI Token
                   </span>
-                  {/* Static placeholder per Phase 3.1 scope — real balance wiring is a later phase */}
                   <span className="mono-num font-semibold text-ink">0</span>
                 </div>
 
