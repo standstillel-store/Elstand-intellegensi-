@@ -30,7 +30,10 @@ export const isWalletConnectConfigured = Boolean(projectId);
 export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [mainnet, arbitrum, optimism, base, polygon, bsc];
 
 export const wagmiAdapter = new WagmiAdapter({
-  storage: createStorage({ storage: cookieStorage }),
+  // `as any`: wagmi & @reown/appkit-adapter-wagmi punya definisi tipe
+  // Storage yang sedikit beda meski secara runtime kompatibel — ini cuma
+  // bypass type-check, bukan bug fungsional.
+  storage: createStorage({ storage: cookieStorage }) as any,
   ssr: true,
   projectId: projectId || "unconfigured",
   networks,
