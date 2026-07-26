@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { CircleUser } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { TopNav } from "./layout/TopNav";
+import { ProfileMenu } from "./layout/ProfileMenu";
 import { NavDrawer } from "./mobile/NavDrawer";
 import { Footer } from "./Footer";
 import { AIChatDock } from "./AIChatDock";
@@ -35,13 +35,7 @@ export function AppShell({
             </Link>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
               <AlertsBell />
-              <Link
-                href="/settings"
-                aria-label="Profile & settings"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-bg-raised hover:text-ink"
-              >
-                <CircleUser size={18} />
-              </Link>
+              <ProfileMenu />
             </div>
           </div>
           <div className="flex items-center justify-between gap-2 px-4 pb-2.5">
