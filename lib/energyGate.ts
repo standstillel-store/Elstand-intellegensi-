@@ -94,26 +94,41 @@ export type EnergyGateResult =
  *   }
  */
 export async function reserveEnergy(feature: EnergyFeature): Promise<EnergyGateResult> {
-  const supabase = createSupabaseServerClient();
-  if (!supabase) return { ok: true, reservation: null };
+  try {
+    const supabase = createSupabaseServerClient();
+    if (!supabase) return { ok: true, reservation: null };
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: true, reservation: null };
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: true, reservation: null };
 
-  const cost = FEATURE_COSTS[feature];
-  const result = await spendEnergy(supabase, user.id, cost, feature);
-  if (!result.ok) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: "insufficient_energy", message: INSUFFICIENT_ENERGY_MESSAGE, balance: result.balance },
-        { status: 402 }
-      ),
-    };
+    const cost = FEATURE_COSTS[feature];
+    const result = await spendEnergy(supabase, user.id, cost, feature);
+    if (!result.ok) {
+      if (result.error === "insufficient_energy") {
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: "insufficient_energy", message: INSUFFICIENT_ENERGY_MESSAGE, balance: result.balance },
+            { status: 402 }
+          ),
+        };
+      }
+      // Anything other than a genuine "not enough energy" rejection — a
+      // missing/un-migrated ai_token table, RLS misconfig, a DB blip — is
+      // an energy-SYSTEM problem, not a reason to block a real feature.
+      // Fail open: log it, let the request through unmetered.
+      console.error(`[energyGate] reserveEnergy: spend failed for "${feature}" (${result.error}) — proceeding unmetered.`);
+      return { ok: true, reservation: null };
+    }
+    return { ok: true, reservation: { supabase, userId: user.id, feature, cost } };
+  } catch (err) {
+    // Last-resort net: whatever broke, it must never be the reason AI
+    // Energy takes the actual AI feature down with it.
+    console.error(`[energyGate] reserveEnergy threw for "${feature}" — proceeding unmetered:`, err);
+    return { ok: true, reservation: null };
   }
-  return { ok: true, reservation: { supabase, userId: user.id, feature, cost } };
 }
 
 /**

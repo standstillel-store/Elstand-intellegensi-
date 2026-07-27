@@ -2,6 +2,8 @@
 
 ## V3.0 — Phase 3.2: AI Energy System (akhirnya beneran jalan, bukan stub)
 
+**Patch (hari yang sama):** bug asli ketemu abis first delivery — `reserveEnergy()` nge-treat SEMUA kegagalan `spendEnergy()` sebagai "insufficient_energy" (402, AI gak dipanggil), termasuk kalau penyebabnya infra error (misal migration `ai_token` belum jalan di Supabase live, RLS misconfig, DB blip). Efeknya: kalau ada masalah infra apapun di sistem energy, 3 fitur yang di-gate (Analyze Coin, Generate Signal, AI Chat) ikut mati total — padahal harusnya masalah di layer metering gak boleh sampai matiin fitur AI yang sebenarnya. Fixed: sekarang cuma rejection asli ("insufficient_energy") yang nge-block; error lain (dikasih kode `"infra_error"`) bikin request lanjut *unmetered* (di-log, tapi AI tetep jalan). `reserveEnergy()` juga dibungkus try/catch penuh sebagai jaring terakhir — apapun yang meledak di situ gak akan pernah nge-crash route AI-nya.
+
 Brief-nya: bikin sistem AI Energy yang beneran berfungsi — belum ada payment/top-up/blockchain/wallet payment/subscription, itu semua nanti. Pas mulai ngoprek, ternyata table-nya (`ai_token`, `ai_token_transactions`) udah ada dari Phase 3.1 lengkap dengan RLS, cuma masih stub separuh jalan: UI-nya nampilin "0" hardcoded, dan `chargeEnergy()` di `lib/energyGate.ts` gak dipanggil di endpoint manapun. Jadi round ini nyambungin yang udah ada, bukan bikin sistem paralel — table-nya dipakai apa adanya, gak ada migration nambah table baru.
 
 **Ganti mekanisme daily reward, bukan cuma nyalain switch**

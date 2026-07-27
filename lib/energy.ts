@@ -43,14 +43,15 @@ export interface EnergyState {
 export interface SpendResult {
   ok: boolean;
   balance: number;
-  error?: "insufficient_energy" | "concurrent_update" | string;
+  /** "insufficient_energy" is the only value callers should treat as a hard block — see reserveEnergy() in lib/energyGate.ts, which fails OPEN (proceeds unmetered) on anything else, e.g. "infra_error" (a DB problem — missing table/migration, RLS misconfig, network blip, or genuine retry-exhaustion under real concurrency). A metering bug should never be the reason a real AI feature stops working. */
+  error?: "insufficient_energy" | "infra_error" | string;
 }
 
 export interface ClaimResult {
   ok: boolean;
   balance: number;
   nextResetAt: string;
-  error?: "too_soon" | "concurrent_update" | string;
+  error?: "too_soon" | "infra_error" | string;
 }
 
 interface TokenRow {
@@ -144,11 +145,15 @@ async function applyDelta(
       .select("balance, last_reset_at")
       .maybeSingle();
 
-    if (error) return { ok: false, error: error.message, balance: current.balance };
+    if (error) {
+      console.error("[energy] applyDelta DB error:", error.message);
+      return { ok: false, error: "infra_error", balance: current.balance };
+    }
     if (updated) return { ok: true, balance: updated.balance, last_reset_at: updated.last_reset_at };
     // Someone else's write landed first — loop and retry against a fresh read.
   }
-  return { ok: false, error: "concurrent_update", balance: lastKnownBalance };
+  console.error(`[energy] applyDelta exhausted ${MAX_CAS_ATTEMPTS} retries for user ${userId} — real concurrent contention, or every UPDATE is silently matching zero rows for some other reason.`);
+  return { ok: false, error: "infra_error", balance: lastKnownBalance };
 }
 
 /**
