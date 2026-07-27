@@ -3,6 +3,7 @@ import { scanWatchlist } from "@/lib/elvoid/service";
 import { insertSignals } from "@/lib/elvoid/signals";
 import { getWallet, executeSignal, gradeMeetsThreshold } from "@/lib/elvoid/paperTrader";
 import type { AiSignal } from "@/lib/elvoid/types";
+import { reserveEnergy, settleEnergy } from "@/lib/energyGate";
 
 /** AI auto-execute: opt-in via Settings. Only fires for freshly-persisted signals — never for the unsaved-fallback path (no Supabase, nothing to track anyway). */
 async function autoExecuteQualifying(saved: AiSignal[]): Promise<string[]> {
@@ -17,16 +18,25 @@ async function autoExecuteQualifying(saved: AiSignal[]): Promise<string[]> {
   return executedIds;
 }
 
+// Phase 3.2: gated as "Market Scanner / Token Screener" (-4 AI Energy).
+// Reserved before the actual scan runs; settled true on every path that
+// returns a real batch of signals (persisted or the no-Supabase fallback),
+// false (refund) only if scanWatchlist/insertSignals throws.
 export async function POST() {
+  const gate = await reserveEnergy("market_scanner");
+  if (!gate.ok) return gate.response;
+
   try {
     const generated = await scanWatchlist();
     const saved = await insertSignals(generated);
     if (saved.length) {
       const autoExecuted = await autoExecuteQualifying(saved);
+      if (gate.reservation) await settleEnergy(gate.reservation, true);
       return NextResponse.json({ signals: saved, persisted: true, autoExecuted });
     }
 
     // Supabase not configured — return the freshly generated batch unsaved.
+    if (gate.reservation) await settleEnergy(gate.reservation, true);
     return NextResponse.json({
       signals: generated.map((s, i) => ({
         ...s,
@@ -50,6 +60,7 @@ export async function POST() {
     });
   } catch (err) {
     console.error("[ElVoid AI] scan error:", err);
+    if (gate.reservation) await settleEnergy(gate.reservation, false);
     return NextResponse.json({ error: "Scan market gagal — coba lagi sebentar." }, { status: 500 });
   }
 }

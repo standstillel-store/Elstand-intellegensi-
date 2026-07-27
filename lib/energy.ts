@@ -27,6 +27,8 @@ export const FEATURE_COSTS = {
   analyze_coin: 2,
   generate_signal: 4,
   ai_chat: 2,
+  load_chart: 4,
+  market_scanner: 4,
 } as const;
 export type EnergyFeature = keyof typeof FEATURE_COSTS;
 
