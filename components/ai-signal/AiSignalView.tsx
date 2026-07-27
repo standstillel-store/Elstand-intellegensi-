@@ -50,13 +50,13 @@ export function AiSignalView() {
     setError(null);
     try {
       const raw = await fetch("/api/ai-signals/scan", { method: "POST" });
-      if (!raw.ok) {
+      if (!raw.ok && raw.status >= 500) {
         setError(`Scan gagal (HTTP ${raw.status}) — server tidak merespons dengan benar. Coba lagi sebentar.`);
         return;
       }
       const res = await raw.json();
       if (res.error) {
-        setError(res.error);
+        setError(res.message ?? res.error);
       } else if (Array.isArray(res.signals) && res.signals.length === 0) {
         setError(
           "Scan selesai tapi 0 sinyal ditemukan. Biasanya ini berarti data candle Binance tidak bisa diakses dari server (Binance memblokir IP asal Amerika Serikat) — pastikan Vercel Function region di-set ke luar AS (mis. sin1), lalu redeploy."
@@ -86,7 +86,7 @@ export function AiSignalView() {
         return;
       }
       const res = await raw.json();
-      if (res.error) setError(res.error);
+      if (res.error) setError(res.message ?? res.error);
       else await load();
     } catch {
       setError("Analyze gagal — koneksi ke server terputus atau timeout. Coba lagi sebentar.");
