@@ -9,6 +9,7 @@ interface AccountMeResponse {
   signedIn: boolean;
   user: AppUser | null;
   profile: AppProfile | null;
+  energy: { balance: number; nextResetAt: string } | null;
 }
 
 export function ProfileMenu() {
@@ -38,6 +39,19 @@ export function ProfileMenu() {
       cancelled = true;
     };
   }, []);
+
+  // Balance can change elsewhere (Settings claim, or any AI feature spending
+  // it) between page load and the moment someone actually opens this menu to
+  // check it — refresh right then rather than showing stale data.
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/account/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setMe(data);
+      })
+      .catch(() => {});
+  }, [open]);
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -94,9 +108,9 @@ export function ProfileMenu() {
 
           <div className="flex items-center justify-between px-3 py-2 text-xs">
             <span className="flex items-center gap-1.5 text-ink-muted">
-              <Zap size={12} className="text-signal-glow" /> AI Token
+              <Zap size={12} className="text-signal-glow" /> AI Energy
             </span>
-            <span className="mono-num font-semibold text-ink">0</span>
+            <span className="mono-num font-semibold text-ink">{me?.energy?.balance ?? "—"}</span>
           </div>
 
           <div className="my-1 border-t border-line" />

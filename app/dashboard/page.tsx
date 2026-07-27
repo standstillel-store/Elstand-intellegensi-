@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Footer } from "@/components/Footer";
 import { NavDrawer } from "@/components/mobile/NavDrawer";
 import { AIChatDock } from "@/components/AIChatDock";
+import { AiEnergyWidget } from "@/components/dashboard/AiEnergyWidget";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
 import { TopMarketOverview } from "@/components/intelligence/TopMarketOverview";
 import { GlobalIntelligenceMap } from "@/components/intelligence/GlobalIntelligenceMap";
@@ -176,6 +177,10 @@ export default async function Home() {
 
       <div className="lg:pl-60">
         <div className="mx-auto max-w-[1680px] space-y-5 px-4 py-5 lg:px-5">
+          <div className="flex justify-end">
+            <AiEnergyWidget />
+          </div>
+
           <div className="rounded-lg border border-amber/30 bg-amber/5 px-4 py-3 text-xs leading-relaxed text-amber">
             ElStand AI menyajikan analisis hubungan antar market berbasis data publik secara rule-based dan transparan —
             bukan model black-box, bukan sinyal beli/jual, dan bukan jaminan keuntungan. Selalu lakukan riset mandiri

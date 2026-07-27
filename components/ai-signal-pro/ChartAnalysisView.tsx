@@ -86,6 +86,7 @@ export function ChartAnalysisView() {
   const [orderType, setOrderType] = useState<OrderType>("market");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const loadCandles = useCallback(async (sym: string, tf: string) => {
     setCandlesLoading(true);
@@ -143,6 +144,7 @@ export function ChartAnalysisView() {
   async function handleSaveSignal() {
     if (!signal) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const raw = await fetch("/api/ai-signals", {
         method: "POST",
@@ -150,7 +152,13 @@ export function ChartAnalysisView() {
         body: JSON.stringify({ coin: signal.coin, timeframe: signal.timeframe }),
       });
       const res = await raw.json();
-      if (!res.error) setSaved(true);
+      if (res.error) {
+        setSaveError(res.error);
+      } else {
+        setSaved(true);
+      }
+    } catch {
+      setSaveError("Gagal menyimpan signal — coba lagi sebentar.");
     } finally {
       setSaving(false);
     }
@@ -159,6 +167,7 @@ export function ChartAnalysisView() {
   async function handleExecute() {
     if (!signal) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const raw = await fetch("/api/ai-signals", {
         method: "POST",
@@ -166,13 +175,18 @@ export function ChartAnalysisView() {
         body: JSON.stringify({ coin: signal.coin, timeframe: signal.timeframe }),
       });
       const res = await raw.json();
-      if (res.error || !res.signal?.id) return;
+      if (res.error || !res.signal?.id) {
+        setSaveError(res.error ?? "Gagal menghasilkan signal untuk dieksekusi.");
+        return;
+      }
       await fetch("/api/paper-trader/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signalId: res.signal.id, orderType }),
       });
       setSaved(true);
+    } catch {
+      setSaveError("Gagal eksekusi — coba lagi sebentar.");
     } finally {
       setSaving(false);
     }
@@ -386,6 +400,7 @@ export function ChartAnalysisView() {
                     {saving ? "Memproses…" : `Execute ${orderType}`}
                   </button>
                 </div>
+                {saveError && <p className="text-xs text-down">{saveError}</p>}
               </div>
             </motion.div>
           )}

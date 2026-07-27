@@ -31,9 +31,14 @@ export function TokenAnalyzerSection() {
     setError(null);
     try {
       const res = await fetch(`/api/token-analysis?q=${encodeURIComponent(trimmed)}`);
+      const data = await res.json();
+      if (res.status === 402) {
+        setError(data?.message || "AI Energy tidak mencukupi.");
+        setReport(null);
+        return;
+      }
       if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as CoinReport;
-      setReport(data);
+      setReport(data as CoinReport);
     } catch {
       setError("Gagal mengambil data — coba lagi sebentar.");
       setReport(null);

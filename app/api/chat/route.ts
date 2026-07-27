@@ -14,6 +14,7 @@ import { isRelevantAsset } from "@/lib/asset-filters";
 import { getActiveProvider } from "@/lib/ai/provider";
 import { routeChat, AiRouterNotConfiguredError } from "@/lib/ai/router";
 import type { TerminalReport } from "@/lib/terminalReport";
+import { reserveEnergy, settleEnergy, INSUFFICIENT_ENERGY_MESSAGE } from "@/lib/energyGate";
 
 interface ChatBody {
   message: string;
@@ -51,6 +52,18 @@ export async function POST(req: Request) {
     return NextResponse.json({
       report: errorReport('Tanya sesuatu dulu — misalnya "analisa BTC" atau "whale activity".', "AI"),
     });
+  }
+
+  // Phase 3.2: gated as "AI Agent Chat" (-2 AI Energy), reserved before doing
+  // any real work below and settled right before each return. Deliberately
+  // NOT reusing reserveEnergy()'s generic 402 body here — useElVoidChat.ts
+  // (the only caller) expects every response to have a `report` field, so
+  // an insufficient-balance reply needs to be wrapped in one too, or the
+  // hook treats it as a network failure and shows a generic "Retrying..."
+  // instead of the actual message.
+  const gate = await reserveEnergy("ai_chat");
+  if (!gate.ok) {
+    return NextResponse.json({ report: errorReport(INSUFFICIENT_ENERGY_MESSAGE, "AI") }, { status: 402 });
   }
 
   try {
@@ -112,9 +125,17 @@ export async function POST(req: Request) {
       report = await buildGeneralMarketReport(snap);
     }
 
+    // "SYSTEM" is errorReport()'s own marker (see its definition above) for
+    // "this is an internal system/error message, not a real answer" — used
+    // above for both "AI sedang sibuk" (all providers exhausted) and this
+    // function's own outer catch. A rule-based "COIN NOT FOUND" reply is a
+    // genuine, useful answer (title "COIN NOT FOUND", not "SYSTEM") and
+    // still charges — the engine did respond, it just didn't have data.
+    if (gate.reservation) await settleEnergy(gate.reservation, report.title !== "SYSTEM");
     return NextResponse.json({ report });
   } catch (err) {
     console.error("[ElVoid AI] chat engine error:", err);
+    if (gate.reservation) await settleEnergy(gate.reservation, false);
     return NextResponse.json({
       report: errorReport("Data live sedang tidak bisa diambil sebentar — coba lagi dalam beberapa detik."),
     });

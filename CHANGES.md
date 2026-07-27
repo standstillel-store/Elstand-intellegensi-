@@ -1,5 +1,50 @@
 # ElStand AI — Market Intelligence Dashboard: apa yang berubah
 
+## V3.0 — Phase 3.2: AI Energy System (akhirnya beneran jalan, bukan stub)
+
+Brief-nya: bikin sistem AI Energy yang beneran berfungsi — belum ada payment/top-up/blockchain/wallet payment/subscription, itu semua nanti. Pas mulai ngoprek, ternyata table-nya (`ai_token`, `ai_token_transactions`) udah ada dari Phase 3.1 lengkap dengan RLS, cuma masih stub separuh jalan: UI-nya nampilin "0" hardcoded, dan `chargeEnergy()` di `lib/energyGate.ts` gak dipanggil di endpoint manapun. Jadi round ini nyambungin yang udah ada, bukan bikin sistem paralel — table-nya dipakai apa adanya, gak ada migration nambah table baru.
+
+**Ganti mekanisme daily reward, bukan cuma nyalain switch**
+
+Versi Phase 3.1 reset balance ke 10 flat tiap 24 jam secara pasif, begitu ada request yang baca balance-nya. Brief minta yang beda banget: klaim +10 manual lewat tombol, gated 24 jam sejak klaim terakhir (bukan reset jam 00.00). Itu ganti mekanisme beneran, bukan rename doang — jadi `lib/energy.ts` gue tulis ulang total:
+- `claimDailyEnergy()` — klaim +10, compare-and-swap atomic di level query biar gak bisa spam-klik tombol atau klaim dobel dari 2 tab/device.
+- `spendEnergy()` — tetep ada (logic-nya udah bener dari Phase 3.1), sekarang dipakai sebagai langkah "reserve" di gate baru (lihat bawah).
+- `refundEnergy()` — baru. Undo spend kalau fitur yang dibayar ternyata gagal.
+- Kolom DB tetep `balance` dan `last_reset_at`, gak di-rename — cuma makna `last_reset_at` sekarang "kapan terakhir klaim", bukan "kapan terakhir reset pasif". Rename kolom berarti nyentuh tiap caller cuma buat manfaat kosmetik, jadi gue skip demi minim risiko.
+- Nambahin `check (balance >= 0)` di `ai_token` (`supabase/schema.sql`) — jaga-jaga di level DB, bukan cuma percaya logic aplikasi.
+
+**Reserve-then-refund buat 3 fitur yang di-gate**
+
+Brief-nya beda redaksi soal kapan energy dipotong per fitur: Generate Signal & AI Chat eksplisit "kalau gagal jangan dipotong", Analyze Coin cuma bilang "harus otomatis mengurangi" tanpa nyebut sukses/gagal. Gue samain ketiganya biar konsisten: potong energy duluan (atomic — gak bisa kebobol biarpun ada 2 request bareng di sisa energy pas-pasan), baru jalanin fitur-nya, refund kalau gagal. Analyze Coin jadi ikut auto-refund kalau exception juga, meski brief gak eksplisit minta — lebih aman buat user dan brief-nya emang gak bilang sebaliknya. `lib/energyGate.ts` nambah `reserveEnergy()` + `settleEnergy()` buat pola ini; `chargeEnergy()` yang lama dibiarin nganggur (masih gak kepake di mana pun, tapi gak gue hapus — gak ada ruginya).
+
+Yang di-gate, biaya, dan definisi sukses/gagal yang gue pakai:
+- **Analyze Coin** (`app/api/token-analysis`, −2) — sukses kecuali exception (502). "Coin not found" tetep dianggap sukses — mesin analisisnya emang jalan, cuma datanya kosong, itu jawaban valid.
+- **Generate AI Signal** (`app/api/ai-signals` POST, −4) — sukses kalau ada signal object yang keluar (persisted atau enggak ke DB, dua-duanya tetep kena charge — user tetep dapet signal beneran). 404 "candle data gak tersedia" dan exception di-refund.
+- **AI Agent Chat** (`app/api/chat` POST, −2) — sukses kecuali report balik dengan `title: "SYSTEM"` (penanda internal buat "AI sedang sibuk" / error — udah ada dari sononya di `errorReport()`, bukan gue yang nambahin). Jawaban rule-based "COIN NOT FOUND" tetep charge, itu jawaban beneran bukan error.
+
+Cuma 3 endpoint ini yang di-gate. `/api/ai-signals/scan` (full watchlist scan) dan `/api/ai-signals/analyze-chart` sengaja gue biarin — brief nyebut 3 fitur spesifik, gue gak nebak-nebak nambahin sendiri.
+
+**Endpoint baru**
+
+`/api/ai-energy` (GET — balance + riwayat 10 transaksi terakhir), `/api/ai-energy/claim` (POST), `/api/ai-energy/consume` (POST — generic validate-then-spend, dipanggil siapapun yang butuh potong energy langsung by feature key). `/api/account/energy` (bikinan Phase 3.1) sengaja dibiarin apa adanya — masih jalan normal, cuma UI baru gak manggil dia lagi, semua pindah ke `/api/ai-energy`.
+
+**UI**
+
+- **Profile Dropdown** (`ProfileMenu.tsx`) — angka "0" hardcoded diganti balance beneran (data-nya sebenarnya udah ke-fetch dari `/api/account/me`, cuma gak dipakai), label "AI Token" → "AI Energy" biar sama kayak brief. Ditambah refetch pas dropdown dibuka biar gak nampilin angka basi.
+- **Settings** (`AiEnergySection.tsx`) — plot twist: komponennya udah lumayan lengkap dari Phase 3.1 (bukan static placeholder kayak dugaan awal gue dari komentar lama di schema.sql), tapi ternyata gak pernah di-render — gak ada di `SettingsView.tsx` maupun di nav (`SettingsNav.tsx`). Gue tulis ulang (tombol Klaim, copy diupdate biar gak nyebut "reset otomatis" lagi) sekalian akhirnya didaftarin ke nav + di-render.
+- **Dashboard** — widget kecil baru (`AiEnergyWidget.tsx`), pill kecil pojok kanan atas halaman, styling sama persis kayak pill di Settings/Profile (gak bikin gaya baru). Gak nyentuh grid/panel yang udah ada — cuma 1 baris baru paling atas, sebelum disclaimer.
+
+**Pesan error yang bener, bukan silent fail**
+
+Chat: response insufficient-energy dibungkus dalam bentuk `TerminalReport` yang sama kayak balasan normal (biar `useElVoidChat.ts` gak perlu diubah — kalau formatnya beda, hook-nya bakal nganggep ini network error terus auto-retry, user gak pernah liat pesan yang bener). Token Analyzer (drawer + versi mobile) dan Chart Analysis (`ChartAnalysisView.tsx` — tombol Save Signal/Execute) ditambahin state buat nangkep status 402 secara spesifik, biar "AI Energy tidak mencukupi." beneran nongol ke user. `AiSignalView.tsx` (halaman utama Generate Signal) udah otomatis bener dari sononya berkat error-handling yang udah ada — gak gue apa-apain.
+
+**Gak disentuh** (sesuai brief): Landing Page, Google Login, Wallet, Signal Logic, AI Router, Dashboard Layout, Authentication. Zero dependency npm baru.
+
+**Belum digarap ronde ini**
+- Payment / top-up / blockchain / wallet payment / subscription — emang belum scope-nya, brief-nya jelas soal ini.
+- `/api/ai-signals/scan` dan `/analyze-chart` gak di-meter — brief cuma nyebut 3 fitur spesifik.
+- Edge case concurrency yang sempit banget: 2 request nyaris bersamaan dari sisa energy pas-pasan bisa dua-duanya lolos reservation sebelum salah satu ke-block (balance tetap gak akan pernah negatif — itu dijamin — tapi teorinya bisa "kebobolan" 1 request ekstra dalam skenario super jarang ini). Fix penuhnya butuh pola hold/reserve yang lebih berat dari compare-and-swap; kalau nanti concurrency-nya beneran jadi masalah, itu langkah berikutnya.
+
 ## V2.9 — Phase 3.0: AI Router (Groq + OpenRouter, gratis, auto-failover)
 
 Fokus ronde ini murni AI Chat Backend — gak nyentuh Dashboard, Landing Page, Wallet, Google Login, komponen UI manapun, database, atau AI Signal Engine (`lib/elvoid/*`). Yang berubah cuma `lib/ai/`, `app/api/chat/route.ts`, dan dokumentasi.

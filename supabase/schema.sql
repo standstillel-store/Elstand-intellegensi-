@@ -373,10 +373,14 @@ create table if not exists profiles (
   updated_at timestamptz not null default now()
 );
 
--- ai_token — one AI Energy balance row per user (lib/energy.ts). Phase 3.1's
--- UI only shows a static "0" placeholder — this table exists purely because
--- lib/energy.ts/lib/energyGate.ts already read and write it; no token system
--- is being built here.
+-- ai_token — one AI Energy balance row per user (lib/energy.ts). Phase 3.1
+-- created this table as scaffolding (lib/energy.ts/lib/energyGate.ts already
+-- read and wrote it) but the UI only ever showed a static "0" and nothing
+-- called chargeEnergy() yet. Phase 3.2 is what actually turns it on: a
+-- claim-based daily +10 (not a passive reset) and real spend/refund wiring
+-- on Analyze Coin, Generate AI Signal, and AI Agent Chat. Same table, same
+-- columns — last_reset_at now means "last daily claim" rather than "last
+-- passive reset". See lib/energy.ts for the full writeup.
 create table if not exists ai_token (
   user_id uuid primary key references users (id) on delete cascade,
   balance numeric not null default 10,
@@ -384,6 +388,12 @@ create table if not exists ai_token (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Defense in depth alongside the compare-and-swap guard in lib/energy.ts's
+-- applyDelta() — belt and suspenders against a negative balance ever landing
+-- in the DB, even from a future bug or a direct SQL edit.
+alter table ai_token drop constraint if exists ai_token_balance_non_negative;
+alter table ai_token add constraint ai_token_balance_non_negative check (balance >= 0);
 
 -- ai_token_transactions — append-only ledger, one row per ai_token change.
 create table if not exists ai_token_transactions (

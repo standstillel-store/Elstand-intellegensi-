@@ -54,16 +54,23 @@ export function TokenAnalyzerDrawer() {
   const { openSymbol, close } = useTokenAnalyzer();
   const [report, setReport] = useState<CoinReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [energyError, setEnergyError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!openSymbol) return;
     let cancelled = false;
     setLoading(true);
     setReport(null);
+    setEnergyError(null);
     fetch(`/api/token-analysis?q=${encodeURIComponent(openSymbol)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) setReport(data);
+      .then(async (r) => {
+        const data = await r.json();
+        if (cancelled) return;
+        if (r.status === 402) {
+          setEnergyError(data?.message || "AI Energy tidak mencukupi.");
+          return;
+        }
+        setReport(data);
       })
       .catch(() => {
         if (!cancelled) setReport(null);
@@ -106,13 +113,15 @@ export function TokenAnalyzerDrawer() {
             <div className="space-y-5 p-4">
               {loading && <SkeletonCard lines={6} />}
 
-              {!loading && report && !report.found && (
+              {!loading && energyError && <p className="py-10 text-center text-sm text-ink-muted">{energyError}</p>}
+
+              {!loading && !energyError && report && !report.found && (
                 <p className="py-10 text-center text-sm text-ink-muted">
                   Tidak menemukan data untuk &ldquo;{openSymbol}&rdquo;.
                 </p>
               )}
 
-              {!loading && report?.found && (
+              {!loading && !energyError && report?.found && (
                 <>
                   <div>
                     <div className="flex items-baseline justify-between">
