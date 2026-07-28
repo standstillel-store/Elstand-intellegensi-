@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/auth/server";
-import { verifyWalletSignature } from "@/lib/wallet/verify";
+import { verifyWalletSignature, checkWalletConflict } from "@/lib/wallet/verify";
 import { connectorNameToWalletType } from "@/lib/wallet/connectors";
 import { logActivity } from "@/lib/activityLog";
 
+// Google → Wallet linking: called from Settings > Wallet, always requires an
+// existing Supabase session. For the reverse direction (arriving with a
+// wallet before any session exists, e.g. from /login), see
+// app/api/wallet/session/route.ts instead — that route shares the same
+// verifyWalletSignature/checkWalletConflict logic but doesn't require `user`
+// up front.
 export async function POST(request: Request) {
   const supabase = createSupabaseServerClient();
   if (!supabase) return NextResponse.json({ error: "Auth belum dikonfigurasi." }, { status: 503 });
@@ -27,16 +33,9 @@ export async function POST(request: Request) {
   const walletType = connectorNameToWalletType(connectorName);
   const now = new Date().toISOString();
 
-  // wallet_address is globally unique (see schema.sql) — if it's already
-  // verified under a different account, upsert-by-address would silently
-  // reassign it. Check first and give a clear error instead.
-  const { data: existing } = await supabase
-    .from("wallets")
-    .select("user_id")
-    .eq("wallet_address", address.toLowerCase())
-    .maybeSingle();
-  if (existing && existing.user_id !== user.id) {
-    return NextResponse.json({ error: "This wallet is already linked to a different account." }, { status: 409 });
+  const { conflict, reason } = await checkWalletConflict(supabase, address, user.id);
+  if (conflict) {
+    return NextResponse.json({ error: reason ?? "This wallet is already linked to a different account." }, { status: reason ? 503 : 409 });
   }
 
   const { data: wallet, error } = await supabase

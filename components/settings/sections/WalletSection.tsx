@@ -4,7 +4,7 @@ import { useAccount, useSignMessage, useDisconnect } from "wagmi";
 import { useAppKit } from "@reown/appkit/react";
 import { Wallet as WalletIcon, Plug, Unplug, Loader2, ShieldCheck, X } from "lucide-react";
 import { SettingsCard, SettingsRow } from "../SettingsCard";
-import { isWalletConnectConfigured } from "@/lib/web3/config";
+import { isWalletConnectConfigured, CHAIN_NAMES } from "@/lib/web3/config";
 import { buildVerificationMessage, generateNonce } from "@/lib/wallet/message";
 import { WALLET_TYPE_LABEL, type WalletType } from "@/lib/wallet/connectors";
 import { timeAgo, shortAddr } from "@/lib/format";
@@ -18,15 +18,6 @@ interface WalletRow {
   first_connected_at: string;
   last_connected_at: string;
 }
-
-const CHAIN_NAMES: Record<number, string> = {
-  1: "Ethereum",
-  42161: "Arbitrum",
-  10: "Optimism",
-  8453: "Base",
-  137: "Polygon",
-  56: "BNB Chain",
-};
 
 function ConnectButton() {
   // Safe to call unconditionally: ConnectButton only ever renders from the

@@ -29,6 +29,19 @@ export const isWalletConnectConfigured = Boolean(projectId);
 // every Viem-supported chain from '@reown/appkit/networks'.
 export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [mainnet, arbitrum, optimism, base, polygon, bsc];
 
+// Human-readable labels for the chain IDs above — kept next to `networks`
+// itself so the two can't drift apart. Consumed by components/settings/
+// sections/WalletSection.tsx and app/login/page.tsx; add an entry here
+// whenever a chain is added to `networks`.
+export const CHAIN_NAMES: Record<number, string> = {
+  1: "Ethereum",
+  42161: "Arbitrum",
+  10: "Optimism",
+  8453: "Base",
+  137: "Polygon",
+  56: "BNB Chain",
+};
+
 export const wagmiAdapter = new WagmiAdapter({
   // `as any`: wagmi & @reown/appkit-adapter-wagmi punya definisi tipe
   // Storage yang sedikit beda meski secara runtime kompatibel — ini cuma
