@@ -8,32 +8,42 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   webpack: (config, { webpack }) => {
-    // @reown/appkit-adapter-wagmi's default connector set pulls in
-    // @coinbase/cdp-sdk (for its Coinbase/Smart-Wallet connector) and
-    // @wagmi/connectors' optional `porto` connector — neither is something
-    // this app configured or calls (check web3/config.ts: the wallet list
-    // here is MetaMask/Rabby/OKX/Coinbase/WalletConnect via AppKit's own
-    // modal, not a direct dependency on either package). Both are
-    // legitimately optional:
-    //   - cdp-sdk's x402 payment feature has several chain-specific
-    //     optional sub-clients (@x402/evm, @x402/svm, @x402/core, ...) —
-    //     Webpack still tries to resolve whichever ones cdp-sdk's own code
-    //     references, and fails hard since none are installed. First build
-    //     surfaced @x402/svm and @x402/evm; a second build (after ignoring
-    //     those two) surfaced @x402/core next — same subtree, Webpack just
-    //     hadn't reached it yet in the first pass. This ignores the whole
-    //     @x402 scope up front instead of the next leaf showing up on a
-    //     third build.
-    //   - `porto` is a separate optional wagmi connector (wagmi's own
-    //     docs: "connector dependencies are now optional peer
-    //     dependencies... if you want to use [porto], you also need to
-    //     install the porto npm package") — not configured here at all.
-    // Safe specifically because no code path this app actually exercises
-    // imports from either at runtime; this only tells Webpack not to
-    // chase these two unused optional branches while bundling.
+    // @reown/appkit-adapter-wagmi's default connector set (no explicit
+    // `connectors` option is passed to WagmiAdapter in lib/web3/config.ts,
+    // so it falls back to the adapter's full default set) pulls in every
+    // connector wagmi ships, including several this app never asked for
+    // and that pull in packages that aren't installed:
+    //   - @coinbase/cdp-sdk (Coinbase/Smart-Wallet connector's x402
+    //     payment feature) → @x402/evm, @x402/svm, @x402/core, ...
+    //   - `porto`, a separate optional wagmi connector (wagmi's own docs:
+    //     "connector dependencies are now optional peer dependencies...
+    //     if you want to use [porto], you also need to install the porto
+    //     npm package")
+    //   - Tempo Wallet connector (@wagmi/core/dist/esm/tempo/) →
+    //     @metamask/connect-evm, plus a bare `'accounts'` import that
+    //     looks like a broken internal/workspace reference in whichever
+    //     @wagmi/core version resolved here (not a real installable
+    //     package at all — "tempoWallet is a thin Wagmi wrapper around
+    //     the accounts dialog adapter" per wagmi's own docs, so this is
+    //     almost certainly a packaging bug in that connector's published
+    //     build, not something anyone should `npm install`).
+    // None of MetaMask/Rabby/OKX/Coinbase/WalletConnect — the actual
+    // wallet list this app supports — are affected; those are auto-
+    // detected via EIP-6963 or use WalletConnect directly, neither of
+    // which touches any of the modules below.
+    //
+    // `'accounts'` on its own is too generic a name to ignore everywhere
+    // (a real unrelated package could plausibly share that name elsewhere
+    // in the tree) — contextRegExp scopes that specific ignore to only
+    // requests coming from @wagmi/core's tempo directory, not a blanket
+    // ignore of anything called 'accounts' anywhere in the build.
     config.plugins.push(
       new webpack.IgnorePlugin({
-        resourceRegExp: /^(@x402\/|porto(\/|$))/,
+        resourceRegExp: /^(@x402\/|porto(\/|$)|@metamask\/connect-evm)/,
+      }),
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^accounts$/,
+        contextRegExp: /@wagmi[\\/]core[\\/]dist[\\/]esm[\\/]tempo/,
       })
     );
     return config;
