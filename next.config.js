@@ -8,21 +8,32 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   webpack: (config, { webpack }) => {
-    // @reown/appkit-adapter-wagmi transitively pulls in @coinbase/cdp-sdk
-    // (not a direct dependency of this project — check with
-    // `npm ls @coinbase/cdp-sdk` if you want to see exactly which package
-    // requires it). cdp-sdk treats @x402/svm and @x402/evm as optional
-    // peer dependencies for its x402 payment feature, which nothing in
-    // this codebase calls. Webpack still tries to resolve them at bundle
-    // time and fails the build since they're not installed
-    // ("Module not found: Can't resolve '@x402/svm/exact/client'" /
-    // "...'@x402/evm'"). IgnorePlugin tells webpack these two are safe to
-    // skip instead of erroring — this only affects the bundling step, and
-    // is safe specifically because no code path this app actually
-    // exercises imports from them at runtime.
+    // @reown/appkit-adapter-wagmi's default connector set pulls in
+    // @coinbase/cdp-sdk (for its Coinbase/Smart-Wallet connector) and
+    // @wagmi/connectors' optional `porto` connector — neither is something
+    // this app configured or calls (check web3/config.ts: the wallet list
+    // here is MetaMask/Rabby/OKX/Coinbase/WalletConnect via AppKit's own
+    // modal, not a direct dependency on either package). Both are
+    // legitimately optional:
+    //   - cdp-sdk's x402 payment feature has several chain-specific
+    //     optional sub-clients (@x402/evm, @x402/svm, @x402/core, ...) —
+    //     Webpack still tries to resolve whichever ones cdp-sdk's own code
+    //     references, and fails hard since none are installed. First build
+    //     surfaced @x402/svm and @x402/evm; a second build (after ignoring
+    //     those two) surfaced @x402/core next — same subtree, Webpack just
+    //     hadn't reached it yet in the first pass. This ignores the whole
+    //     @x402 scope up front instead of the next leaf showing up on a
+    //     third build.
+    //   - `porto` is a separate optional wagmi connector (wagmi's own
+    //     docs: "connector dependencies are now optional peer
+    //     dependencies... if you want to use [porto], you also need to
+    //     install the porto npm package") — not configured here at all.
+    // Safe specifically because no code path this app actually exercises
+    // imports from either at runtime; this only tells Webpack not to
+    // chase these two unused optional branches while bundling.
     config.plugins.push(
       new webpack.IgnorePlugin({
-        resourceRegExp: /^@x402\/(svm|evm)/,
+        resourceRegExp: /^(@x402\/|porto(\/|$))/,
       })
     );
     return config;
