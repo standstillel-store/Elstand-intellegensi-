@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Bricolage_Grotesque } from "next/font/google";
 import "./globals.css";
 import { TokenAnalyzerProvider } from "@/components/token-analyzer/TokenAnalyzerContext";
 import { TokenAnalyzerDrawer } from "@/components/token-analyzer/TokenAnalyzerDrawer";
@@ -13,6 +13,16 @@ const mono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
   weight: ["400", "500", "700"],
+  display: "swap",
+});
+// Phase 5 — landing page display face only (`font-display` utility, opt-in).
+// Loaded globally like sans/mono above so it's available site-wide as a CSS
+// variable, but nothing outside new landing components references the
+// `font-display` class, so the dashboard's typography is byte-for-byte
+// unchanged.
+const display = Bricolage_Grotesque({
+  subsets: ["latin"],
+  variable: "--font-display",
   display: "swap",
 });
 
@@ -35,7 +45,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const cookieHeader = headers().get("cookie");
 
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable} ${display.variable}`}>
       <body className="bg-bg text-ink font-sans antialiased">
         <ThemePreferenceProvider />
         <Web3Provider cookies={cookieHeader}>

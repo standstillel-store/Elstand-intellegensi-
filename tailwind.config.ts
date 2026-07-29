@@ -45,10 +45,27 @@ const config: Config = {
           muted: "#8A8F98",
           faint: "#565A64",
         },
+        // Phase 5 — landing page only. Deliberately isolated from bg/surface/
+        // raised above (nearly identical hex values, not reused) so landing
+        // redesign work can never accidentally bleed into the dashboard.
+        landing: {
+          bg: "#09090B",
+          surface: "#111827",
+          card: "#151823",
+          line: "rgba(255,255,255,0.08)",
+          violet: { DEFAULT: "#7C6AF6", dim: "#3B3480", glow: "#A79BFF" },
+          blue: { DEFAULT: "#3E7BFA", dim: "#1E3B80", glow: "#7FA8FF" },
+          cyan: { DEFAULT: "#22D3EE", dim: "#0E6B7A", glow: "#7EEBFB" },
+          // Thin signature accent (confirmed Phase 5 decision) — used sparingly,
+          // never as a wash. Kept separate from dashboard's `amber` (#F5B942,
+          // means "WAIT/caution" there) so the two never carry each other's meaning.
+          gold: { DEFAULT: "#D4AF37", dim: "#7A6220", glow: "#F0D584" },
+        },
       },
       fontFamily: {
         mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       boxShadow: {
         "glow-signal": "0 0 0 1px rgb(var(--signal-rgb) / 0.35), 0 0 24px rgb(var(--signal-glow-rgb) / 0.20)",
@@ -58,6 +75,9 @@ const config: Config = {
         "glow-smartmoney": "0 0 0 1px rgba(59,130,246,0.4), 0 0 20px rgba(59,130,246,0.22)",
         "glow-amber": "0 0 0 1px rgba(245,185,66,0.35), 0 0 20px rgba(245,185,66,0.18)",
         "card": "0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px -12px rgba(0,0,0,0.6)",
+        "glow-landing-violet": "0 0 0 1px rgba(124,106,246,0.4), 0 0 24px rgba(167,155,255,0.22)",
+        "glow-landing-cyan": "0 0 0 1px rgba(34,211,238,0.4), 0 0 22px rgba(126,235,251,0.22)",
+        "glow-landing-gold": "0 0 0 1px rgba(212,175,55,0.35), 0 0 20px rgba(240,213,132,0.18)",
       },
       keyframes: {
         ticker: {
@@ -104,6 +124,13 @@ const config: Config = {
           "0%": { transform: "translateY(-100%)" },
           "100%": { transform: "translateY(100%)" },
         },
+        // Phase 5 — landing hero ambient background. Pairs with `.landing-aurora`
+        // (globals.css): shifts backgroundPosition on a large, low-opacity
+        // gradient so it reads as a slow atmospheric drift, never a hard pan.
+        auroraDrift: {
+          "0%, 100%": { backgroundPosition: "0% 50%" },
+          "50%": { backgroundPosition: "100% 50%" },
+        },
       },
       animation: {
         ticker: "ticker 38s linear infinite",
@@ -118,6 +145,7 @@ const config: Config = {
         typingDot: "typingDot 1.2s ease-in-out infinite",
         slideInRight: "slideInRight 0.3s ease-out both",
         scanline: "scanline 2.4s linear infinite",
+        auroraDrift: "auroraDrift 26s ease-in-out infinite",
       },
     },
   },

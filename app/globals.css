@@ -279,3 +279,36 @@ body {
   background: linear-gradient(180deg, transparent, rgb(var(--signal-rgb) / 0.12), transparent);
   animation: scanline 2.4s linear infinite;
 }
+
+/* ---- Phase 5 — Landing page tokens (isolated from dashboard) ------- */
+
+/* Frosted glass surface for landing sections (hero cards, feature tiles,
+   terminal preview panels). Deliberately separate from .panel/.glow-card
+   above — those are opaque by design for dense dashboard data; landing
+   sections are atmospheric marketing surfaces and can afford translucency. */
+.landing-glass {
+  background: rgba(21, 24, 35, 0.55); /* landing.card @ 55% */
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 20px 60px -20px rgba(0, 0, 0, 0.6);
+}
+
+/* Slow-drifting ambient wash for the hero background — violet/blue/cyan
+   dominant, with one thin gold thread (confirmed Phase 5 decision: an
+   accent, not a wash — kept at the lowest opacity of the four here).
+   Large background-size + the auroraDrift keyframe (tailwind.config.ts)
+   shifts backgroundPosition slowly so it reads as atmosphere, not a pan.
+   Covered by the existing prefers-reduced-motion / [data-motion="reduced"]
+   rules above automatically — no extra motion-safety code needed. */
+.landing-aurora {
+  background-image:
+    radial-gradient(circle at 15% 20%, rgba(124, 106, 246, 0.16), transparent 45%),
+    radial-gradient(circle at 85% 15%, rgba(34, 211, 238, 0.12), transparent 40%),
+    radial-gradient(circle at 75% 75%, rgba(62, 123, 250, 0.1), transparent 45%),
+    radial-gradient(circle at 50% 95%, rgba(212, 175, 55, 0.06), transparent 50%);
+  background-size: 200% 200%;
+  animation: auroraDrift 26s ease-in-out infinite;
+}
