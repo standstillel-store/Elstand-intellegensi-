@@ -24,6 +24,19 @@ export interface AiProviderInput {
   history?: string;
   /** A short live-data digest (BTC price, Fear&Greed, etc.) so an LLM reply stays grounded instead of hallucinating market state. */
   liveContext?: string;
+  /**
+   * Phase: AI CORE ENGINE — when set, replaces SYSTEM_VOICE below entirely
+   * instead of being appended to it. Used only by lib/ai/core/llm.ts, only
+   * when a developer has explicitly opted into a paid provider via
+   * AI_CHAT_PROVIDER (see getActiveProvider()) and wants ONE of the 10 AI
+   * Core modules (Oracle, Scanner, etc.) to run on that provider instead of
+   * the free Groq/OpenRouter default. Omitted (undefined) for every
+   * existing call site — app/api/chat/route.ts never sets this — so chat's
+   * behavior through this file is byte-for-byte unchanged.
+   */
+  systemPromptOverride?: string;
+  /** Requests a larger reply than chat's 600-token default — module output is structured JSON with several fields, not a short chat reply. Ignored unless systemPromptOverride is also set. */
+  maxTokensOverride?: number;
 }
 
 export interface AiProvider {
@@ -54,18 +67,21 @@ function makeOpenAiCompatible(id: AiProviderId, label: string, envKey: string, m
     id,
     label,
     available: true,
-    async generate({ message, history, liveContext }) {
+    async generate({ message, history, liveContext, systemPromptOverride, maxTokensOverride }) {
+      const systemContent =
+        systemPromptOverride ?? SYSTEM_VOICE + (liveContext ? `\n\nData live saat ini:\n${liveContext}` : "");
       const res = await fetch(baseUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
           model,
           messages: [
-            { role: "system", content: SYSTEM_VOICE + (liveContext ? `\n\nData live saat ini:\n${liveContext}` : "") },
+            { role: "system", content: systemContent },
             ...(history ? [{ role: "user" as const, content: `Konteks percakapan sebelumnya:\n${history}` }] : []),
             { role: "user", content: message },
           ],
-          max_tokens: 600,
+          max_tokens: maxTokensOverride ?? 600,
+          ...(systemPromptOverride ? { response_format: { type: "json_object" } } : {}),
         }),
       });
       if (!res.ok) throw new Error(`${label} error ${res.status}`);
@@ -84,14 +100,16 @@ function makeAnthropic(): AiProvider {
     id: "anthropic",
     label: "Claude",
     available: true,
-    async generate({ message, history, liveContext }) {
+    async generate({ message, history, liveContext, systemPromptOverride, maxTokensOverride }) {
+      const systemContent =
+        systemPromptOverride ?? SYSTEM_VOICE + (liveContext ? `\n\nData live saat ini:\n${liveContext}` : "");
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 600,
-          system: SYSTEM_VOICE + (liveContext ? `\n\nData live saat ini:\n${liveContext}` : ""),
+          max_tokens: maxTokensOverride ?? 600,
+          system: systemContent,
           messages: [
             ...(history ? [{ role: "user" as const, content: `Konteks percakapan sebelumnya:\n${history}` }] : []),
             { role: "user", content: message },
@@ -114,10 +132,9 @@ function makeGemini(): AiProvider {
     id: "gemini",
     label: "Gemini",
     available: true,
-    async generate({ message, history, liveContext }) {
-      const prompt = `${SYSTEM_VOICE}${liveContext ? `\n\nData live saat ini:\n${liveContext}` : ""}${
-        history ? `\n\nKonteks percakapan sebelumnya:\n${history}` : ""
-      }\n\nPertanyaan: ${message}`;
+    async generate({ message, history, liveContext, systemPromptOverride }) {
+      const voice = systemPromptOverride ?? `${SYSTEM_VOICE}${liveContext ? `\n\nData live saat ini:\n${liveContext}` : ""}`;
+      const prompt = `${voice}${history ? `\n\nKonteks percakapan sebelumnya:\n${history}` : ""}\n\nPertanyaan: ${message}`;
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
         {

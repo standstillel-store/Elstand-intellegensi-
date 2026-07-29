@@ -149,14 +149,27 @@ async function callOpenAiCompatibleOnce(
   apiKey: string,
   model: string,
   messages: ChatMessage[],
-  extraHeaders?: Record<string, string>
+  extraHeaders?: Record<string, string>,
+  opts?: { responseFormatJson?: boolean; maxTokens?: number }
 ): Promise<string> {
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    max_tokens: opts?.maxTokens ?? MAX_TOKENS,
+    temperature: TEMPERATURE,
+  };
+  // Groq and OpenRouter are both OpenAI-compatible and both support this for
+  // JSON-capable models — asked for only by lib/ai/core (structured module
+  // output), never by the plain-chat path below, so chat's request body is
+  // byte-for-byte unchanged.
+  if (opts?.responseFormatJson) body.response_format = { type: "json_object" };
+
   const res = await fetchWithTimeout(
     url,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, ...extraHeaders },
-      body: JSON.stringify({ model, messages, max_tokens: MAX_TOKENS, temperature: TEMPERATURE }),
+      body: JSON.stringify(body),
     },
     REQUEST_TIMEOUT_MS
   );
@@ -177,8 +190,20 @@ function cacheKeyFor(message: string): string {
   return `ai-router:${normalized}`;
 }
 
-async function runRouterChain(input: AiRouterInput, groqKey?: string, openRouterKey?: string): Promise<AiRouterResult> {
-  const messages = buildMessages(input);
+/**
+ * The actual Groq -> OpenRouter failover chain, generalized over a plain
+ * `messages` array instead of `AiRouterInput` — this is the one place that
+ * retry count, timeout, and free-model priority order live, so both the
+ * chat path below and lib/ai/core (Phase: AI CORE ENGINE — the 10-module
+ * reasoning layer, see lib/ai/core/llm.ts) share one failover policy
+ * instead of two that could quietly drift apart.
+ */
+async function runProviderChain(
+  messages: ChatMessage[],
+  groqKey: string | undefined,
+  openRouterKey: string | undefined,
+  opts?: { responseFormatJson?: boolean; maxTokens?: number }
+): Promise<AiRouterResult> {
   const attempts: string[] = [];
 
   if (groqKey) {
@@ -186,7 +211,7 @@ async function runRouterChain(input: AiRouterInput, groqKey?: string, openRouter
     for (let attempt = 1; attempt <= 2; attempt++) {
       const startedAt = Date.now();
       try {
-        const text = await callOpenAiCompatibleOnce(GROQ_URL, groqKey, model, messages);
+        const text = await callOpenAiCompatibleOnce(GROQ_URL, groqKey, model, messages, undefined, opts);
         logProviderUsed("Groq", model, Date.now() - startedAt);
         return { text, provider: "groq", model };
       } catch (err) {
@@ -201,9 +226,14 @@ async function runRouterChain(input: AiRouterInput, groqKey?: string, openRouter
     for (const model of getOpenRouterFreeModels()) {
       const startedAt = Date.now();
       try {
-        const text = await callOpenAiCompatibleOnce(OPENROUTER_URL, openRouterKey, model, messages, {
-          "X-Title": "ElStand Intel",
-        });
+        const text = await callOpenAiCompatibleOnce(
+          OPENROUTER_URL,
+          openRouterKey,
+          model,
+          messages,
+          { "X-Title": "ElStand Intel" },
+          opts
+        );
         logProviderUsed("OpenRouter", model, Date.now() - startedAt);
         return { text, provider: "openrouter", model };
       } catch (err) {
@@ -215,6 +245,11 @@ async function runRouterChain(input: AiRouterInput, groqKey?: string, openRouter
   }
 
   throw new AiRouterExhaustedError(attempts);
+}
+
+/** Unchanged chat behavior — builds the same messages as before this refactor, hands off to runProviderChain() with no JSON mode and the default chat MAX_TOKENS. */
+async function runRouterChain(input: AiRouterInput, groqKey?: string, openRouterKey?: string): Promise<AiRouterResult> {
+  return runProviderChain(buildMessages(input), groqKey, openRouterKey);
 }
 
 /**
@@ -232,6 +267,52 @@ export async function routeChat(input: AiRouterInput): Promise<AiRouterResult> {
   if (!groqKey && !openRouterKey) throw new AiRouterNotConfiguredError();
 
   return cached(cacheKeyFor(input.message), getCacheTtlMs(), () => runRouterChain(input, groqKey, openRouterKey));
+}
+
+// ---------------------------------------------------------------------------
+// Structured (JSON-mode) entry point — lib/ai/core/llm.ts's Phase: AI CORE
+// ENGINE module layer (AI Oracle, Scanner, Confidence Engine, etc.) calls
+// this instead of routeChat(): same Groq-first/OpenRouter-fallback chain,
+// same GROQ_API_KEY/OPENROUTER_API_KEY env vars, same $0 default, but with a
+// caller-supplied system prompt (each module has its own — see
+// lib/ai/core/prompts.ts) instead of the fixed AI_ROUTER_SYSTEM_PROMPT
+// above, and `response_format: json_object` requested from the provider so
+// the reply is valid JSON the module layer can parse straight into its own
+// typed result.
+//
+// Deliberately NOT cached (unlike routeChat) — module input is a market/
+// trade data snapshot that's different almost every call, so a cache would
+// rarely hit and risks serving stale numbers back into a "never hallucinate,
+// state what's live" prompt. Deliberately does not touch AiRouterInput/
+// buildMessages/the chat cache — chat's behavior above is unchanged by this
+// function existing.
+// ---------------------------------------------------------------------------
+export interface AiRouterStructuredInput {
+  /** Full module system prompt — ELSTAND_AI_CORE_SYSTEM_PROMPT + the specific module's instructions + its required JSON output shape. See lib/ai/core/prompts.ts. */
+  systemPrompt: string;
+  /** The grounding data payload (already-computed signal/market/performance data, as a JSON string) — this is the ONLY market truth the model is allowed to reason from. */
+  userContent: string;
+  /** Structured JSON with several fields needs more room than a chat reply — defaults higher than chat's 700 when omitted. */
+  maxTokens?: number;
+}
+
+/**
+ * @throws {AiRouterNotConfiguredError} neither GROQ_API_KEY nor OPENROUTER_API_KEY is set — callers (lib/ai/core/llm.ts) treat this as "AI reasoning not available right now", not a hard failure, and fall back to the deterministic-only output every module already computes.
+ * @throws {AiRouterExhaustedError} at least one key was set but every attempt failed.
+ */
+export async function routeStructured(input: AiRouterStructuredInput): Promise<AiRouterResult> {
+  const groqKey = process.env.GROQ_API_KEY;
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  if (!groqKey && !openRouterKey) throw new AiRouterNotConfiguredError();
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: input.systemPrompt },
+    { role: "user", content: input.userContent },
+  ];
+  return runProviderChain(messages, groqKey, openRouterKey, {
+    responseFormatJson: true,
+    maxTokens: input.maxTokens ?? 1100,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,34 @@ import { NextResponse } from "next/server";
 import { buildScanContext, buildSignalForSymbol } from "@/lib/elvoid/service";
 import { listSignals, insertSignal } from "@/lib/elvoid/signals";
 import type { SignalStatus } from "@/lib/elvoid/types";
+import type { GeneratedSignal } from "@/lib/elvoid/engine";
 import { reserveEnergy, settleEnergy } from "@/lib/energyGate";
+import { runAiOracle, runAiTechnicalAnalyst, runAiConfidenceEngine, isAiCoreConfigured } from "@/lib/ai/core/router";
+
+// Phase: AI CORE ENGINE — opt-in only (POST body `includeAiReasoning: true`).
+// Runs Oracle + Technical Analyst + Confidence Engine in parallel and
+// attaches the result as `aiReasoning` on the response; every existing
+// caller that omits the flag gets byte-for-byte the same response as
+// before this phase. Metered separately from "generate_signal" (its own
+// "ai_reasoning" cost, see lib/energy.ts) and only actually charged when at
+// least one module really ran on an LLM — if every module fell back to its
+// deterministic result (AI not configured, or every provider attempt
+// failed), the reservation is refunded rather than charged, since the
+// feature the user asked for didn't actually happen.
+async function attachAiReasoning(generated: GeneratedSignal) {
+  if (!isAiCoreConfigured()) return null;
+  const gate = await reserveEnergy("ai_reasoning");
+  if (!gate.ok) return null; // insufficient AI Energy — degrade silently, still return the base signal
+
+  const [oracle, technicalAnalyst, confidenceEngine] = await Promise.all([
+    runAiOracle(generated),
+    runAiTechnicalAnalyst(generated),
+    runAiConfidenceEngine(generated),
+  ]);
+  const usedRealAi = [oracle.meta.source, technicalAnalyst.meta.source, confidenceEngine.meta.source].some((s) => s === "ai");
+  if (gate.reservation) await settleEnergy(gate.reservation, usedRealAi);
+  return { oracle, technicalAnalyst, confidenceEngine };
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -23,15 +50,16 @@ export async function GET(req: Request) {
 // holds exactly. Never blocks unmetered/anonymous callers — same convention
 // as every other optional-auth route in this app.
 export async function POST(req: Request) {
-  let body: { coin?: string; timeframe?: string };
+  let body: { coin?: string; timeframe?: string; includeAiReasoning?: boolean };
   try {
-    body = (await req.json()) as { coin?: string; timeframe?: string };
+    body = (await req.json()) as { coin?: string; timeframe?: string; includeAiReasoning?: boolean };
   } catch {
     return NextResponse.json({ error: "Body tidak valid." }, { status: 400 });
   }
   const coin = (body.coin ?? "").trim();
   if (!coin) return NextResponse.json({ error: "Sertakan simbol coin, misalnya BTC." }, { status: 400 });
   const timeframe = body.timeframe ?? "4h";
+  const includeAiReasoning = body.includeAiReasoning === true;
 
   const gate = await reserveEnergy("generate_signal");
   if (!gate.ok) return gate.response;
@@ -46,10 +74,11 @@ export async function POST(req: Request) {
         { status: 404 }
       );
     }
+    const aiReasoning = includeAiReasoning ? await attachAiReasoning(generated) : null;
     const saved = await insertSignal(generated);
     if (saved) {
       if (gate.reservation) await settleEnergy(gate.reservation, true);
-      return NextResponse.json({ signal: saved, persisted: true });
+      return NextResponse.json({ signal: saved, persisted: true, ...(aiReasoning ? { aiReasoning } : {}) });
     }
 
     // Supabase not configured — still return the freshly generated signal so
@@ -69,6 +98,7 @@ export async function POST(req: Request) {
         created_at: new Date().toISOString(),
       },
       persisted: false,
+      ...(aiReasoning ? { aiReasoning } : {}),
     });
   } catch (err) {
     console.error("[ElVoid AI] signal generation error:", err);

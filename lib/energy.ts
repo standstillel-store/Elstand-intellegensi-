@@ -29,6 +29,22 @@ export const FEATURE_COSTS = {
   ai_chat: 2,
   load_chart: 4,
   market_scanner: 4,
+  // --- Phase: AI CORE ENGINE — additive. Only charged when a caller
+  // explicitly opts into the new LLM-reasoning add-on for a route (see
+  // each route's `includeAiReasoning`/`ai=1` flag); the original 5 costs
+  // above and every existing call site are unchanged. ---
+  /** Oracle + Technical Analyst + Confidence Engine bundle on one generated signal. */
+  ai_reasoning: 3,
+  /** AI Scanner's narrated ranking over a scan batch. */
+  ai_scanner_reasoning: 3,
+  /** AI Token Analyzer add-on to Analyze Coin. */
+  ai_token_analysis: 2,
+  /** AI Market Intelligence or AI Narrative (whichever `mode` is requested). */
+  ai_market_intelligence: 3,
+  /** AI Journal's narrated single-trade review. */
+  ai_journal_review: 2,
+  /** AI Paper Trading Coach + AI Personal Coach bundle. */
+  ai_coach: 3,
 } as const;
 export type EnergyFeature = keyof typeof FEATURE_COSTS;
 

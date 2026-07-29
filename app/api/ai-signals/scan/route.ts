@@ -3,7 +3,23 @@ import { scanWatchlist } from "@/lib/elvoid/service";
 import { insertSignals } from "@/lib/elvoid/signals";
 import { getWallet, executeSignal, gradeMeetsThreshold } from "@/lib/elvoid/paperTrader";
 import type { AiSignal } from "@/lib/elvoid/types";
+import type { GeneratedSignal } from "@/lib/elvoid/engine";
 import { reserveEnergy, settleEnergy } from "@/lib/energyGate";
+import { runAiScanner, isAiCoreConfigured } from "@/lib/ai/core/router";
+
+// Phase: AI CORE ENGINE — opt-in only (POST body `{ "includeAiReasoning": true }`).
+// Same "only charge if AI actually ran" rule as the other two AI-reasoning
+// integrations — see app/api/ai-signals/route.ts's attachAiReasoning() for
+// the full explanation.
+async function attachAiScanner(generated: GeneratedSignal[]) {
+  if (!isAiCoreConfigured() || !generated.length) return null;
+  const gate = await reserveEnergy("ai_scanner_reasoning");
+  if (!gate.ok) return null;
+
+  const aiScanner = await runAiScanner(generated);
+  if (gate.reservation) await settleEnergy(gate.reservation, aiScanner.meta.source === "ai");
+  return aiScanner;
+}
 
 /** AI auto-execute: opt-in via Settings. Only fires for freshly-persisted signals — never for the unsaved-fallback path (no Supabase, nothing to track anyway). */
 async function autoExecuteQualifying(saved: AiSignal[]): Promise<string[]> {
@@ -22,17 +38,27 @@ async function autoExecuteQualifying(saved: AiSignal[]): Promise<string[]> {
 // Reserved before the actual scan runs; settled true on every path that
 // returns a real batch of signals (persisted or the no-Supabase fallback),
 // false (refund) only if scanWatchlist/insertSignals throws.
-export async function POST() {
+export async function POST(req: Request) {
+  let includeAiReasoning = false;
+  try {
+    const body = (await req.json()) as { includeAiReasoning?: boolean } | null;
+    includeAiReasoning = body?.includeAiReasoning === true;
+  } catch {
+    // No body (or invalid JSON) is the existing, expected shape for every
+    // caller before this phase — just means the flag is off.
+  }
+
   const gate = await reserveEnergy("market_scanner");
   if (!gate.ok) return gate.response;
 
   try {
     const generated = await scanWatchlist();
+    const aiScanner = includeAiReasoning ? await attachAiScanner(generated) : null;
     const saved = await insertSignals(generated);
     if (saved.length) {
       const autoExecuted = await autoExecuteQualifying(saved);
       if (gate.reservation) await settleEnergy(gate.reservation, true);
-      return NextResponse.json({ signals: saved, persisted: true, autoExecuted });
+      return NextResponse.json({ signals: saved, persisted: true, autoExecuted, ...(aiScanner ? { aiScanner } : {}) });
     }
 
     // Supabase not configured — return the freshly generated batch unsaved.
@@ -57,6 +83,7 @@ export async function POST() {
         created_at: new Date().toISOString(),
       })),
       persisted: false,
+      ...(aiScanner ? { aiScanner } : {}),
     });
   } catch (err) {
     console.error("[ElVoid AI] scan error:", err);

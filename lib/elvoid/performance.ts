@@ -75,6 +75,22 @@ export async function getJournalEntries(limit = 200): Promise<JournalWithSignal[
   return (data ?? []) as unknown as JournalWithSignal[];
 }
 
+/** Same select shape as getJournalEntries() above, narrowed to one row by id — powers the on-demand AI Journal route (POST /api/ai-journal/review) so it doesn't have to pull a whole page of entries just to review one. */
+export async function getJournalEntryById(id: string): Promise<JournalWithSignal | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from("ai_journal")
+    .select("*, signal:ai_signals(coin,side,strategy,confidence,entry,reason,timeframe,scans,extra_reasoning)")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    console.error("[ElVoid AI] getJournalEntryById error:", error.message);
+    return null;
+  }
+  return (data as unknown as JournalWithSignal) ?? null;
+}
+
 function winRateOf(entries: { result: string }[]): number {
   if (!entries.length) return 0;
   return Number(((entries.filter((e) => e.result === "win").length / entries.length) * 100).toFixed(1));

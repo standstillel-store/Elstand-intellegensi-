@@ -114,8 +114,14 @@ function roundPrice(price: number): number {
  * engine's scanner keys. "Liquidity" covers two internal scanners (sweep +
  * pool) — either agreeing counts as that one factor, so the total stays at
  * 12 rather than 13 and matches the brief's own checklist 1:1.
+ *
+ * Exported (Phase: AI CORE ENGINE) so lib/ai/core/modules/confidenceEngine.ts
+ * can walk the same 12 factors when explaining a Confidence breakdown,
+ * instead of hand-maintaining a second list that could drift from this one.
+ * Purely a visibility change — the list itself and everything that reads it
+ * below is untouched.
  */
-const CONFLUENCE_FACTOR_KEYS: { label: string; keys: string[] }[] = [
+export const CONFLUENCE_FACTOR_KEYS: { label: string; keys: string[] }[] = [
   { label: "Trend", keys: ["trend"] },
   { label: "Market Structure", keys: ["market_structure"] },
   { label: "Liquidity", keys: ["liquidity_sweep", "liquidity_pool"] },
