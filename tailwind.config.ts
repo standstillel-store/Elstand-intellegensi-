@@ -131,6 +131,24 @@ const config: Config = {
           "0%, 100%": { backgroundPosition: "0% 50%" },
           "50%": { backgroundPosition: "100% 50%" },
         },
+        // Phase 5.2 — Confluence Core rebuild. Sphere breathes (scale) and
+        // floats (reuses cardFloat) on separate layers so the two transforms
+        // never fight each other on one element. The node ring rotates via
+        // orbitSlow; each label counter-rotates via orbitSlowReverse (same
+        // duration, opposite direction) so text stays upright while its dot
+        // still visibly orbits — a standard trick, not two unrelated spins.
+        coreBreathe: {
+          "0%, 100%": { transform: "scale(1)" },
+          "50%": { transform: "scale(1.035)" },
+        },
+        orbitSlow: {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
+        },
+        orbitSlowReverse: {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(-360deg)" },
+        },
       },
       animation: {
         ticker: "ticker 38s linear infinite",
@@ -146,6 +164,9 @@ const config: Config = {
         slideInRight: "slideInRight 0.3s ease-out both",
         scanline: "scanline 2.4s linear infinite",
         auroraDrift: "auroraDrift 26s ease-in-out infinite",
+        coreBreathe: "coreBreathe 6s ease-in-out infinite",
+        orbitSlow: "orbitSlow 90s linear infinite",
+        orbitSlowReverse: "orbitSlowReverse 90s linear infinite",
       },
     },
   },

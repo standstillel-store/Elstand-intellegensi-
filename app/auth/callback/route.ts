@@ -30,6 +30,21 @@ export async function GET(request: NextRequest) {
         await upsertUserProfile(supabase, data.user);
         return NextResponse.redirect(`${origin}${next}`);
       }
+
+      // "flow_state_already_used" fires when this exact code was already
+      // exchanged — almost always a duplicate callback hit (a second tab, a
+      // browser/messaging-app link prefetch, bfcache replaying an old
+      // navigation), not a genuine sign-in failure. If an earlier hit
+      // already succeeded, a valid session is already sitting in cookies
+      // from that first exchange — check before showing an error for what
+      // would otherwise look like "it worked, then it randomly failed."
+      const isFlowStateReplay = error?.code === "flow_state_already_used" || /flow.?state/i.test(error?.message ?? "");
+      if (isFlowStateReplay) {
+        const { data: existing } = await supabase.auth.getUser();
+        if (existing.user) {
+          return NextResponse.redirect(`${origin}${next}`);
+        }
+      }
     }
   }
 

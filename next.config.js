@@ -7,6 +7,21 @@ const nextConfig = {
     // yourself and are happy with it, feel free to flip this back to false.
     ignoreDuringBuilds: true,
   },
+  async headers() {
+    // Phase 5 — fixes the exact failure mode hit while testing the landing
+    // redesign: a phone browser kept serving an HTML snapshot of "/" from
+    // before the redeploy, while the same URL with a random query string
+    // (never in cache) correctly showed the new build. `no-cache` doesn't
+    // disable caching — it tells the browser to always revalidate with the
+    // server first (a cheap conditional request), so an unchanged page still
+    // returns fast via 304, but a changed one is never served stale again.
+    return [
+      {
+        source: "/",
+        headers: [{ key: "Cache-Control", value: "no-cache" }],
+      },
+    ];
+  },
   webpack: (config, { webpack }) => {
     // @reown/appkit-adapter-wagmi's default connector set (no explicit
     // `connectors` option is passed to WagmiAdapter in lib/web3/config.ts,

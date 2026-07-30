@@ -303,6 +303,22 @@ body {
    shifts backgroundPosition slowly so it reads as atmosphere, not a pan.
    Covered by the existing prefers-reduced-motion / [data-motion="reduced"]
    rules above automatically — no extra motion-safety code needed. */
+/* Hand-written on purpose, duplicating the theme entry in tailwind.config.ts:
+   this keyframe is only ever reached from custom CSS (.landing-aurora below)
+   and arbitrary `[animation:auroraDrift_Ns_...]` values in HeroSignature.tsx
+   — never through the generated `animate-auroraDrift` utility class itself —
+   so it needs to exist here unconditionally rather than depend on Tailwind's
+   content scanner noticing a utility class that's never actually used. */
+@keyframes auroraDrift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
 .landing-aurora {
   background-image:
     radial-gradient(circle at 15% 20%, rgba(124, 106, 246, 0.16), transparent 45%),
@@ -311,4 +327,17 @@ body {
     radial-gradient(circle at 50% 95%, rgba(212, 175, 55, 0.06), transparent 50%);
   background-size: 200% 200%;
   animation: auroraDrift 26s ease-in-out infinite;
+}
+
+/* Phase 5.2 — cinematic grain. A single inline SVG feTurbulence filter as a
+   data-URI background — no image asset, no dependency. Kept far too subtle
+   to notice as "texture" on its own; it just stops large flat gradient
+   areas (the aurora, the sphere) from looking like a flat digital wash. */
+.landing-noise {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }

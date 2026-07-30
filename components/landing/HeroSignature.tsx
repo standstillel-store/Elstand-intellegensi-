@@ -3,36 +3,40 @@
 import { type PointerEvent } from "react";
 import { motion, useMotionValue, useReducedMotion, useSpring, useTransform } from "framer-motion";
 
-// Phase 5 hero signature element — "Confluence Core."
-// Not a generic floating-crystal 3D ornament: this is a literal visualization
-// of how ElStand's AI actually reasons (fan-in — many signals converging into
-// one verdict), the same mental model as the reasoning chain in
-// components/intelligence/ui/NodeDrawer.tsx. CSS/SVG only per the confirmed
-// Phase 5 decision — zero new dependencies, no three.js/@react-three/fiber.
+// Phase 5.2 — Confluence Core, rebuilt per the "final polish" brief: a glass-
+// sphere AI entity, not a flat circle-and-lines diagram. Still CSS/SVG only —
+// no three.js/@react-three/fiber/WebGL, per the confirmed Phase 5 decision.
+// Every layer below is a *fake*-3D technique (layered gradients, an inset
+// box-shadow for roundness, a blurred specular highlight, a masked
+// conic-gradient rim) rather than real geometry — deliberately, since that's
+// what stays cheap enough to keep LCP fast.
 //
-// Deliberately shows no confidence number or score here: this element is
-// atmospheric/conceptual, not a data readout, so there's nothing here that
-// could be mistaken for a real (or fake) figure — the actual AI Reasoning
-// section (Phase 5.3) is where real, clearly-labeled output belongs.
+// This is still a literal visualization of how ElStand's AI actually reasons
+// (fan-in — many signals converging into one verdict; the same model as the
+// reasoning chain in components/intelligence/ui/NodeDrawer.tsx), not a
+// generic ornament. No confidence number or score anywhere in it — this
+// element is atmospheric/conceptual; real, clearly-labeled numbers live in
+// the AI Reasoning section (Phase 5.3), never here.
 
-const SIZE = 420;
+const SIZE = 440;
 const CENTER = SIZE / 2;
-const NODE_RADIUS = 175;
-const CORE_RADIUS = 62;
+const NODE_RADIUS = 180;
+const CORE_INNER_STOP = 74;
 
-const THREADS = [
-  { label: "RSI", angleDeg: -125, hue: "violet" as const },
-  { label: "WHALE", angleDeg: -55, hue: "cyan" as const },
-  { label: "FUNDING", angleDeg: -5, hue: "blue" as const },
-  { label: "NEWS", angleDeg: 55, hue: "violet" as const },
-  { label: "MACRO", angleDeg: 125, hue: "cyan" as const },
-];
+const NODE_LABELS = ["MACRO", "WHALE", "NEWS", "FUNDING", "ON-CHAIN", "LIQUIDITY", "SENTIMENT"] as const;
+const HUES = ["violet", "cyan", "blue"] as const;
 
-// Mirrors landing.violet/blue/cyan in tailwind.config.ts. Kept as plain hex
-// here (not Tailwind stroke-* classes) because Tailwind's JIT scanner can't
-// see color names built at runtime from a data array — if those tokens ever
-// change, update both places.
-const STROKE: Record<(typeof THREADS)[number]["hue"], string> = {
+const NODES = NODE_LABELS.map((label, i) => ({
+  label,
+  angleDeg: -90 + (360 / NODE_LABELS.length) * i,
+  hue: HUES[i % HUES.length],
+}));
+
+// Mirrors landing.violet/blue/cyan in tailwind.config.ts. Plain hex here (not
+// Tailwind stroke-*/bg-* classes) because Tailwind's JIT scanner can't see
+// color names built at runtime from a data array — if those tokens change,
+// update both places.
+const STROKE: Record<(typeof HUES)[number], string> = {
   violet: "#7C6AF6",
   blue: "#3E7BFA",
   cyan: "#22D3EE",
@@ -42,6 +46,82 @@ function pointOnCircle(angleDeg: number, radius: number) {
   const rad = (angleDeg * Math.PI) / 180;
   return { x: CENTER + radius * Math.cos(rad), y: CENTER + radius * Math.sin(rad) };
 }
+
+// The sphere itself — isolated so the layer stack (bloom / rim / body /
+// highlight / inner glow / label) reads clearly on its own.
+function GlassSphere() {
+  return (
+    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <div className="animate-cardFloat">
+        <div className="relative h-[132px] w-[132px] animate-coreBreathe">
+          {/* Cast shadow — the one thing that actually sells "floating." */}
+          <div
+            className="absolute -bottom-7 left-1/2 h-4 w-20 -translate-x-1/2 rounded-full opacity-60"
+            style={{ background: "radial-gradient(ellipse at center, rgba(0,0,0,0.55), transparent 75%)", filter: "blur(4px)" }}
+          />
+
+          {/* Outer bloom. */}
+          <div
+            className="absolute -inset-9 rounded-full opacity-80"
+            style={{ background: "radial-gradient(circle, rgba(124,106,246,0.26), transparent 70%)", filter: "blur(18px)" }}
+          />
+
+          {/* Rim light — thin conic-gradient ring, masked to just the edge.
+              Violet → cyan → one short gold arc (the only gold in the whole
+              piece — a few degrees of a 360° ring is comfortably under the
+              "max 5%" ceiling). Rotates slowly on its own. */}
+          <div
+            className="absolute -inset-[3px] animate-orbitSlow rounded-full"
+            style={{
+              background:
+                "conic-gradient(from 200deg, transparent 0deg, rgba(124,106,246,0.75) 55deg, rgba(34,211,238,0.7) 140deg, transparent 205deg, transparent 300deg, rgba(212,175,55,0.9) 328deg, rgba(212,175,55,0.9) 340deg, transparent 356deg)",
+              WebkitMask: "radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px))",
+              mask: "radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px))",
+            }}
+          />
+
+          {/* Sphere body — volumetric gradient + inset shadow for curvature. */}
+          <div
+            className="absolute inset-0 rounded-full backdrop-blur-[2px]"
+            style={{
+              background:
+                "radial-gradient(circle at 32% 26%, rgba(255,255,255,0.38) 0%, rgba(167,155,255,0.26) 16%, rgba(124,106,246,0.30) 44%, rgba(21,24,35,0.94) 80%)",
+              boxShadow: "inset -14px -14px 34px rgba(0,0,0,0.55), inset 9px 9px 22px rgba(255,255,255,0.06)",
+            }}
+          />
+
+          {/* Specular highlight — the "glass," not "flat circle," cue. */}
+          <div
+            className="absolute left-[20%] top-[15%] h-[26%] w-[38%] rounded-full opacity-80"
+            style={{ background: "radial-gradient(ellipse at center, rgba(255,255,255,0.6), transparent 72%)", filter: "blur(3px)", transform: "rotate(-18deg)" }}
+            aria-hidden="true"
+          />
+
+          {/* Inner energy — slow pulse, distinct rhythm from the rim/breathe. */}
+          <div
+            className="absolute inset-5 animate-pulseGlow rounded-full"
+            style={{ background: "radial-gradient(circle, rgba(167,155,255,0.3), transparent 70%)" }}
+          />
+
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+            <span className="eyebrow text-[8px] tracking-[0.2em] text-landing-gold">AI CORE</span>
+            <span className="mt-0.5 font-display text-xs text-ink">Confluence</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A handful of small ambient motes — twinkle in place, no orbit of their own.
+// Kept separate from the 7 labeled Oracle Nodes so "energy field" reads as
+// atmosphere, not an 8th data source.
+const MOTES = Array.from({ length: 9 }, (_, i) => ({
+  x: 12 + ((i * 37) % 76),
+  y: 10 + ((i * 53) % 80),
+  delay: (i % 5) * 0.5,
+  size: 2 + (i % 3),
+}));
 
 export function HeroSignature() {
   const prefersReducedMotion = useReducedMotion();
@@ -65,7 +145,7 @@ export function HeroSignature() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[420px]" style={{ perspective: 1000 }}>
+    <div className="mx-auto w-full max-w-[460px]" style={{ perspective: 1000 }}>
       <motion.div
         initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.92 }}
         animate={prefersReducedMotion ? undefined : { opacity: 1, scale: 1 }}
@@ -75,74 +155,87 @@ export function HeroSignature() {
         style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
         className="relative aspect-square"
       >
-        <div className="landing-aurora pointer-events-none absolute -inset-10 -z-10 rounded-full opacity-70" aria-hidden="true" />
+        {/* Cinematic backdrop: aurora wash + two independently-drifting soft
+            "meshes" at different sizes/speeds (parallax-of-speed, not just
+            one flat gradient) + grain so none of it reads as a flat digital wash. */}
+        <div className="landing-aurora pointer-events-none absolute -inset-12 -z-20 rounded-full opacity-70" aria-hidden="true" />
+        <div
+          className="pointer-events-none absolute left-[8%] top-[10%] -z-10 h-[46%] w-[46%] rounded-full opacity-50 [animation:auroraDrift_38s_ease-in-out_infinite]"
+          style={{ background: "radial-gradient(circle, rgba(34,211,238,0.14), transparent 70%)", backgroundSize: "220% 220%", filter: "blur(28px)" }}
+          aria-hidden="true"
+        />
+        <div
+          className="pointer-events-none absolute bottom-[6%] right-[10%] -z-10 h-[40%] w-[40%] rounded-full opacity-50 [animation:auroraDrift_46s_ease-in-out_infinite_reverse]"
+          style={{ background: "radial-gradient(circle, rgba(124,106,246,0.14), transparent 70%)", backgroundSize: "220% 220%", filter: "blur(26px)" }}
+          aria-hidden="true"
+        />
+        <div className="landing-noise -z-10 rounded-full" aria-hidden="true" />
 
-        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full" aria-hidden="true">
-          <defs>
-            <radialGradient id="core-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#A79BFF" stopOpacity="0.5" />
-              <stop offset="100%" stopColor="#7C6AF6" stopOpacity="0" />
-            </radialGradient>
-            {/* The one gold thread — an accent on the ring, never a fill. */}
-            <linearGradient id="core-ring" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#7C6AF6" />
-              <stop offset="55%" stopColor="#22D3EE" />
-              <stop offset="100%" stopColor="#D4AF37" />
-            </linearGradient>
-          </defs>
+        {/* Ambient motes. */}
+        {MOTES.map((m, i) => (
+          <span
+            key={i}
+            className="animate-pulseGlow absolute rounded-full bg-landing-cyan-glow"
+            style={{
+              left: `${m.x}%`,
+              top: `${m.y}%`,
+              width: m.size,
+              height: m.size,
+              opacity: 0.5,
+              animationDelay: `${m.delay}s`,
+              animationDuration: "3.2s",
+            }}
+            aria-hidden="true"
+          />
+        ))}
 
-          {THREADS.map((t) => {
-            const outer = pointOnCircle(t.angleDeg, NODE_RADIUS);
-            const inner = pointOnCircle(t.angleDeg, CORE_RADIUS + 4);
-            const stroke = STROKE[t.hue];
+        {/* Oracle Node ring — rotates as one rigid group (orbitSlow); each
+            label counter-rotates (orbitSlowReverse, identical duration) so
+            text stays upright while still visibly carried around the sphere. */}
+        <div className="absolute inset-0 animate-orbitSlow" aria-hidden="true">
+          <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
+            {NODES.map((n) => {
+              const outer = pointOnCircle(n.angleDeg, NODE_RADIUS);
+              const inner = pointOnCircle(n.angleDeg, CORE_INNER_STOP);
+              const stroke = STROKE[n.hue];
+              return (
+                <g key={n.label}>
+                  <line x1={outer.x} y1={outer.y} x2={inner.x} y2={inner.y} stroke={stroke} strokeOpacity={0.25} strokeWidth={1.5} />
+                  {!prefersReducedMotion && (
+                    <line
+                      x1={outer.x}
+                      y1={outer.y}
+                      x2={inner.x}
+                      y2={inner.y}
+                      stroke={stroke}
+                      strokeWidth={2}
+                      strokeDasharray="3 10"
+                      strokeLinecap="round"
+                      className="animate-dashFlowSlow"
+                    />
+                  )}
+                  <circle cx={outer.x} cy={outer.y} r={4} fill={stroke} />
+                  <circle cx={outer.x} cy={outer.y} r={9} fill={stroke} opacity={0.18} />
+                </g>
+              );
+            })}
+          </svg>
+
+          {NODES.map((n) => {
+            const p = pointOnCircle(n.angleDeg, NODE_RADIUS + 26);
             return (
-              <g key={t.label}>
-                <line x1={outer.x} y1={outer.y} x2={inner.x} y2={inner.y} stroke={stroke} strokeOpacity={0.28} strokeWidth={1.5} />
-                <line
-                  x1={outer.x}
-                  y1={outer.y}
-                  x2={inner.x}
-                  y2={inner.y}
-                  stroke={stroke}
-                  strokeWidth={2}
-                  strokeDasharray="3 9"
-                  strokeLinecap="round"
-                  className={prefersReducedMotion ? undefined : "animate-dashFlowSlow"}
-                />
-                <circle cx={outer.x} cy={outer.y} r={4} fill={stroke} />
-              </g>
+              <span
+                key={n.label}
+                className="eyebrow animate-orbitSlowReverse absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-[9px] tracking-[0.2em] text-ink-faint"
+                style={{ left: `${(p.x / SIZE) * 100}%`, top: `${(p.y / SIZE) * 100}%` }}
+              >
+                {n.label}
+              </span>
             );
           })}
-
-          <circle cx={CENTER} cy={CENTER} r={CORE_RADIUS + 30} fill="url(#core-glow)" />
-          <circle
-            cx={CENTER}
-            cy={CENTER}
-            r={CORE_RADIUS}
-            fill="rgba(21,24,35,0.65)"
-            stroke="url(#core-ring)"
-            strokeWidth={1.5}
-            className={prefersReducedMotion ? undefined : "animate-pulseGlow"}
-          />
-        </svg>
-
-        {THREADS.map((t) => {
-          const p = pointOnCircle(t.angleDeg, NODE_RADIUS + 24);
-          return (
-            <span
-              key={t.label}
-              className="eyebrow absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-[9px] tracking-[0.2em] text-ink-faint"
-              style={{ left: `${(p.x / SIZE) * 100}%`, top: `${(p.y / SIZE) * 100}%` }}
-            >
-              {t.label}
-            </span>
-          );
-        })}
-
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="eyebrow text-[9px] tracking-[0.2em] text-landing-gold">AI CORE</span>
-          <span className="mt-1 font-display text-sm text-ink">Confluence</span>
         </div>
+
+        <GlassSphere />
       </motion.div>
     </div>
   );
