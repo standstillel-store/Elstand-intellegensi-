@@ -13,6 +13,19 @@ export function Eyebrow({ children }: { children: ReactNode }) {
   );
 }
 
+// Phase 5 — same shape as Eyebrow above, but on `landing.violet` instead of
+// the dashboard's runtime-swappable `signal` accent. New landing sections
+// (Hero onward) use this one; sections not yet redesigned keep using the
+// original Eyebrow until their turn, so nothing shifts color mid-migration.
+export function LandingEyebrow({ children }: { children: ReactNode }) {
+  return (
+    <p className="eyebrow inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-landing-violet-glow">
+      <span className="h-1 w-1 rounded-full bg-landing-violet-glow" />
+      {children}
+    </p>
+  );
+}
+
 export function SectionIntro({
   eyebrow,
   title,

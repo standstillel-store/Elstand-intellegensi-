@@ -1,46 +1,59 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowRight } from "lucide-react";
-import { Container, Eyebrow } from "./shared";
-import { HeroMockup } from "./HeroMockup";
-import { TickerStrip } from "./TickerStrip";
+import { Container, LandingEyebrow } from "./shared";
+import { HeroSignature } from "./HeroSignature";
+import { TickerStrip, TickerStripFallback } from "./TickerStrip";
+
+// Phase 5.2 rewrite. HeroMockup is intentionally no longer imported here —
+// its heatmap/sparkline/signal-card content is being repurposed into the
+// "ELVOID AI Terminal Preview" section (Phase 5.3), not deleted. The file
+// still exists at ./HeroMockup.tsx, just unused until then.
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden pt-14 sm:pt-20">
-      <Container className="grid items-center gap-12 pb-16 lg:grid-cols-[1.05fr_1fr] lg:gap-8">
-        <div>
-          <Eyebrow>AI-Powered Crypto Intelligence</Eyebrow>
-          <h1 className="mt-4 text-4xl font-bold leading-[1.1] tracking-tight text-ink sm:text-5xl">
-            AI-Powered Crypto <span className="text-gradient-signal">Market Intelligence</span>
-          </h1>
-          <p className="mt-5 max-w-lg text-[15px] leading-relaxed text-ink-muted sm:text-base">
-            Analyze crypto markets smarter with AI-driven insights, technical analysis, and market monitoring tools.
-          </p>
+    <section className="landing-aurora relative overflow-hidden bg-landing-bg pt-16 sm:pt-24">
+      <Container className="flex flex-col items-center pb-10 text-center">
+        <LandingEyebrow>AI-Powered Crypto Intelligence</LandingEyebrow>
 
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-signal px-6 py-3 text-sm font-semibold text-white shadow-glow-signal transition-colors hover:bg-signal-glow"
-            >
-              Start Free <ArrowRight size={16} />
-            </Link>
-            <a
-              href="#features"
-              className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-6 py-3 text-sm font-semibold text-ink transition-colors hover:border-signal/40 hover:text-ink"
-            >
-              Explore Features
-            </a>
-          </div>
+        <h1 className="mt-5 max-w-3xl font-display text-4xl font-medium leading-[1.08] tracking-tight text-ink sm:text-6xl">
+          The Bloomberg Terminal for{" "}
+          <span className="bg-gradient-to-r from-landing-violet via-landing-blue to-landing-cyan bg-clip-text text-transparent">
+            Crypto Intelligence
+          </span>
+        </h1>
 
-          <p className="mt-4 text-xs text-ink-faint">Free plan available · No credit card required</p>
+        <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-ink-muted sm:text-base">
+          One AI terminal that reads price action, whales, funding, news, and macro together —
+          then shows you exactly why, not just a BUY/SELL badge.
+        </p>
+
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <Link
+            href="/login"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-landing-violet px-6 py-3 text-sm font-semibold text-white shadow-glow-landing-violet transition-colors hover:bg-landing-violet-glow"
+          >
+            Launch Terminal <ArrowRight size={16} />
+          </Link>
+          {/* Targets #features (still exists pre-5.3) — retarget to #intelligence once the AI Intelligence Grid section ships. */}
+          <a
+            href="#features"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-landing-line px-6 py-3 text-sm font-semibold text-ink transition-colors hover:border-landing-violet/40"
+          >
+            View Intelligence
+          </a>
         </div>
 
-        <div className="flex justify-center lg:justify-end">
-          <HeroMockup />
+        <p className="mt-4 text-xs text-ink-faint">Free to start · No credit card required</p>
+
+        <div className="mt-14 w-full sm:mt-20">
+          <HeroSignature />
         </div>
       </Container>
 
-      <TickerStrip />
+      <Suspense fallback={<TickerStripFallback />}>
+        <TickerStrip />
+      </Suspense>
     </section>
   );
 }
