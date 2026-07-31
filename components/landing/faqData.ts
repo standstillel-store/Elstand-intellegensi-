@@ -13,7 +13,7 @@ export const FAQS = [
   },
   {
     question: "How do I get started?",
-    answer: "Sign in with Google and you're straight into the dashboard — the Free plan needs no card and no setup.",
+    answer: "Sign in with Google and you're straight into the dashboard — every account starts with free AI Energy, no card and no setup needed.",
   },
   {
     question: "Is my data secure?",

@@ -35,9 +35,9 @@ export function Hero() {
           >
             Launch Terminal <ArrowRight size={16} />
           </Link>
-          {/* Targets #features (still exists pre-5.3) — retarget to #intelligence once the AI Intelligence Grid section ships. */}
+          {/* Live Market Preview (Section 2) now exists at #intelligence. */}
           <a
-            href="#features"
+            href="#intelligence"
             className="inline-flex items-center justify-center gap-2 rounded-md border border-landing-line px-6 py-3 text-sm font-semibold text-ink transition-colors hover:border-landing-violet/40"
           >
             View Intelligence

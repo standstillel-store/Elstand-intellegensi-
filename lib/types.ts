@@ -21,6 +21,17 @@ export interface FundingInfo {
   openInterestValue?: number;
 }
 
+export interface OrderBookLevel {
+  price: number;
+  qty: number;
+}
+
+export interface OrderBookSnapshot {
+  symbol: string;
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+}
+
 export interface WhaleTransfer {
   hash: string;
   asset: string;

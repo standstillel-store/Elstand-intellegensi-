@@ -1,5 +1,5 @@
 import { cached } from "./cache";
-import type { FundingInfo } from "./types";
+import type { FundingInfo, OrderBookSnapshot } from "./types";
 import type { Candle } from "./elvoid/types";
 
 const BASE = "https://fapi.binance.com";
@@ -63,6 +63,30 @@ export async function getFundingSnapshot(): Promise<FundingInfo[]> {
       })
     );
     return withOi;
+  });
+}
+
+/**
+ * Public order-book depth snapshot — Binance Futures' /depth endpoint is
+ * public market data, no API key needed. Refreshed every 10s (cached, like
+ * everything else in this file) rather than a live WebSocket stream: a real
+ * snapshot every 10s is honest, live data for a landing page card without
+ * holding a socket open for anonymous visitors — the true tick-by-tick
+ * stream is what the actual terminal is for.
+ */
+export async function getOrderBookDepth(symbol: string, limit = 20): Promise<OrderBookSnapshot> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  return cached(`bn:depth:${pair}:${limit}`, 10_000, async () => {
+    const res = await fetch(`${BASE}/fapi/v1/depth?symbol=${pair}&limit=${limit}`, {
+      next: { revalidate: 10 },
+    });
+    if (!res.ok) throw new Error(`Binance depth failed for ${pair}: ${res.status}`);
+    const json = (await res.json()) as { bids: [string, string][]; asks: [string, string][] };
+    return {
+      symbol: pair,
+      bids: json.bids.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+      asks: json.asks.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+    };
   });
 }
 

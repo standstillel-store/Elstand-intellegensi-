@@ -23,7 +23,7 @@ const CENTER = SIZE / 2;
 const NODE_RADIUS = 180;
 const CORE_INNER_STOP = 74;
 
-const NODE_LABELS = ["MACRO", "WHALE", "NEWS", "FUNDING", "ON-CHAIN", "LIQUIDITY", "SENTIMENT"] as const;
+const NODE_LABELS = ["MACRO", "WHALE", "NEWS", "FUNDING", "ON-CHAIN", "DEX", "CEX", "SENTIMENT"] as const;
 const HUES = ["violet", "cyan", "blue"] as const;
 
 const NODES = NODE_LABELS.map((label, i) => ({

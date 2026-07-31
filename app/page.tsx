@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { LandingHeader } from "@/components/landing/LandingHeader";
 import { Hero } from "@/components/landing/Hero";
+import { LiveMarketPreview } from "@/components/landing/LiveMarketPreview";
 import { About } from "@/components/landing/About";
 import { Features } from "@/components/landing/Features";
 import { HowItWorks } from "@/components/landing/HowItWorks";
 import { AiSignalShowcase } from "@/components/landing/AiSignalShowcase";
-import { Pricing } from "@/components/landing/Pricing";
+import { TokenSection } from "@/components/landing/TokenSection";
 import { Faq } from "@/components/landing/Faq";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { JsonLd } from "@/components/landing/JsonLd";
@@ -44,11 +45,12 @@ export default function LandingPage() {
       <JsonLd />
       <LandingHeader />
       <Hero />
+      <LiveMarketPreview />
       <About />
       <Features />
       <HowItWorks />
       <AiSignalShowcase />
-      <Pricing />
+      <TokenSection />
       <Faq />
       <LandingFooter />
     </main>
