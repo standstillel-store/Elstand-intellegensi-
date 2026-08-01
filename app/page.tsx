@@ -7,6 +7,8 @@ import { Features } from "@/components/landing/Features";
 import { HowItWorks } from "@/components/landing/HowItWorks";
 import { AiSignalShowcase } from "@/components/landing/AiSignalShowcase";
 import { TokenSection } from "@/components/landing/TokenSection";
+import { Roadmap } from "@/components/landing/Roadmap";
+import { Security } from "@/components/landing/Security";
 import { Faq } from "@/components/landing/Faq";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { JsonLd } from "@/components/landing/JsonLd";
@@ -51,6 +53,8 @@ export default function LandingPage() {
       <HowItWorks />
       <AiSignalShowcase />
       <TokenSection />
+      <Roadmap />
+      <Security />
       <Faq />
       <LandingFooter />
     </main>

@@ -8,6 +8,10 @@ import { Container, LandingEyebrow } from "./shared";
 // this section describes the real mechanic instead of inventing a nicer one.
 // Referral and Bug Hunter are confirmed "Coming Soon" — neither exists in the
 // codebase yet (checked: no referral/bounty code anywhere).
+//
+// id="ai-energy" added here — LandingHeader's nav item used to point at
+// #pricing, which stopped resolving to anything the moment this component
+// replaced Pricing.tsx. The nav label/href are now fixed to match.
 
 const SAMPLE_COSTS: Array<{ label: string; cost: number }> = [
   { label: "AI Signal", cost: 4 },
@@ -40,7 +44,7 @@ function UtilityCard({
 
 export function TokenSection() {
   return (
-    <section className="bg-landing-bg py-20 sm:py-28">
+    <section id="ai-energy" className="border-t border-landing-line bg-landing-bg py-20 sm:py-28">
       <Container>
         <div className="max-w-xl">
           <LandingEyebrow>AI Energy</LandingEyebrow>
