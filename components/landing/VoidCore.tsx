@@ -35,6 +35,26 @@ const SIZE = 560;
 const CENTER = SIZE / 2;
 const VOID_RADIUS = 92;
 const NODE_RADIUS = 246;
+const COIN_RADIUS = VOID_RADIUS + 58;
+
+// v2 addition, from the reference photo the user uploaded of a numbered
+// hex-tessellated sphere with an ember particle field. Not embedded as an
+// image asset — it's very likely a stock/generated render of unknown
+// license, and dropping a found photo into a real product's codebase as a
+// permanent visual asset is a different, riskier thing than using it for
+// style reference the way the moodboard images earlier in this project
+// were used. What's actually carried over into code below: a hex-faceted
+// texture on the void's surface (fading in toward the rim, same "texture
+// emerges from darkness" logic as everything else here) and a small ring
+// of coin discs — CIRCLE + TICKER TEXT, not brand logo artwork, so there's
+// no trademark-artwork question either.
+const COINS = [
+  { ticker: "BTC", angle: -66 },
+  { ticker: "ETH", angle: 6 },
+  { ticker: "SOL", angle: 78 },
+  { ticker: "BNB", angle: 150 },
+  { ticker: "XRP", angle: -138 },
+] as const;
 
 const NODES = [
   { label: "MACRO", angle: -90 },
@@ -121,6 +141,23 @@ export function VoidCore() {
                 </animateMotion>
               </circle>
             ))}
+
+          {/* Coin ring — circle + ticker text, not logo artwork. Static on
+              purpose: VoidCore already has three moving layers (rim,
+              particles, emission); a fourth spinning one would be more
+              motion than signal. */}
+          {COINS.map((c) => {
+            const p = pt(c.angle, COIN_RADIUS);
+            return (
+              <g key={c.ticker} transform={`translate(${p.x} ${p.y})`}>
+                <circle r={15} fill="rgba(9,9,11,0.85)" stroke="rgba(240,213,132,0.55)" strokeWidth={1} />
+                <circle r={15} fill="none" stroke="rgba(126,235,251,0.25)" strokeWidth={0.5} />
+                <text textAnchor="middle" dominantBaseline="central" fontSize={7.5} fill="#F0D584" className="mono-num">
+                  {c.ticker}
+                </text>
+              </g>
+            );
+          })}
         </svg>
 
         {/* Labels — fixed, not orbiting. Legible at a glance; only the ring and particles carry motion. */}
@@ -149,6 +186,29 @@ export function VoidCore() {
             boxShadow: "inset 0 0 40px 10px rgba(0,0,0,0.9), 0 0 60px 10px rgba(0,0,0,0.7)",
           }}
         >
+          {/* Hex facet texture — the void's surface reads as made of many
+              small panels, not a smooth gradient. Faded in via mask so it's
+              invisible at the exact center and strongest at the rim, same
+              "texture emerges from darkness" logic as the rest of the file.
+              Circle-shaped mask/fill (not a rect) so there's no square-corner
+              clipping to worry about — it can't poke outside a round parent
+              if it was never square to begin with. */}
+          <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" aria-hidden="true">
+            <defs>
+              <pattern id="voidHex" width="12" height="10.4" patternUnits="userSpaceOnUse">
+                <polygon points="6,0 12,3 12,9 6,12 0,9 0,3" fill="none" stroke="rgba(126,235,251,0.4)" strokeWidth={0.5} />
+              </pattern>
+              <radialGradient id="voidHexFade" cx="50%" cy="50%" r="50%">
+                <stop offset="45%" stopColor="white" stopOpacity={0} />
+                <stop offset="100%" stopColor="white" stopOpacity={0.9} />
+              </radialGradient>
+              <mask id="voidHexMask">
+                <circle cx={50} cy={50} r={50} fill="url(#voidHexFade)" />
+              </mask>
+            </defs>
+            <circle cx={50} cy={50} r={50} fill="url(#voidHex)" mask="url(#voidHexMask)" />
+          </svg>
+
           {/* Rim light — thin conic ring, gold-dominant with a short violet/blue arc for depth. Reuses the existing orbitSlow keyframe. */}
           <div
             className={reduceMotion ? "" : "animate-orbitSlow"}

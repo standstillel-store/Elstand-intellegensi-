@@ -1,50 +1,64 @@
-ElStand AI — Phase 5 Reboot: Terminal Preview, Features reskin, light/dark toggle
-==================================================================================
+ElStand AI — Phase 5 Reboot: full current drop (13 file)
+===========================================================
 
-12 file di update ini. GitHub web nggak bisa upload .zip lalu auto-extract —
-ekstrak dulu (file manager HP: tap .zip > Extract), lalu tiap file: kalau
-sudah ada di repo, edit (pensil) > select all > paste > Commit; kalau belum
-ada, "Add file > Create new file" di folder yang sesuai.
+Ini paket LENGKAP paling baru — isinya semua file dari drop-drop sebelumnya
+(sudah termasuk toggle terang/gelap, Terminal Preview, Features reskin) DITAMBAH
+perubahan baru di bawah. Nggak perlu buka zip yang lama lagi, yang ini sudah
+final/gabungan semuanya.
 
-PALING PENTING DULU — 2 file yang DIPAKAI BERSAMA seluruh app (bukan cuma
-landing page):
+CARA PASANG: ekstrak (file manager HP: tap .zip > Extract), lalu tiap file —
+kalau sudah ada di repo: edit (pensil) > select all > paste > Commit. Kalau
+belum ada (Reveal.tsx, ThemeToggle.tsx, TerminalPreview.tsx): "Add file >
+Create new file" di folder yang sesuai.
 
-  tailwind.config.ts (di root repo)
-  app/globals.css
-    - Ini SATU-SATUNYA bagian yang secara teknis "keluar" dari folder
-      landing, karena cuma ada satu file config buat seluruh app — nggak
-      ada cara nambahin warna baru buat landing tanpa nyentuh file ini.
-      TAPI: yang aku ubah cuma isi di dalam objek `landing` (tailwind.config)
-      dan nambahin blok CSS baru (bukan ngubah yang lama) di globals.css.
-      Nggak ada satupun token yang dashboard/auth/backend pakai (bg, line,
-      signal, amber, up, down, rugpull, smartmoney, ink) yang kesentuh atau
-      berubah nilainya. Kalau kamu mau double-check sendiri: search "signal"
-      atau "ink:" di file lama vs baru, isinya sama persis.
-    - GANTI seluruh isi kedua file ini dengan yang di zip.
+=== BARU DI DROP INI ===
 
-Sisanya (semua di components/landing/ + app/page.tsx) 100% landing-only,
-nggak ada risiko ke backend/auth/dashboard sama sekali:
+Soal foto bola hex biru+angka+api yang kamu kirim: nggak aku jadiin file
+gambar di project. Itu kemungkinan besar foto stock/hasil AI generator yang
+lisensinya nggak jelas — masukin foto orang lain sebagai aset tetap di
+produk beneran itu beda risikonya dibanding sekadar liat-liat buat gaya,
+karena itu artinya nyebarin ulang karya orang lain. Yang aku lakuin malah
+bangun ulang "rasa"-nya pakai kode asli punya kita sendiri:
 
-  app/page.tsx
-    - GANTI seluruh isi. <main> sekarang punya class "landing-root" (perlu
-      ada ini biar toggle terang/gelap jalan) + render TerminalPreview.
+  components/landing/VoidCore.tsx  -> DIPERBARUI
+    - Permukaan void sekarang ada tekstur segi-enam (hex) yang muncul
+      samar dari tengah ke pinggir, ngambil dari kesan foto kamu (bola
+      isinya panel-panel kecil) tapi versi kode sendiri, bukan foto.
+    - Nambah cincin koin kecil (BTC/ETH/SOL/BNB/XRP) — bentuknya lingkaran
+      + teks ticker, BUKAN logo resmi masing-masing koin, jadi aman dari
+      urusan hak cipta/merek logo.
 
-  components/landing/TerminalPreview.tsx   -> FILE BARU
-  components/landing/ThemeToggle.tsx       -> FILE BARU
-  components/landing/Features.tsx          -> GANTI seluruh isi (reskin, konten 6 fitur tetap sama)
-  components/landing/Hero.tsx              -> GANTI seluruh isi (nambah class theme-invariant)
-  components/landing/LandingHeader.tsx     -> GANTI seluruh isi (pasang tombol toggle)
-  components/landing/TokenSection.tsx      -> GANTI seluruh isi (ink -> landing-ink)
-  components/landing/Roadmap.tsx           -> GANTI seluruh isi (ink -> landing-ink)
-  components/landing/Security.tsx          -> GANTI seluruh isi (ink -> landing-ink)
-  components/landing/VoidCore.tsx          -> sama persis kayak sebelumnya, cuma dikirim ulang biar satu paket lengkap
+  components/landing/Reveal.tsx  -> FILE BARU
+    - Wrapper animasi scroll (fade + geser naik pas section masuk layar).
+      Otomatis nonaktif kalau user set "reduce motion" di HP/browser-nya.
+    - Dipasang di: Features, Roadmap, Security, AI Energy (TokenSection).
+      Hero & Terminal Preview sengaja nggak dikasih (sudah rame animasinya
+      sendiri).
 
-Soal toggle terang/gelap: Hero (Void Core) dan Terminal Preview SENGAJA
-tetap gelap terus walau mode terang dinyalain — alasannya di komentar kode
-(theme-invariant class): terminal trading kan emang biasanya gelap, siang
-atau malam. Section lain (header, Features, AI Energy, Roadmap, Security,
-dan section lama yang belum di-reskin) ikut ganti terang/gelap.
+  components/landing/Roadmap.tsx  -> DIPERBARUI (selain Reveal)
+    - Ketemu 2 kelas warna yang kelewat pas ganti ke landing-ink kemarin
+      (bg-ink-faint harusnya bg-landing-ink-faint) — udah dibetulin,
+      kalau kelewat, titik "Later" di roadmap bakal warnanya salah pas
+      mode terang.
 
-Belum lolos `npm run build` beneran (sandbox nggak ada network buat
-install/verify) — semua .ts/.tsx sudah lolos syntax check TypeScript asli,
-tapi tetap perhatikan log Vercel setelah push.
+=== SEMUA FILE DI ZIP INI ===
+
+  tailwind.config.ts, app/globals.css   -> shared, tapi cuma nambah/ubah
+    bagian `landing` — dashboard/auth nggak kesentuh nilainya.
+  app/page.tsx                          -> <main> punya class landing-root
+  components/landing/Hero.tsx           -> theme-invariant (tetap gelap)
+  components/landing/VoidCore.tsx       -> hex texture + coin ring baru
+  components/landing/TerminalPreview.tsx -> theme-invariant (tetap gelap)
+  components/landing/LandingHeader.tsx  -> tombol toggle terang/gelap
+  components/landing/ThemeToggle.tsx    -> logic toggle-nya
+  components/landing/Reveal.tsx         -> wrapper animasi scroll
+  components/landing/Features.tsx       -> reskin + Reveal
+  components/landing/Roadmap.tsx        -> reskin + Reveal + fix warna
+  components/landing/Security.tsx       -> reskin + Reveal
+  components/landing/TokenSection.tsx   -> reskin + Reveal
+
+Semua .ts/.tsx lolos syntax check TypeScript asli. Belum pernah di-`npm run
+build` beneran (sandbox nggak ada network) — perhatikan log Vercel abis push.
+
+Belum kesentuh sama sekali: Live Market Preview, About, How It Works, AI
+Signal Showcase, FAQ, Footer — masih versi lama.

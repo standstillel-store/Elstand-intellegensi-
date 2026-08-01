@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { BrainCircuit, LineChart, ScanSearch, Newspaper, ShieldCheck, Wallet } from "lucide-react";
 import { Container, LandingEyebrow } from "./shared";
+import { Reveal } from "./Reveal";
 
 // Phase 5 REBOOT — reskin, not a rewrite. The six features here were
 // already accurate (matches lib/ai, lib/scanner, lib/binance/riskManager,
@@ -65,7 +66,7 @@ export function Features() {
   return (
     <section id="features" className="border-t border-landing-line bg-landing-bg py-20 sm:py-28">
       <Container>
-        <div className="max-w-xl">
+        <Reveal className="max-w-xl">
           <LandingEyebrow>Features</LandingEyebrow>
           <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-landing-ink sm:text-3xl">
             Everything you need to read the market, in one terminal
@@ -73,9 +74,9 @@ export function Features() {
           <p className="mt-4 text-[15px] leading-relaxed text-landing-ink-muted">
             Six tools, one workflow — from first scan to a documented trading plan.
           </p>
-        </div>
+        </Reveal>
 
-        <div className="mt-10 grid gap-4">
+        <Reveal delay={0.1} className="mt-10 grid gap-4">
           <div className="landing-glass grid gap-5 rounded-2xl p-6 sm:grid-cols-[auto_1fr] sm:items-center sm:p-8">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-landing-gold/30 bg-landing-gold/10">
               <FEATURED.icon size={22} className="text-landing-gold-glow" />
@@ -107,7 +108,7 @@ export function Features() {
               </div>
             ))}
           </div>
-        </div>
+        </Reveal>
       </Container>
     </section>
   );

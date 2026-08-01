@@ -1,5 +1,6 @@
 import { KeyRound, Lock, Fingerprint, Siren, FileText } from "lucide-react";
 import { Container, LandingEyebrow } from "./shared";
+import { Reveal } from "./Reveal";
 
 // Phase 5 — Security (brief Section 8). Every point below maps to a real
 // file in this codebase (lib/binance/crypto.ts + credentials.ts,
@@ -37,7 +38,7 @@ export function Security() {
   return (
     <section id="security" className="border-t border-landing-line bg-landing-surface py-20 sm:py-28">
       <Container>
-        <div className="max-w-xl">
+        <Reveal className="max-w-xl">
           <LandingEyebrow>Security</LandingEyebrow>
           <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-landing-ink sm:text-3xl">
             How your keys and funds are protected
@@ -46,9 +47,9 @@ export function Security() {
             No paid audit to point to yet — so here's exactly how your API keys, your wallet, and your
             funds are handled, in plain terms.
           </p>
-        </div>
+        </Reveal>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+        <Reveal delay={0.1} className="mt-10 grid gap-4 sm:grid-cols-2">
           {POINTS.map((p) => (
             <div key={p.title} className="landing-glass flex gap-4 rounded-xl p-5">
               <p.icon size={18} className="mt-0.5 shrink-0 text-landing-cyan-glow" />
@@ -58,9 +59,12 @@ export function Security() {
               </div>
             </div>
           ))}
-        </div>
+        </Reveal>
 
-        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-landing-line pt-6 text-[13px] text-landing-ink-muted">
+        <Reveal
+          delay={0.2}
+          className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-landing-line pt-6 text-[13px] text-landing-ink-muted"
+        >
           <p className="max-w-md">
             When you connect an exchange, create an API key with trading permissions only — disable
             withdrawals. ElStand will never ask you for withdrawal access.
@@ -72,7 +76,7 @@ export function Security() {
             <FileText size={14} />
             Read our methodology
           </a>
-        </div>
+        </Reveal>
       </Container>
     </section>
   );

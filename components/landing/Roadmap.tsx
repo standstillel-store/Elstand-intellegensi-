@@ -1,4 +1,5 @@
 import { Container, LandingEyebrow } from "./shared";
+import { Reveal } from "./Reveal";
 
 // Phase 5 — Roadmap (brief Section 7). Status reflects the codebase as
 // audited in PHASE5-PLAN.md, not aspirational copy: "Now" is what's shipped
@@ -14,7 +15,7 @@ type Horizon = "now" | "next" | "later";
 const HORIZON_META: Record<Horizon, { label: string; sub: string; dot: string }> = {
   now: { label: "Now", sub: "Live in the terminal", dot: "bg-landing-violet" },
   next: { label: "Next", sub: "In progress", dot: "bg-landing-cyan" },
-  later: { label: "Later", sub: "Exploring", dot: "bg-ink-faint" },
+  later: { label: "Later", sub: "Exploring", dot: "bg-landing-ink-faint" },
 };
 
 interface RoadmapItem {
@@ -62,7 +63,7 @@ function RoadmapColumn({ horizon }: { horizon: Horizon }) {
         {items.map((item) => (
           <li key={item.title}>
             <div className="flex items-center gap-2">
-              <span className="h-1 w-1 shrink-0 rounded-full bg-ink-faint" />
+              <span className="h-1 w-1 shrink-0 rounded-full bg-landing-ink-faint" />
               <h3 className="text-sm font-semibold tracking-tight text-landing-ink">{item.title}</h3>
             </div>
             <p className="mt-1.5 pl-3 text-[13px] leading-relaxed text-landing-ink-muted">{item.body}</p>
@@ -77,7 +78,7 @@ export function Roadmap() {
   return (
     <section id="roadmap" className="border-t border-landing-line bg-landing-bg py-20 sm:py-28">
       <Container>
-        <div className="max-w-xl">
+        <Reveal className="max-w-xl">
           <LandingEyebrow>Roadmap</LandingEyebrow>
           <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-landing-ink sm:text-3xl">
             Built in the open, one working feature at a time
@@ -86,13 +87,13 @@ export function Roadmap() {
             No quarters, no fixed dates — just what's actually shipped, what's being hardened, and what
             we haven't solved yet.
           </p>
-        </div>
+        </Reveal>
 
-        <div className="mt-10 grid gap-4 lg:grid-cols-3">
+        <Reveal delay={0.1} className="mt-10 grid gap-4 lg:grid-cols-3">
           <RoadmapColumn horizon="now" />
           <RoadmapColumn horizon="next" />
           <RoadmapColumn horizon="later" />
-        </div>
+        </Reveal>
       </Container>
     </section>
   );

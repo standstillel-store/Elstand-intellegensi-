@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Container, LandingEyebrow } from "./shared";
+import { Reveal } from "./Reveal";
 
 // Replaces the old Pricing.tsx entirely — that component described a $0/$29
 // subscription model that was never actually built (see PHASE5-PLAN.md audit).
@@ -46,7 +47,7 @@ export function TokenSection() {
   return (
     <section id="ai-energy" className="border-t border-landing-line bg-landing-bg py-20 sm:py-28">
       <Container>
-        <div className="max-w-xl">
+        <Reveal className="max-w-xl">
           <LandingEyebrow>AI Energy</LandingEyebrow>
           <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-landing-ink sm:text-3xl">
             No subscriptions. Just energy.
@@ -56,19 +57,19 @@ export function TokenSection() {
             <span className="text-landing-gold">+10 more every day</span>. Spend it only on the AI features you
             actually use. No tiers, no card required to start.
           </p>
-        </div>
+        </Reveal>
 
         {/* Cost strip — real numbers from lib/energy.ts, not illustrative. */}
-        <div className="mt-10 flex flex-wrap gap-3">
+        <Reveal delay={0.1} className="mt-10 flex flex-wrap gap-3">
           {SAMPLE_COSTS.map((c) => (
             <div key={c.label} className="landing-glass flex items-center gap-2 rounded-full px-4 py-2 text-[12px]">
               <span className="text-landing-ink-muted">{c.label}</span>
               <span className="mono-num text-landing-cyan-glow">{c.cost} ⚡</span>
             </div>
           ))}
-        </div>
+        </Reveal>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Reveal delay={0.15} className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <UtilityCard
             status="live"
             title="AI Energy"
@@ -89,7 +90,7 @@ export function TokenSection() {
             title="Bug Hunter"
             description="Report a real bug, get rewarded in Energy. Program details coming soon."
           />
-        </div>
+        </Reveal>
 
         <div className="mt-10">
           <Link
