@@ -54,18 +54,18 @@ function RoadmapColumn({ horizon }: { horizon: Horizon }) {
     <div className="landing-glass rounded-xl p-5 sm:p-6">
       <div className="flex items-center gap-2">
         <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-        <span className="eyebrow text-[11px] uppercase tracking-[0.2em] text-ink-muted">{meta.label}</span>
+        <span className="eyebrow text-[11px] uppercase tracking-[0.2em] text-landing-ink-muted">{meta.label}</span>
       </div>
-      <p className="mt-1 font-display text-sm text-ink">{meta.sub}</p>
+      <p className="mt-1 font-display text-sm text-landing-ink">{meta.sub}</p>
 
       <ul className="mt-5 space-y-5">
         {items.map((item) => (
           <li key={item.title}>
             <div className="flex items-center gap-2">
               <span className="h-1 w-1 shrink-0 rounded-full bg-ink-faint" />
-              <h3 className="text-sm font-semibold tracking-tight text-ink">{item.title}</h3>
+              <h3 className="text-sm font-semibold tracking-tight text-landing-ink">{item.title}</h3>
             </div>
-            <p className="mt-1.5 pl-3 text-[13px] leading-relaxed text-ink-muted">{item.body}</p>
+            <p className="mt-1.5 pl-3 text-[13px] leading-relaxed text-landing-ink-muted">{item.body}</p>
           </li>
         ))}
       </ul>
@@ -79,10 +79,10 @@ export function Roadmap() {
       <Container>
         <div className="max-w-xl">
           <LandingEyebrow>Roadmap</LandingEyebrow>
-          <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-ink sm:text-3xl">
+          <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-landing-ink sm:text-3xl">
             Built in the open, one working feature at a time
           </h2>
-          <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">
+          <p className="mt-4 text-[15px] leading-relaxed text-landing-ink-muted">
             No quarters, no fixed dates — just what's actually shipped, what's being hardened, and what
             we haven't solved yet.
           </p>

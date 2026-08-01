@@ -48,18 +48,48 @@ const config: Config = {
         // Phase 5 — landing page only. Deliberately isolated from bg/surface/
         // raised above (nearly identical hex values, not reused) so landing
         // redesign work can never accidentally bleed into the dashboard.
+        // Phase 5 REBOOT — now CSS-variable-backed (globals.css defines
+        // --landing-*-rgb) so the light/dark toggle can override them, using
+        // the exact same <alpha-value> pattern the dashboard's own `signal`
+        // token above already proved out for runtime-swappable color. Values
+        // are unchanged in dark mode — only now expressed as variables.
         landing: {
-          bg: "#09090B",
-          surface: "#111827",
-          card: "#151823",
-          line: "rgba(255,255,255,0.08)",
-          violet: { DEFAULT: "#7C6AF6", dim: "#3B3480", glow: "#A79BFF" },
-          blue: { DEFAULT: "#3E7BFA", dim: "#1E3B80", glow: "#7FA8FF" },
-          cyan: { DEFAULT: "#22D3EE", dim: "#0E6B7A", glow: "#7EEBFB" },
+          bg: "rgb(var(--landing-bg-rgb) / <alpha-value>)",
+          surface: "rgb(var(--landing-surface-rgb) / <alpha-value>)",
+          card: "rgb(var(--landing-card-rgb) / <alpha-value>)",
+          line: "rgb(var(--landing-line-rgb) / var(--landing-line-alpha))",
+          violet: {
+            DEFAULT: "rgb(var(--landing-violet-rgb) / <alpha-value>)",
+            dim: "rgb(var(--landing-violet-dim-rgb) / <alpha-value>)",
+            glow: "rgb(var(--landing-violet-glow-rgb) / <alpha-value>)",
+          },
+          blue: {
+            DEFAULT: "rgb(var(--landing-blue-rgb) / <alpha-value>)",
+            dim: "rgb(var(--landing-blue-dim-rgb) / <alpha-value>)",
+            glow: "rgb(var(--landing-blue-glow-rgb) / <alpha-value>)",
+          },
+          cyan: {
+            DEFAULT: "rgb(var(--landing-cyan-rgb) / <alpha-value>)",
+            dim: "rgb(var(--landing-cyan-dim-rgb) / <alpha-value>)",
+            glow: "rgb(var(--landing-cyan-glow-rgb) / <alpha-value>)",
+          },
           // Thin signature accent (confirmed Phase 5 decision) — used sparingly,
           // never as a wash. Kept separate from dashboard's `amber` (#F5B942,
           // means "WAIT/caution" there) so the two never carry each other's meaning.
-          gold: { DEFAULT: "#D4AF37", dim: "#7A6220", glow: "#F0D584" },
+          gold: {
+            DEFAULT: "rgb(var(--landing-gold-rgb) / <alpha-value>)",
+            dim: "rgb(var(--landing-gold-dim-rgb) / <alpha-value>)",
+            glow: "rgb(var(--landing-gold-glow-rgb) / <alpha-value>)",
+          },
+          // New in the reboot: a landing-only text-color set, so sections that
+          // opt into the light/dark toggle don't have to keep using the
+          // dashboard's shared `ink` (which stays fixed — dashboard has no
+          // light mode, and never should change because of a landing toggle).
+          ink: {
+            DEFAULT: "rgb(var(--landing-ink-rgb) / <alpha-value>)",
+            muted: "rgb(var(--landing-ink-muted-rgb) / <alpha-value>)",
+            faint: "rgb(var(--landing-ink-faint-rgb) / <alpha-value>)",
+          },
         },
       },
       fontFamily: {

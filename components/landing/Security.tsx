@@ -39,10 +39,10 @@ export function Security() {
       <Container>
         <div className="max-w-xl">
           <LandingEyebrow>Security</LandingEyebrow>
-          <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-ink sm:text-3xl">
+          <h2 className="mt-4 font-display text-2xl font-medium tracking-tight text-landing-ink sm:text-3xl">
             How your keys and funds are protected
           </h2>
-          <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">
+          <p className="mt-4 text-[15px] leading-relaxed text-landing-ink-muted">
             No paid audit to point to yet — so here's exactly how your API keys, your wallet, and your
             funds are handled, in plain terms.
           </p>
@@ -53,14 +53,14 @@ export function Security() {
             <div key={p.title} className="landing-glass flex gap-4 rounded-xl p-5">
               <p.icon size={18} className="mt-0.5 shrink-0 text-landing-cyan-glow" />
               <div>
-                <h3 className="font-display text-sm text-ink">{p.title}</h3>
-                <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{p.body}</p>
+                <h3 className="font-display text-sm text-landing-ink">{p.title}</h3>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-landing-ink-muted">{p.body}</p>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-landing-line pt-6 text-[13px] text-ink-muted">
+        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-landing-line pt-6 text-[13px] text-landing-ink-muted">
           <p className="max-w-md">
             When you connect an exchange, create an API key with trading permissions only — disable
             withdrawals. ElStand will never ask you for withdrawal access.

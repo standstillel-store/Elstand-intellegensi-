@@ -20,7 +20,7 @@ import { TickerStrip, TickerStripFallback } from "./TickerStrip";
 
 export function Hero() {
   return (
-    <section className="landing-aurora relative overflow-hidden bg-landing-bg pt-16 sm:pt-24">
+    <section className="landing-aurora theme-invariant relative overflow-hidden bg-landing-bg pt-16 sm:pt-24">
       {/* Corner registration marks — small, quiet, "instrument panel" detail. */}
       <div className="pointer-events-none absolute inset-6 hidden sm:block" aria-hidden="true">
         <span className="absolute left-0 top-0 h-3 w-3 border-l border-t border-landing-line" />

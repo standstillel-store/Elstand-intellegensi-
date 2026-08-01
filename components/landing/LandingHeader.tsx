@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Container } from "./shared";
+import { ThemeToggle } from "./ThemeToggle";
 
-// Phase 5 REBOOT — same structure as the previous reskin (scroll-aware
-// blur, fixed nav links), only the accent swapped from violet to gold to
-// match the new primary direction (see VoidCore.tsx / Hero.tsx comments).
-// "Start Free" now sits on a gold button, so its label needs a dark text
-// color for contrast — reuses the landing-bg token rather than a new
-// one-off hex value.
+// Phase 5 REBOOT — accent is gold (see VoidCore.tsx/Hero.tsx comments).
+// Now also uses landing-ink instead of the shared dashboard `ink` token,
+// so header text responds to the new light/dark toggle correctly — ink
+// itself never changed, this file just points at the new landing-only
+// copy of it instead.
 const NAV_LINKS = [
   { href: "#features", label: "Features" },
   { href: "#how-it-works", label: "How it Works" },
@@ -40,21 +40,22 @@ export function LandingHeader() {
       <Container className="flex h-16 items-center justify-between">
         <Link href="/" className="flex shrink-0 items-center gap-2.5">
           <span className="h-2 w-2 rounded-full bg-landing-gold animate-pulseGlow" />
-          <span className="font-display text-[15px] font-medium tracking-tight text-ink">ElStand AI</span>
+          <span className="font-display text-[15px] font-medium tracking-tight text-landing-ink">ElStand AI</span>
         </Link>
 
         <nav className="hidden items-center gap-7 md:flex">
           {NAV_LINKS.map((link) => (
-            <a key={link.href} href={link.href} className="text-sm text-ink-muted transition-colors hover:text-ink">
+            <a key={link.href} href={link.href} className="text-sm text-landing-ink-muted transition-colors hover:text-landing-ink">
               {link.label}
             </a>
           ))}
         </nav>
 
         <div className="flex items-center gap-2.5">
+          <ThemeToggle />
           <Link
             href="/login"
-            className="hidden text-sm font-medium text-ink-muted transition-colors hover:text-ink sm:block"
+            className="hidden text-sm font-medium text-landing-ink-muted transition-colors hover:text-landing-ink sm:block"
           >
             Log in
           </Link>

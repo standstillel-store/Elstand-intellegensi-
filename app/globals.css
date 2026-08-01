@@ -11,6 +11,91 @@
   --signal-rgb: 109 93 246;
   --signal-glow-rgb: 167 139 250;
   --signal-dim-rgb: 68 58 153;
+
+  /* Phase 5 REBOOT — landing-only light/dark toggle. Separate name (--landing-*)
+     and separate attribute (data-landing-theme, set on .landing-root — never on
+     <html>) from the dashboard's own --signal-* / data-theme-mode system above,
+     so the two can never collide. Values below are the dark defaults and match
+     the hex already in tailwind.config.ts's `landing` object exactly — dark
+     mode is pixel-identical to before this change, just re-expressed as
+     variables so a toggle can override it. landing-ink is new (not the shared
+     `ink` token dashboard uses) for the same isolation reason. */
+  --landing-bg-rgb: 9 9 11;
+  --landing-surface-rgb: 17 24 39;
+  --landing-card-rgb: 21 24 35;
+  --landing-line-rgb: 255 255 255;
+  --landing-line-alpha: 0.08;
+  --landing-violet-rgb: 124 106 246;
+  --landing-violet-dim-rgb: 59 52 128;
+  --landing-violet-glow-rgb: 167 155 255;
+  --landing-blue-rgb: 62 123 250;
+  --landing-blue-dim-rgb: 30 59 128;
+  --landing-blue-glow-rgb: 127 168 255;
+  --landing-cyan-rgb: 34 211 238;
+  --landing-cyan-dim-rgb: 14 107 122;
+  --landing-cyan-glow-rgb: 126 235 251;
+  --landing-gold-rgb: 212 175 55;
+  --landing-gold-dim-rgb: 122 98 32;
+  --landing-gold-glow-rgb: 240 213 132;
+  --landing-ink-rgb: 230 232 238;
+  --landing-ink-muted-rgb: 138 143 152;
+  --landing-ink-faint-rgb: 86 90 100;
+}
+
+/* Light mode — only takes effect inside .landing-root (set on <main> in
+   app/page.tsx), and only once ThemeToggle sets data-landing-theme="light"
+   on that same element. Never on <html>, so it cannot survive a client-side
+   navigation to a dashboard route the way a root-level attribute could. */
+.landing-root[data-landing-theme="light"] {
+  color-scheme: light;
+  --landing-bg-rgb: 250 249 246;
+  --landing-surface-rgb: 240 237 230;
+  --landing-card-rgb: 255 255 255;
+  --landing-line-rgb: 20 18 14;
+  --landing-line-alpha: 0.1;
+  --landing-violet-rgb: 88 66 214;
+  --landing-violet-dim-rgb: 210 202 250;
+  --landing-violet-glow-rgb: 58 40 168;
+  --landing-blue-rgb: 28 88 208;
+  --landing-blue-dim-rgb: 198 216 250;
+  --landing-blue-glow-rgb: 14 64 164;
+  --landing-cyan-rgb: 7 128 148;
+  --landing-cyan-dim-rgb: 188 233 238;
+  --landing-cyan-glow-rgb: 4 98 113;
+  --landing-gold-rgb: 150 108 10;
+  --landing-gold-dim-rgb: 235 215 165;
+  --landing-gold-glow-rgb: 118 84 4;
+  --landing-ink-rgb: 22 20 15;
+  --landing-ink-muted-rgb: 99 94 84;
+  --landing-ink-faint-rgb: 152 147 137;
+}
+
+/* Hero (Void Core) and Terminal Preview are meant to stay dark regardless of
+   site theme — the same way a real trading terminal reads dark whether it's
+   day or night outside, not because they're unfinished. Re-declaring the
+   variables here shadows the light-mode override above for anything nested
+   inside, via normal CSS custom-property scoping (no !important needed). */
+.theme-invariant {
+  --landing-bg-rgb: 9 9 11;
+  --landing-surface-rgb: 17 24 39;
+  --landing-card-rgb: 21 24 35;
+  --landing-line-rgb: 255 255 255;
+  --landing-line-alpha: 0.08;
+  --landing-violet-rgb: 124 106 246;
+  --landing-violet-dim-rgb: 59 52 128;
+  --landing-violet-glow-rgb: 167 155 255;
+  --landing-blue-rgb: 62 123 250;
+  --landing-blue-dim-rgb: 30 59 128;
+  --landing-blue-glow-rgb: 127 168 255;
+  --landing-cyan-rgb: 34 211 238;
+  --landing-cyan-dim-rgb: 14 107 122;
+  --landing-cyan-glow-rgb: 126 235 251;
+  --landing-gold-rgb: 212 175 55;
+  --landing-gold-dim-rgb: 122 98 32;
+  --landing-gold-glow-rgb: 240 213 132;
+  --landing-ink-rgb: 230 232 238;
+  --landing-ink-muted-rgb: 138 143 152;
+  --landing-ink-faint-rgb: 86 90 100;
 }
 
 /* Compact Mode (Settings → Appearance) — tightens the rhythm app-wide
@@ -287,10 +372,10 @@ body {
    above — those are opaque by design for dense dashboard data; landing
    sections are atmospheric marketing surfaces and can afford translucency. */
 .landing-glass {
-  background: rgba(21, 24, 35, 0.55); /* landing.card @ 55% */
+  background: rgb(var(--landing-card-rgb) / 0.55);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--landing-line-rgb) / var(--landing-line-alpha));
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.06) inset,
     0 20px 60px -20px rgba(0, 0, 0, 0.6);

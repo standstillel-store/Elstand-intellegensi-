@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { LandingHeader } from "@/components/landing/LandingHeader";
 import { Hero } from "@/components/landing/Hero";
+import { TerminalPreview } from "@/components/landing/TerminalPreview";
 import { LiveMarketPreview } from "@/components/landing/LiveMarketPreview";
 import { About } from "@/components/landing/About";
 import { Features } from "@/components/landing/Features";
@@ -43,10 +44,11 @@ export const metadata: Metadata = {
 
 export default function LandingPage() {
   return (
-    <main className="min-h-screen">
+    <main className="landing-root min-h-screen">
       <JsonLd />
       <LandingHeader />
       <Hero />
+      <TerminalPreview />
       <LiveMarketPreview />
       <About />
       <Features />
