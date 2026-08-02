@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { ArrowRight } from "lucide-react";
 import { Container, LandingEyebrow } from "./shared";
-import { VoidCore } from "./VoidCore";
+import { OrbIntelligence } from "./OrbIntelligence";
 import { TickerStrip, TickerStripFallback } from "./TickerStrip";
 
 // Phase 5 REBOOT — full rewrite, not a reskin. Previous version (center-
@@ -64,7 +64,7 @@ export function Hero() {
         <p className="mt-4 text-xs text-ink-faint">Free to start · No credit card required</p>
 
         <div className="relative mt-8 w-full sm:mt-4 sm:-mb-8 lg:-mb-16">
-          <VoidCore />
+          <OrbIntelligence />
         </div>
       </Container>
 
