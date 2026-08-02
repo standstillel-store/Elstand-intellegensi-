@@ -8,13 +8,14 @@ import type { GlobalSentimentReading } from "@/lib/intelligence/globalSentiment"
 const TONE_TEXT: Record<string, string> = {
   up: "text-up",
   down: "text-down",
-  amber: "text-amber",
-  neutral: "text-ink-muted",
+  amber: "text-gold",
+  neutral: "text-smartmoney-glow",
+  signal: "text-signal-glow",
 };
 
 function Row({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5">
+    <div className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-bg-surface/60">
       <span className="eyebrow text-[10px] tracking-wide text-ink-faint">{label}</span>
       <span className={clsx("mono-num text-sm font-bold", TONE_TEXT[tone])}>{value}</span>
     </div>
@@ -42,18 +43,20 @@ export function AIFinalConclusion({
   ];
 
   return (
-    <div className="glow-card overflow-hidden">
+    <div className="glow-card ambient-glow ambient-glow-ai overflow-hidden">
       <div className="border-b border-line/70 bg-bg-raised px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <TerminalSquare size={13} className="text-signal-glow" />
-          <span className="mono-num text-[11px] font-bold tracking-widest text-ink">ELVOID AI — FINAL CONCLUSION</span>
-          <LiveDot tone="signal" />
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-signal/30 bg-signal/10 text-signal-glow">
+            <TerminalSquare size={13} />
+          </span>
+          <span className="mono-num truncate text-[11px] font-bold tracking-widest text-ink">ELVOID AI — FINAL CONCLUSION</span>
+          <LiveDot tone="signal" className="ml-auto shrink-0" />
         </div>
       </div>
 
       <div className="divide-y divide-line/70">
         <Row label="MARKET MODE" value={c.modeLabel} tone={c.modeTone} />
-        <Row label="CONFIDENCE" value={`${c.confidence}%`} tone="neutral" />
+        <Row label="CONFIDENCE" value={`${c.confidence}%`} tone="signal" />
 
         <div className="grid grid-cols-3 divide-x divide-line/70">
           {assetRows.map((row) => (

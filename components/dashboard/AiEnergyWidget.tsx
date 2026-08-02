@@ -35,8 +35,8 @@ export function AiEnergyWidget() {
   if (balance === null) return null;
 
   return (
-    <span className="flex items-center gap-1.5 rounded-md border border-signal/30 bg-signal/10 px-2.5 py-1 text-xs font-semibold text-signal-glow">
-      <Zap size={12} />
+    <span className="flex items-center gap-1.5 rounded-md border border-signal/30 bg-signal/10 px-2.5 py-1 text-xs font-semibold text-signal-glow shadow-glow-signal">
+      <Zap size={12} className="animate-pulseGlow" />
       AI Energy {balance}
     </span>
   );

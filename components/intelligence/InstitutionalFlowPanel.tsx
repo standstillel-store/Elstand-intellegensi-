@@ -40,11 +40,13 @@ export async function InstitutionalFlowPanel({ smartMoney }: { smartMoney?: Smar
   const hasSmartMoney = Boolean(smartMoney?.length);
 
   return (
-    <div className="glow-card p-4">
+    <div className="glow-card ambient-glow ambient-glow-gold p-4">
       <SectionHeader
         code="INF"
         title="Institutional Flow"
         hint={connected ? `Net ETF ${etfNetTotalUsd >= 0 ? "+" : ""}${formatUsd(etfNetTotalUsd)}` : "Waiting for API"}
+        icon={<Landmark size={13} />}
+        accent="gold"
       />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">

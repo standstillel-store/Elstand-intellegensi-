@@ -7,6 +7,7 @@ const TONE_BG: Record<string, string> = {
   amber: "bg-amber",
   rugpull: "bg-rugpull",
   smartmoney: "bg-smartmoney",
+  gold: "bg-gold",
 };
 
 export function LiveDot({
@@ -14,7 +15,7 @@ export function LiveDot({
   label,
   className,
 }: {
-  tone?: "signal" | "up" | "down" | "amber" | "rugpull" | "smartmoney";
+  tone?: "signal" | "up" | "down" | "amber" | "rugpull" | "smartmoney" | "gold";
   label?: string;
   className?: string;
 }) {

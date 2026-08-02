@@ -4,8 +4,8 @@ import type { SentimentStatus } from "@/lib/intelligence/globalSentiment";
 const CONFIG: Record<SentimentStatus, { label: string; dot: string; classes: string }> = {
   "risk-on": { label: "Risk On", dot: "bg-up", classes: "border-up/30 bg-up/10 text-up" },
   "risk-off": { label: "Risk Off", dot: "bg-down", classes: "border-down/30 bg-down/10 text-down" },
-  neutral: { label: "Neutral", dot: "bg-ink-faint", classes: "border-line bg-bg-surface text-ink-muted" },
-  transition: { label: "Transition", dot: "bg-amber", classes: "border-amber/30 bg-amber/10 text-amber" },
+  neutral: { label: "Neutral", dot: "bg-smartmoney", classes: "border-smartmoney/30 bg-smartmoney/10 text-smartmoney-glow" },
+  transition: { label: "Transition", dot: "bg-gold", classes: "border-gold/30 bg-gold/10 text-gold" },
 };
 
 export function MarketStatusBadge({ status, size = "md" }: { status: SentimentStatus; size?: "sm" | "md" }) {

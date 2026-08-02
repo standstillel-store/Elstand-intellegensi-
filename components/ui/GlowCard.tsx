@@ -9,6 +9,9 @@ const TONE_HOVER_SHADOW: Record<string, string> = {
   down: "hover:shadow-glow-down hover:border-down/40",
   rugpull: "hover:shadow-glow-rugpull hover:border-rugpull/40",
   smartmoney: "hover:shadow-glow-smartmoney hover:border-smartmoney/40",
+  // Dashboard primary/premium accent — opt-in only, existing callers that
+  // don't pass tone="gold" keep their current default exactly as before.
+  gold: "hover:shadow-glow-gold hover:border-gold/40",
 };
 
 export function GlowCard({
@@ -20,7 +23,7 @@ export function GlowCard({
   delay = 0,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "up" | "down" | "rugpull" | "smartmoney";
+  tone?: "neutral" | "up" | "down" | "rugpull" | "smartmoney" | "gold";
   className?: string;
   onClick?: () => void;
   as?: "div" | "button";

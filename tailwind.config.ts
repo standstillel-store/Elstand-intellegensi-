@@ -28,6 +28,18 @@ const config: Config = {
           DEFAULT: "#F5B942",
           dim: "#8A6118",
         },
+        // Dashboard "Terminal Visual Overhaul" — new primary/premium accent.
+        // Deliberately its own static token (not CSS-variable-backed like
+        // `signal`): the Settings accent picker stays scoped to `signal`
+        // (now AI-specific, see below), so gold is never swapped by it.
+        // Same hex as the landing page's already-isolated `landing.gold`
+        // (#D4AF37) — same brand color, kept as a separate token so
+        // dashboard and landing can still never bleed into each other.
+        gold: {
+          DEFAULT: "#D4AF37",
+          dim: "#7A6220",
+          glow: "#F0D584",
+        },
         up: "#00E676",
         down: "#FF5252",
         rugpull: {
@@ -104,6 +116,7 @@ const config: Config = {
         "glow-rugpull": "0 0 0 1px rgba(168,85,247,0.4), 0 0 20px rgba(168,85,247,0.22)",
         "glow-smartmoney": "0 0 0 1px rgba(59,130,246,0.4), 0 0 20px rgba(59,130,246,0.22)",
         "glow-amber": "0 0 0 1px rgba(245,185,66,0.35), 0 0 20px rgba(245,185,66,0.18)",
+        "glow-gold": "0 0 0 1px rgba(212,175,55,0.4), 0 0 24px rgba(240,213,132,0.22)",
         "card": "0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px -12px rgba(0,0,0,0.6)",
         "glow-landing-violet": "0 0 0 1px rgba(124,106,246,0.4), 0 0 24px rgba(167,155,255,0.22)",
         "glow-landing-cyan": "0 0 0 1px rgba(34,211,238,0.4), 0 0 22px rgba(126,235,251,0.22)",
@@ -179,6 +192,26 @@ const config: Config = {
           "0%": { transform: "rotate(0deg)" },
           "100%": { transform: "rotate(-360deg)" },
         },
+        // Terminal Visual Overhaul — dashboard-only additions below.
+        // Slow opacity+scale breathing for the ambient glow sitting behind
+        // "important" cards (Intelligence Map, AI Snapshot). Separate from
+        // `coreBreathe` (Phase 5, scale-only, faster) so the two can be
+        // tuned independently even though they look similar.
+        ambientBreathe: {
+          "0%, 100%": { opacity: "0.55", transform: "scale(1)" },
+          "50%": { opacity: "0.85", transform: "scale(1.04)" },
+        },
+        // Gentle drift for the background particle field — small, slow,
+        // never distracting (see "subtle animations only" in the brief).
+        particleFloat: {
+          "0%, 100%": { transform: "translate(0, 0)", opacity: "var(--particle-opacity, 0.5)" },
+          "50%": { transform: "translate(var(--particle-drift-x, 6px), var(--particle-drift-y, -10px))", opacity: "var(--particle-opacity-peak, 0.9)" },
+        },
+        // Very slow pan for .bg-grid-animated — reads as "alive", not scrolling.
+        gridPan: {
+          "0%": { backgroundPosition: "0px 0px" },
+          "100%": { backgroundPosition: "34px 34px" },
+        },
       },
       animation: {
         ticker: "ticker 38s linear infinite",
@@ -197,6 +230,9 @@ const config: Config = {
         coreBreathe: "coreBreathe 6s ease-in-out infinite",
         orbitSlow: "orbitSlow 90s linear infinite",
         orbitSlowReverse: "orbitSlowReverse 90s linear infinite",
+        ambientBreathe: "ambientBreathe 5s ease-in-out infinite",
+        particleFloat: "particleFloat 9s ease-in-out infinite",
+        gridPan: "gridPan 22s linear infinite",
       },
     },
   },

@@ -9,14 +9,19 @@ export function MarketPulsePanel({ inputs }: { inputs: MarketPulseInputs }) {
   const connectedCount = metrics.filter((m) => m.connected).length;
 
   return (
-    <div className="glow-card p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <Activity size={14} className="text-signal-glow" />
-        <SectionHeader code="PULSE" title="Market Pulse" hint={`${connectedCount}/${metrics.length} sinyal terhubung`} />
-        <LiveDot tone="signal" />
+    <div className="glow-card ambient-glow ambient-glow-gold p-4">
+      <div className="flex items-center gap-2">
+        <SectionHeader
+          code="PULSE"
+          title="Market Pulse"
+          hint={`${connectedCount}/${metrics.length} sinyal terhubung`}
+          icon={<Activity size={13} />}
+          accent="gold"
+        />
+        <LiveDot tone="gold" />
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-9">
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-5 lg:grid-cols-9">
         {metrics.map((m) => (
           <PulseGauge key={m.key} metric={m} />
         ))}

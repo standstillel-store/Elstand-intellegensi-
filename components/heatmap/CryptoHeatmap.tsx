@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import clsx from "clsx";
+import { Flame } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { LiveDot } from "@/components/ui/LiveDot";
 import { useTokenAnalyzer } from "@/components/token-analyzer/TokenAnalyzerContext";
@@ -97,11 +98,11 @@ export function CryptoHeatmap({
   }, [markets, rugpullRisks, smartMoneyAccumulation, count]);
 
   return (
-    <div className="glow-card p-4">
+    <div className="glow-card ambient-glow ambient-glow-gold p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <SectionHeader code="HMP" title="Crypto Heatmap" hint={`${cells.length} aset`} />
-          <LiveDot tone="signal" />
+          <SectionHeader code="HMP" title="Crypto Heatmap" hint={`${cells.length} aset`} icon={<Flame size={13} />} accent="gold" />
+          <LiveDot tone="gold" />
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden items-center gap-3 sm:flex">
@@ -122,7 +123,7 @@ export function CryptoHeatmap({
                 onClick={() => setCount(n)}
                 className={clsx(
                   "px-2.5 py-1 transition-colors",
-                  count === n ? "bg-signal/20 text-signal-glow" : "text-ink-faint hover:text-ink"
+                  count === n ? "bg-gold/20 text-gold" : "text-ink-faint hover:text-ink"
                 )}
               >
                 Top {n}

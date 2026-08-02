@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import type { ReactNode } from "react";
 
-export type BadgeTone = "up" | "down" | "signal" | "amber" | "rugpull" | "smartmoney" | "neutral";
+export type BadgeTone = "up" | "down" | "signal" | "amber" | "rugpull" | "smartmoney" | "neutral" | "gold" | "blue";
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
   up: "bg-up/15 text-up border-up/30",
@@ -11,6 +11,11 @@ const TONE_CLASSES: Record<BadgeTone, string> = {
   rugpull: "bg-rugpull/15 text-rugpull-glow border-rugpull/30",
   smartmoney: "bg-smartmoney/15 text-smartmoney-glow border-smartmoney/30",
   neutral: "bg-ink-faint/10 text-ink-muted border-line",
+  // Dashboard "Transition"/primary accent (#D4AF37) — opt-in, new callers only.
+  gold: "bg-gold/15 text-gold border-gold/30",
+  // Alias onto the existing smartmoney blue — explicit "Neutral" semantic
+  // for new dashboard call sites, same color as smartmoney under the hood.
+  blue: "bg-smartmoney/15 text-smartmoney-glow border-smartmoney/30",
 };
 
 export function Badge({

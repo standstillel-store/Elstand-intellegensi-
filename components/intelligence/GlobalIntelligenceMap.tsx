@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import { Maximize2, Minus, Plus } from "lucide-react";
+import { Maximize2, Minus, Plus, Network } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { LiveDot } from "@/components/ui/LiveDot";
 import { MarketStatusBadge } from "./MarketStatusBadge";
@@ -9,36 +9,48 @@ import { NodeDrawer } from "./ui/NodeDrawer";
 import { useZoomPan } from "./ui/useZoomPan";
 import { buildMarketMapNodes, MARKET_MAP_EDGES, type MarketMapLiveInputs, type MarketMapNodeId } from "@/lib/intelligence/marketMap";
 import type { DisplayTone } from "@/lib/intelligence/shared";
+import type { SentimentStatus } from "@/lib/intelligence/globalSentiment";
 
+// Neutral now reads as the dashboard's "Neutral = Blue" accent instead of
+// purple — purple is reserved for the AI Core orb below, so it always
+// means "this is the AI speaking" and nothing else. Transition (amber
+// data, gold display) follows "Transition = Gold". up/down are re-pinned
+// to the exact brand hex instead of a slightly-off placeholder.
 const TONE_BORDER: Record<DisplayTone, string> = {
   up: "border-up/30",
   down: "border-down/30",
-  amber: "border-amber/30",
+  amber: "border-gold/30",
   neutral: "border-line",
 };
 const TONE_BORDER_ACTIVE: Record<DisplayTone, string> = {
   up: "border-up shadow-glow-up",
   down: "border-down shadow-glow-down",
-  amber: "border-amber",
-  neutral: "border-signal shadow-glow-signal",
+  amber: "border-gold shadow-glow-gold",
+  neutral: "border-smartmoney shadow-glow-smartmoney",
 };
-const TONE_DOT: Record<DisplayTone, "up" | "down" | "amber" | "signal"> = {
+const TONE_DOT: Record<DisplayTone, "up" | "down" | "gold" | "smartmoney"> = {
   up: "up",
   down: "down",
-  amber: "amber",
-  neutral: "signal",
+  amber: "gold",
+  neutral: "smartmoney",
 };
 const TONE_TEXT: Record<DisplayTone, string> = {
   up: "text-up",
   down: "text-down",
-  amber: "text-amber",
-  neutral: "text-ink",
+  amber: "text-gold",
+  neutral: "text-smartmoney-glow",
 };
 const TONE_STROKE: Record<DisplayTone, string> = {
-  up: "#22C55E",
-  down: "#EF4444",
-  amber: "#FFB020",
-  neutral: "#6E5BFF",
+  up: "#00E676",
+  down: "#FF5252",
+  amber: "#D4AF37",
+  neutral: "#3B82F6",
+};
+const STATUS_RING: Record<SentimentStatus, string> = {
+  "risk-on": "border-up/60",
+  "risk-off": "border-down/60",
+  neutral: "border-smartmoney/60",
+  transition: "border-gold/60",
 };
 
 const MAP_FALLBACK_HEIGHT = 420;
@@ -145,6 +157,9 @@ export function GlobalIntelligenceMap({ live }: { live: MarketMapLiveInputs }) {
     if (zoomPan.shouldSuppressClick()) return; // a real drag/pinch just ended — don't also open the drawer
     setSelectedId(id);
     setDrawerOpen(true);
+    // Pin the connected-path highlight on click too, not just hover — the
+    // only way touch devices (no real :hover) ever see it.
+    setActiveId(id);
   }
 
   function renderNode(id: MarketMapNodeId, opts?: { wide?: boolean }) {
@@ -158,11 +173,13 @@ export function GlobalIntelligenceMap({ live }: { live: MarketMapLiveInputs }) {
         type="button"
         onClick={() => openNode(node.id)}
         onMouseEnter={() => setActiveId(node.id)}
-        onMouseLeave={() => setActiveId((cur) => (cur === node.id ? null : cur))}
+        onMouseLeave={() =>
+          setActiveId((cur) => (cur === node.id && !(drawerOpen && selectedId === node.id) ? null : cur))
+        }
         onFocus={() => setActiveId(node.id)}
         className={clsx(
           "group relative z-10 rounded-xl border bg-bg-surface p-3 text-left shadow-card transition-all duration-200",
-          "hover:-translate-y-0.5 hover:border-signal/40",
+          "hover:-translate-y-0.5 hover:scale-[1.03] hover:border-gold/40",
           isActive ? TONE_BORDER_ACTIVE[node.tone] : TONE_BORDER[node.tone],
           !node.connected && "border-dashed",
           opts?.wide ? "w-full sm:mx-auto sm:max-w-xs" : "w-full"
@@ -188,29 +205,58 @@ export function GlobalIntelligenceMap({ live }: { live: MarketMapLiveInputs }) {
   const topReasons = live.sentiment.reasons.slice(0, 3);
 
   return (
-    <div className="glow-card p-4">
-      <SectionHeader code="MAP" title="Global Market Intelligence Map" hint="Klik node · geser/cubit = zoom" />
+    <div className="glow-card ambient-glow ambient-glow-gold p-4">
+      <SectionHeader
+        code="MAP"
+        title="Global Market Intelligence Map"
+        hint="Klik node · geser/cubit = zoom"
+        icon={<Network size={13} />}
+        accent="gold"
+      />
 
-      {/* Global Sentiment summary — reads every node, always visible without a click */}
-      <div className="mb-4 rounded-xl border border-line bg-bg-raised p-3.5">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <MarketStatusBadge status={live.sentiment.status} />
-          <span className="text-xs text-ink-faint">Confidence</span>
-          <span className="mono-num text-sm font-semibold text-ink">{live.sentiment.confidence}%</span>
-          <span className="text-xs text-ink-faint">· {live.sentiment.signalsAvailable} sinyal terbaca</span>
+      {/* Global Sentiment summary — reads every node, always visible without a click.
+         Same data as before (status/confidence/signal count/reasons), now led by a
+         bigger "AI Core" orb instead of a plain bar — the map's previous biggest
+         complaint was feeling empty, and this is its visual center of gravity. */}
+      <div className="ambient-glow ambient-glow-ai relative mb-4 overflow-hidden rounded-xl border border-line bg-bg-raised p-4">
+        <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-5">
+          <div className="relative flex h-[150px] w-[150px] shrink-0 items-center justify-center">
+            <span
+              className="absolute h-[92px] w-[92px] animate-ping rounded-full border border-signal/50"
+              style={{ animationDuration: "3.2s" }}
+            />
+            <span className="absolute h-[142px] w-[142px] animate-orbitSlow rounded-full border border-dashed border-signal/20" />
+            <span className="absolute h-[118px] w-[118px] animate-orbitSlowReverse rounded-full border border-signal/25" />
+            <span className={clsx("absolute h-[104px] w-[104px] rounded-full border-2 transition-colors duration-500", STATUS_RING[live.sentiment.status])} />
+            <div className="ai-orb-core relative flex h-[92px] w-[92px] animate-coreBreathe items-center justify-center rounded-full shadow-glow-signal">
+              <div className="text-center leading-none">
+                <p className="mono-num text-2xl font-bold text-ink">{live.sentiment.confidence}%</p>
+                <p className="mt-1 text-[8px] uppercase tracking-wider text-ink/70">AI Read</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="min-w-0 flex-1 text-center sm:text-left">
+            <div className="flex flex-wrap items-center justify-center gap-2.5 sm:justify-start">
+              <MarketStatusBadge status={live.sentiment.status} />
+              <span className="text-xs text-ink-faint">Confidence</span>
+              <span className="mono-num text-sm font-semibold text-ink">{live.sentiment.confidence}%</span>
+              <span className="text-xs text-ink-faint">· {live.sentiment.signalsAvailable} sinyal terbaca</span>
+            </div>
+            {topReasons.length > 0 ? (
+              <ul className="mt-2.5 space-y-1.5 text-left">
+                {topReasons.map((r) => (
+                  <li key={r.text} className={clsx("flex items-start gap-1.5 text-[12px]", r.direction === 1 ? "text-up" : "text-down")}>
+                    <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-current" />
+                    {r.text}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2.5 text-[12px] text-ink-faint">{live.sentiment.note ?? "Belum ada sinyal terbaca."}</p>
+            )}
+          </div>
         </div>
-        {topReasons.length > 0 ? (
-          <ul className="mt-2 space-y-1">
-            {topReasons.map((r) => (
-              <li key={r.text} className={clsx("flex items-start gap-1.5 text-[12px]", r.direction === 1 ? "text-up" : "text-down")}>
-                <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-current" />
-                {r.text}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-2 text-[12px] text-ink-faint">{live.sentiment.note ?? "Belum ada sinyal terbaca."}</p>
-        )}
       </div>
 
       {/* Zoomable / pannable canvas — Ctrl/Cmd+scroll or pinch to zoom, drag to pan,
@@ -221,7 +267,7 @@ export function GlobalIntelligenceMap({ live }: { live: MarketMapLiveInputs }) {
         style={{ height: mapHeight ?? MAP_FALLBACK_HEIGHT, ...zoomPan.viewportStyle }}
         className="map-canvas-grid relative overflow-hidden rounded-xl border border-line"
       >
-        <div ref={containerRef} style={zoomPan.contentStyle} className="relative space-y-3 px-2.5 py-3.5">
+        <div ref={containerRef} style={zoomPan.contentStyle} className="relative space-y-2.5 px-2.5 py-3.5">
           <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
             {paths.map((p) => {
               const pathId = `edge-${p.key}`;
@@ -261,13 +307,13 @@ export function GlobalIntelligenceMap({ live }: { live: MarketMapLiveInputs }) {
 
           <div className="flex justify-center">{renderNode("macro", { wide: true })}</div>
           <div className="flex justify-center">{renderNode("sentiment", { wide: true })}</div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             {renderNode("usd")}
             {renderNode("gold")}
             {renderNode("stocks")}
           </div>
           <div className="flex justify-center">{renderNode("crypto", { wide: true })}</div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             {renderNode("btc")}
             {renderNode("eth")}
             {renderNode("altcoin")}

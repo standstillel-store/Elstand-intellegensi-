@@ -26,7 +26,7 @@ function Card({
 }) {
   const subTone = { up: "text-up", down: "text-down", amber: "text-amber", neutral: "text-ink-faint" }[tone];
   return (
-    <GlowCard delay={delay} className="p-3.5">
+    <GlowCard tone="gold" delay={delay} className="p-3.5">
       <div className="mb-1.5 flex items-center gap-1.5 text-ink-faint">
         {icon}
         <span className="eyebrow text-[10px] uppercase tracking-wider">{label}</span>
@@ -90,7 +90,7 @@ export function TopMarketOverview({
         {fng ? <AnimatedNumber value={fng.value} format={(n) => Math.round(n).toString()} /> : "—"}
       </Card>
 
-      <GlowCard delay={0.12} className="p-3.5">
+      <GlowCard tone="gold" delay={0.12} className="p-3.5">
         <div className="mb-1.5 flex items-center gap-1.5 text-ink-faint">
           <Activity size={13} />
           <span className="eyebrow text-[10px] uppercase tracking-wider">Market Status</span>

@@ -187,7 +187,26 @@ body {
 }
 .glow-card:hover {
   @apply border-signal/40;
+  /* Was border-only — adding the actual glow the class is named for, plus
+     a bit more lift shadow. Tone stays purple/signal (unchanged default),
+     so this is a pure elevation upgrade everywhere .glow-card is used. */
+  box-shadow:
+    0 0 0 1px rgb(var(--signal-rgb) / 0.28),
+    0 0 22px rgb(var(--signal-glow-rgb) / 0.16),
+    0 10px 28px -14px rgba(0, 0, 0, 0.65);
   transform: translateY(-1px);
+}
+
+/* Opt-in modifier — add alongside .glow-card to swap its hover from the
+   default purple/AI tone to the dashboard's gold primary accent. Kept
+   separate (not a change to .glow-card itself) so every other page that
+   already relies on the purple hover keeps behaving exactly as before. */
+.glow-card-gold:hover {
+  border-color: rgba(212, 175, 55, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(212, 175, 55, 0.4),
+    0 0 22px rgba(240, 213, 132, 0.2),
+    0 10px 28px -14px rgba(0, 0, 0, 0.65);
 }
 
 /* Faint dot-grid backdrop for zoom/pan canvases (Global Intelligence Map,
@@ -363,6 +382,109 @@ body {
   inset: 0;
   background: linear-gradient(180deg, transparent, rgb(var(--signal-rgb) / 0.12), transparent);
   animation: scanline 2.4s linear infinite;
+}
+
+/* ---- Terminal Visual Overhaul — dashboard-only primitives ----------
+   Everything below is additive and only used by dashboard components
+   (app/dashboard/page.tsx and components/intelligence, /dashboard,
+   /right-rail). Nothing here is reachable from the landing page or any
+   other route, so it can't drift the two designs together by accident. */
+
+/* Soft ambient glow sitting behind an "important" card — a blurred,
+   low-opacity wash that breathes slowly (ambientBreathe, tailwind.config.ts).
+   Sits at negative z-index behind the card's own background so it never
+   intercepts clicks, and `isolation: isolate` keeps that negative z-index
+   from leaking through to page-level stacking. Pair with exactly one
+   `.ambient-glow-*` tone class — `.ambient-glow` alone renders nothing. */
+.ambient-glow {
+  position: relative;
+  isolation: isolate;
+}
+.ambient-glow::before {
+  content: "";
+  position: absolute;
+  inset: -18px;
+  z-index: -1;
+  border-radius: inherit;
+  filter: blur(32px);
+  pointer-events: none;
+  animation: ambientBreathe 5s ease-in-out infinite;
+}
+.ambient-glow-gold::before {
+  background: radial-gradient(ellipse at 50% 35%, rgba(212, 175, 55, 0.3), transparent 72%);
+}
+.ambient-glow-ai::before {
+  background: radial-gradient(ellipse at 50% 35%, rgb(var(--signal-glow-rgb) / 0.32), transparent 72%);
+}
+.ambient-glow-up::before {
+  background: radial-gradient(ellipse at 50% 35%, rgba(0, 230, 118, 0.22), transparent 72%);
+}
+.ambient-glow-down::before {
+  background: radial-gradient(ellipse at 50% 35%, rgba(255, 82, 82, 0.22), transparent 72%);
+}
+
+/* Animated twin of the existing static .bg-grid texture (unchanged, still
+   used as-is elsewhere) — same look, slow diagonal drift so a large mostly
+   empty canvas (map background, page backdrop) reads as alive rather than
+   a flat printed grid. */
+.bg-grid-animated {
+  background-image:
+    linear-gradient(rgba(230, 232, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(230, 232, 238, 0.035) 1px, transparent 1px);
+  background-size: 34px 34px;
+  animation: gridPan 22s linear infinite;
+}
+
+/* Ambient background particles (components/dashboard/AmbientBackground.tsx).
+   Position/size/delay come in per-instance as inline custom properties so
+   the component can stay a plain static array — no Math.random() at
+   render, which would mismatch between server and client. */
+.bg-particle {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: particleFloat var(--particle-duration, 9s) ease-in-out infinite;
+  animation-delay: var(--particle-delay, 0s);
+}
+
+/* Market Pulse gauge needle — a thin line pivoting from the gauge center,
+   rotated per-reading via inline `transform: rotate()`. The transition
+   lives on the class (not inline) so every gauge animates identically. */
+.gauge-needle {
+  transform-origin: 50% 50%;
+  transition: transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+/* Soft pulsing halo for "this is live/connected" — reuses the existing
+   pulseGlow keyframe (same one .live-dot already uses) so the two motions
+   read as the same visual language. Reserved for connected/active state
+   only — never applied to a waiting/disconnected element. */
+.pulse-ring {
+  position: relative;
+}
+.pulse-ring::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 1px solid currentColor;
+  opacity: 0.3;
+  animation: pulseGlow 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* AI Core orb (Global Intelligence Map) — purple/AI-dominant sphere fill.
+   Rotation/breathing reuse Phase 5's coreBreathe/orbitSlow/orbitSlowReverse
+   (tailwind.config.ts), the same primitives already proven on the landing
+   hero rather than a new mechanism. */
+.ai-orb-core {
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgb(var(--signal-glow-rgb) / 0.95),
+    rgb(var(--signal-rgb) / 0.65) 55%,
+    rgb(var(--signal-dim-rgb) / 0.55) 100%
+  );
 }
 
 /* ---- Phase 5 — Landing page tokens (isolated from dashboard) ------- */

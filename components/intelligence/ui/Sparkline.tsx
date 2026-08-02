@@ -1,8 +1,8 @@
 const TONE_STROKE: Record<string, string> = {
-  up: "#22C55E",
-  down: "#EF4444",
-  amber: "#FFB020",
-  neutral: "#6E5BFF",
+  up: "#00E676",
+  down: "#FF5252",
+  amber: "#D4AF37",
+  neutral: "#3B82F6",
 };
 
 export function Sparkline({

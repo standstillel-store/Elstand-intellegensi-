@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Footer } from "@/components/Footer";
 import { NavDrawer } from "@/components/mobile/NavDrawer";
 import { AIChatDock } from "@/components/AIChatDock";
+import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
 import { AiEnergyWidget } from "@/components/dashboard/AiEnergyWidget";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
 import { TopMarketOverview } from "@/components/intelligence/TopMarketOverview";
@@ -162,13 +163,14 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen lg:pt-14">
+      <AmbientBackground />
       <TopNav />
       <Sidebar />
 
       {/* Mobile header — desktop uses TopNav + Sidebar above instead */}
       <div className="sticky top-0 z-20 flex items-center gap-2.5 border-b border-line bg-bg/95 px-4 py-3 backdrop-blur lg:hidden">
         <NavDrawer />
-        <span className="h-2 w-2 rounded-full bg-signal animate-pulseGlow" />
+        <span className="h-2 w-2 rounded-full bg-gold animate-pulseGlow" />
         <div className="flex items-baseline gap-1.5">
           <span className="text-sm font-bold tracking-tight">ELSTAND</span>
           <span className="text-[10px] font-semibold tracking-wide text-ink-faint">INTEL</span>
@@ -176,7 +178,7 @@ export default async function Home() {
       </div>
 
       <div className="lg:pl-60">
-        <div className="mx-auto max-w-[1680px] space-y-5 px-4 py-5 lg:px-5">
+        <div className="relative mx-auto max-w-[1680px] space-y-4 px-4 py-5 lg:space-y-5 lg:px-5">
           <div className="flex justify-end">
             <AiEnergyWidget />
           </div>
@@ -297,9 +299,9 @@ export default async function Home() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="glow-card flex items-center gap-2 px-3 py-2.5 text-xs text-ink-muted hover:text-ink"
+                  className="glow-card glow-card-gold flex items-center gap-2 px-3 py-2.5 text-xs text-ink-muted hover:text-ink"
                 >
-                  <item.icon size={14} className="shrink-0 text-signal-glow" />
+                  <item.icon size={14} className="shrink-0 text-gold" />
                   {item.label}
                 </Link>
               ))}
