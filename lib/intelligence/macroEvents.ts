@@ -16,7 +16,7 @@ import type { EconomicEvent } from "@/lib/types";
 // doesn't fabricate a bullish/bearish call it can't actually back up.
 // ---------------------------------------------------------------------------
 
-export type MacroCategory = "FOMC" | "CPI" | "PPI" | "NFP" | "PMI" | "Interest Rate" | "Other";
+export type MacroCategory = "FOMC" | "CPI" | "PPI" | "NFP" | "PMI" | "Interest Rate" | "GDP" | "Other";
 
 export interface MacroEventView {
   title: string;
@@ -36,6 +36,7 @@ const KEYWORD_MAP: Array<[RegExp, MacroCategory]> = [
   [/\bnfp\b|non[\s-]?farm payrolls?/i, "NFP"],
   [/\bpmi\b|purchasing managers/i, "PMI"],
   [/interest rate|rate decision|policy rate/i, "Interest Rate"],
+  [/\bgdp\b|gross domestic product/i, "GDP"],
 ];
 
 function categorize(title: string): MacroCategory {

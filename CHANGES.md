@@ -1,5 +1,42 @@
 # ElStand AI — Market Intelligence Dashboard: apa yang berubah
 
+## V4.1 — Phase: Global Market Intelligence Map → AI Relationship Graph
+
+Brief-nya kali ini beda dari V4.0: bukan restyle doang, tapi minta Map-nya jadi "fully interactive AI relationship graph" 3 tingkat (Global Market → 6 kategori → aset masing-masing → 6 koin di bawah Altcoin), dengan left panel, top bar, dan relationship timeline. Karena brief-nya secara eksplisit minta struktur data baru (bukan cuma tampilan), ronde ini **beda dari V4.0** — `lib/intelligence/marketMap.ts` dan beberapa source file memang disentuh, tapi dengan aturan yang sama seperti semua fase sebelumnya: **nggak ada angka dikarang.**
+
+**Keputusan paling penting: real data vs "belum tersambung" — bukan ditutup-tutupi**
+
+Dari ~40 node yang diminta, hampir semuanya ternyata BISA dapet data asli, dengan cara nyambungin ke sumber yang udah ADA di app ini, cuma belum pernah ditarik ke level segranular ini:
+- **Stocks (NASDAQ/SP500/NVDA/AAPL/TSLA)** — `lib/intelligence/sources/stocks.ts` sebelumnya cuma nge-track QQQ/SPY/DIA lewat Finnhub `/quote`; tinggal nambah 3 ticker lagi ke array `TRACKED`, endpoint & mekanismenya persis sama.
+- **Forex (EUR/GBP/JPY/CNY)** — file baru `lib/intelligence/sources/forex.ts`, murni wrapper tipis di atas `fetchTwelveDataSeries()` yang udah ada (dipakai USD/DXY & Gold sejak V2), cuma ganti simbol pair-nya.
+- **Macro (Interest Rate/CPI/PPI/NFP/GDP)** — `lib/intelligence/macroEvents.ts` udah punya taksonomi `MacroCategory` (FOMC/CPI/PPI/NFP/PMI/Interest Rate); tambah "GDP" sebagai kategori baru (regex detection doang, gak ubah logic dampak/forecast), terus tiap node macro tinggal filter array yang sama by category.
+- **News (Reuters/Bloomberg/CoinDesk)** — dikelompokkan dari `newsItems` yang udah ada (NewsAPI/GNews), match by nama source. Real kalau outlet itu lagi ada beritanya di feed, kosong (jujur, bukan dipaksa nol) kalau nggak.
+- **Sentiment (Fear&Greed/Funding/OI/Whale/ETF Flow)** — 5-5nya reuse data yang udah dihitung buat Market Pulse & Whale/Institutional Flow panel, cuma sekarang JUGA muncul sebagai node sendiri di peta.
+- **Stablecoin** — ternyata `getStablecoinSupply()` (DefiLlama, no API key) udah dipanggil dari `getDashboardSnapshot()` buat kebutuhan lain (`snap.stablecoin`); tinggal diteruskan ke map, 0 fetch baru.
+- **Altcoin Level 3 (SOL/BNB/XRP/LINK/SUI/RENDER)** — lookup langsung dari `scannerRows` (Altcoin Scanner) yang udah dihitung di halaman yang sama; top 150 market cap udah pasti mencakup ke-6 coin ini.
+
+Yang **beneran belum ada sumbernya** dan sengaja dibiarkan tampil sebagai node yang jujur nunggu API (bukan dihapus, bukan dikarang): **DEX volume** (belum ada integrasi DefiLlama DEX di app ini), **Twitter** dan **Telegram** (app ini belum punya integrasi media sosial sama sekali). Ketiganya tetap muncul sebagai node yang bisa diklik di peta — taksonomi yang diminta tetap lengkap — tapi selalunampilin "Menunggu API" persis kayak node lain yang belum tersambung, konsisten sama aturan anti-data-dummy yang udah dipegang dari V1.
+
+**Satu penyesuaian dari brief:** "Gold" (XAU, komoditas) nggak ada di 6 kategori Level 1 yang diminta (Crypto/Forex/Stocks/Macro/News/Sentiment) — daripada dihapus (padahal datanya real & udah jalan dari V2), dipindah jadi child ke-6 di bawah Forex, ditandai jelas sebagai komoditas bukan mata uang.
+
+**Cascade effect (contoh CPI→USD→BTC di brief) — dibuat reaktif ke data asli, bukan di-script**
+
+Brief kasih contoh urutan "CPI naik → USD hijau → garis ke BTC merah → AI Verdict jadi Risk Off 82%". Itu nggak di-hardcode sebagai animasi yang muter apapun kondisi pasarnya — soalnya itu sama aja bikin AI pura-pura mikir. Sebagai gantinya: warna & ketebalan tiap garis dihitung dari tone KEDUA node yang disambungnya SAAT INI (dua-duanya connected & searah = terang; salah satu belum tersambung = redup; tone-nya beda arah = netral), dan partikel cuma jalan di garis yang dua ujungnya beneran live. Kalau kondisi pasar beneran membentuk pola kayak di contoh itu, peta bakal nunjukkinnya — tapi karena itu beneran kejadian, bukan diputer terus-terusan.
+
+**UI baru:**
+- **AI Core orb** di tengah (node "Global Market") — lebih besar dari V4.0, breathing glow + 2 ring rotasi + sonar ping, warna ring luar ikut status sentiment live (hijau/merah/biru/gold).
+- **Hub-and-spoke layout**: News di atas, Forex/Global/Stocks di tengah, Macro/Sentiment di bawahnya, Crypto di baris paling bawah — mengikuti sketsa ASCII di brief, dibangun pakai grid col-start/row-start (bukan grid-template-areas arbitrary, lebih aman lintas breakpoint).
+- **Expand/collapse**: tiap node kategori (dan Altcoin di dalam Crypto) punya chevron buat buka anak-anaknya; klik chevron nggak ikut milih node itu (event `stopPropagation`, tombol terpisah dari card). Klik chip "Connected Markets"/"Related Assets" di panel otomatis buka cabang yang relevan di peta.
+- **Left panel** (`components/intelligence/ui/NodeDrawer.tsx`, ditulis ulang) — permanent sidebar di desktop (≥1024px), bottom sheet di mobile (perilaku lama dipertahankan). Isi: Title, Current Trend, Confidence (kalau node itu emang punya angka confidence asli — AI Score, sentiment confidence; nggak dipaksain buat node yang nggak punya), AI Reasoning, Latest Event, Connected Markets (dari edge graph), Related Assets (sibling di parent yang sama).
+- **Top bar**: AI Verdict, Risk Mode, Confidence %, Market Phase — 4 angka berbeda (2 dari `GlobalSentimentReading`, 2 dari `FinalConclusion` yang emang komputasi terpisah), bukan angka yang sama ditempel 4x.
+- **Relationship Timeline** (bawah): AI Reasoning / Macro Event / Whale Movement / ETF Flow — 4 bacaan "terkini" dari data yang udah connected, bukan histori beneran (app ini belum nyimpen snapshot historis di mana pun) — jujur ditampilin sebagai bacaan terbaru, bukan diklaim sebagai "timeline" 24 jam.
+- Tema: gold + purple tetap, tambah **cyan** (`tailwind.config.ts`) buat aksen graph/data-flow sesuai brief "Gold + Purple + Cyan".
+- Layout dashboard: Map dikeluarin dari grid 2 kolom (dulu share row sama Crypto Heatmap) jadi full-width sendiri — sekarang punya top bar + panel + graph + timeline, nggak muat lagi di setengah kolom. Crypto Heatmap jadi baris sendiri di bawahnya.
+
+**Testing:** `tsc --noEmit` 0 error, `next build` sukses 88 route termasuk `/dashboard` (29.9kB, naik dari 21.3kB — proporsional sama fitur barunya). Semua sumber eksternal baru (TwelveData buat 4 FX pair, Finnhub buat 3 ticker saham) manggil fungsi generik yang sama kayak yang udah dipakai USD/Gold/Nasdaq dari V2 — bukan integrasi baru dari nol.
+
+**Gak disentuh:** logic klasifikasi bullish/bearish/neutral/transition di manapun (threshold-nya sama persis), `deriveGlobalSentiment`/`deriveFinalConclusion` (Map cuma baca hasilnya, gak ikut ngitung), `TerminalReportView`/AI Snapshot/AI Final Conclusion (masih pake `buildReasoningChain` yang sama, gak diubah), semua halaman selain `/dashboard`.
+
 ## V4.0 — Phase: Dashboard Visual Overhaul (Bloomberg × Apple, UI/UX-only)
 
 Brief-nya eksplisit: redesign visual `/dashboard` doang — gold (#D4AF37) jadi primary accent, purple tetap dipakai tapi cuma buat AI, tambah "rasa hidup" (ambient glow, particle/grid background, micro-interaction, animated skeleton) ke 6 section yang dianggap masih kosong (Global Intelligence Map, AI Snapshot, Market Pulse, Sector Rotation, Altcoin Scanner, Whale Intelligence), **tanpa nyentuh fitur/API flow/business logic/backend**. Jadi ronde ini murni presentation layer: nggak ada file di `lib/intelligence/*.ts` atau route API manapun yang disentuh — semua komponen tetap nerima props yang persis sama, cuma cara render-nya beda.

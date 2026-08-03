@@ -40,6 +40,15 @@ const config: Config = {
           dim: "#7A6220",
           glow: "#F0D584",
         },
+        // Intelligence Map V4 — third accent for the "AI neural network /
+        // cyber" theme (data-flow lines, connection pulses). Static token
+        // like gold, not CSS-var-backed — the accent picker stays scoped to
+        // `signal` only.
+        cyan: {
+          DEFAULT: "#22D3EE",
+          dim: "#0E7490",
+          glow: "#67E8F9",
+        },
         up: "#00E676",
         down: "#FF5252",
         rugpull: {
@@ -117,6 +126,7 @@ const config: Config = {
         "glow-smartmoney": "0 0 0 1px rgba(59,130,246,0.4), 0 0 20px rgba(59,130,246,0.22)",
         "glow-amber": "0 0 0 1px rgba(245,185,66,0.35), 0 0 20px rgba(245,185,66,0.18)",
         "glow-gold": "0 0 0 1px rgba(212,175,55,0.4), 0 0 24px rgba(240,213,132,0.22)",
+        "glow-cyan": "0 0 0 1px rgba(34,211,238,0.4), 0 0 24px rgba(103,232,249,0.24)",
         "card": "0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px -12px rgba(0,0,0,0.6)",
         "glow-landing-violet": "0 0 0 1px rgba(124,106,246,0.4), 0 0 24px rgba(167,155,255,0.22)",
         "glow-landing-cyan": "0 0 0 1px rgba(34,211,238,0.4), 0 0 22px rgba(126,235,251,0.22)",

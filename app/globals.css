@@ -422,6 +422,9 @@ body {
 .ambient-glow-down::before {
   background: radial-gradient(ellipse at 50% 35%, rgba(255, 82, 82, 0.22), transparent 72%);
 }
+.ambient-glow-cyan::before {
+  background: radial-gradient(ellipse at 50% 35%, rgba(34, 211, 238, 0.26), transparent 72%);
+}
 
 /* Animated twin of the existing static .bg-grid texture (unchanged, still
    used as-is elsewhere) — same look, slow diagonal drift so a large mostly

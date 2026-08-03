@@ -36,6 +36,12 @@ const TRACKED: { label: string; ticker: string }[] = [
   { label: "Nasdaq (QQQ)", ticker: "QQQ" },
   { label: "S&P 500 (SPY)", ticker: "SPY" },
   { label: "Dow Jones (DIA)", ticker: "DIA" },
+  // Added for the Intelligence Map's Stocks drill-down — individual tickers
+  // are actually better-covered than index ETFs on Finnhub's free /quote
+  // endpoint (no proxy/add-on caveat needed for these).
+  { label: "NVIDIA", ticker: "NVDA" },
+  { label: "Apple", ticker: "AAPL" },
+  { label: "Tesla", ticker: "TSLA" },
 ];
 
 async function fetchQuote(ticker: string, apiKey: string): Promise<StockQuote | undefined> {

@@ -26,6 +26,7 @@ import { buildAltcoinScannerRows, getSampleAltcoinScannerRows } from "@/lib/inte
 import { getUsdReading } from "@/lib/intelligence/sources/usd";
 import { getGoldReading } from "@/lib/intelligence/sources/gold";
 import { getStocksReading } from "@/lib/intelligence/sources/stocks";
+import { getEurReading, getGbpReading, getJpyReading, getCnyReading } from "@/lib/intelligence/sources/forex";
 import { getCryptoPanicNews } from "@/lib/intelligence/sources/cryptoNews";
 import { getMacroEventsView, getNextHighImpactEvent } from "@/lib/intelligence/macroEvents";
 import { deriveGlobalSentiment } from "@/lib/intelligence/globalSentiment";
@@ -55,12 +56,16 @@ const QUICK_LINKS = [
 ];
 
 export default async function Home() {
-  const [snap, usd, gold, stocks, cryptoNews] = await Promise.all([
+  const [snap, usd, gold, stocks, cryptoNews, eur, gbp, jpy, cny] = await Promise.all([
     getDashboardSnapshot(),
     getUsdReading(),
     getGoldReading(),
     getStocksReading(),
     getCryptoPanicNews(),
+    getEurReading(),
+    getGbpReading(),
+    getJpyReading(),
+    getCnyReading(),
   ]);
   const { base } = snap;
   const { markets, global, funding, whales, fng, news, calendar, rugpullRisks } = base;
@@ -101,7 +106,7 @@ export default async function Home() {
   const sectorRotation = markets.length ? computeSectorRotation(markets) : getSampleSectorRotation();
   const scannerRows = markets.length ? buildAltcoinScannerRows(markets, snap.smartMoneyAccumulation) : getSampleAltcoinScannerRows();
 
-  const macroEvents = getMacroEventsView(calendar);
+  const macroEvents = getMacroEventsView(calendar, 24);
   const nextHighImpact = getNextHighImpactEvent(calendar);
   const newsItems = cryptoNews ?? news;
 
@@ -215,14 +220,18 @@ export default async function Home() {
             sentiment={sentiment}
           />
 
-          <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
           <GlobalIntelligenceMap
+            finalConclusion={finalConclusion}
             live={{
               sentiment,
               macroEvents,
               newsItems,
               usd,
               gold,
+              eur,
+              gbp,
+              jpy,
+              cny,
               stocks,
               totalMarketCapUsd: global?.total_market_cap.usd,
               totalMarketCapChange24h: global?.market_cap_change_percentage_24h_usd,
@@ -260,10 +269,13 @@ export default async function Home() {
                 ? { symbol: topLoser.symbol.toUpperCase(), change24h: topLoser.price_change_percentage_24h_in_currency ?? 0 }
                 : undefined,
               sectorRotation,
+              altcoinScannerRows: scannerRows,
+              stablecoin: snap.stablecoin,
+              etfFlow: institutionalFlow,
             }}
           />
+
           <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
-          </div>
 
           <WhaleLiquidityPanel
             transfers={whales}
