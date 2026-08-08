@@ -10,6 +10,7 @@ import { NavDrawer } from "@/components/mobile/NavDrawer";
 import { AIChatDock } from "@/components/AIChatDock";
 import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
 import { AiEnergyWidget } from "@/components/dashboard/AiEnergyWidget";
+import { SystemStatusStrip } from "@/components/dashboard/SystemStatusStrip";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
 import { TopMarketOverview } from "@/components/intelligence/TopMarketOverview";
 import { GlobalIntelligenceMap } from "@/components/intelligence/GlobalIntelligenceMap";
@@ -166,6 +167,15 @@ export default async function Home() {
     btcOpenInterestUsd: btcFunding?.openInterestValue,
   });
 
+  // Honest connectivity count for the status ribbon — derived from which
+  // optional macro/intelligence sources actually resolved, not fabricated.
+  // Core sources (Binance markets, funding, whales, F&G) gate the whole
+  // page render, so they're not counted here — only the supplementary ones
+  // that can genuinely be null when a key isn't configured.
+  const macroSources = [usd, gold, stocks, eur, gbp, jpy, cny];
+  const connectedSources = macroSources.filter(Boolean).length + (institutionalFlow.connected ? 1 : 0);
+  const totalSources = macroSources.length + 1;
+
   return (
     <main className="min-h-screen lg:pt-14">
       <AmbientBackground />
@@ -194,7 +204,14 @@ export default async function Home() {
             sebelum mengambil keputusan.
           </div>
 
-          <TopMarketOverview
+          {/* Terminal grid: dashboard panels as a 12-column workstation grid instead of a vertical card stack */}
+          <div className="grid grid-cols-12 gap-4 lg:gap-5">
+            <div className="col-span-12">
+              <SystemStatusStrip connectedSources={connectedSources} totalSources={totalSources} />
+            </div>
+
+            <div className="col-span-12">
+              <TopMarketOverview
             btc={
               btcMarket
                 ? {
@@ -218,9 +235,11 @@ export default async function Home() {
             btcDominance={global?.market_cap_percentage.btc}
             fng={fng ? { value: fng.now.value, classification: fng.now.classification } : undefined}
             sentiment={sentiment}
-          />
+              />
+            </div>
 
-          <GlobalIntelligenceMap
+            <div className="col-span-12 lg:col-span-6">
+              <GlobalIntelligenceMap
             finalConclusion={finalConclusion}
             live={{
               sentiment,
@@ -273,36 +292,54 @@ export default async function Home() {
               stablecoin: snap.stablecoin,
               etfFlow: institutionalFlow,
             }}
-          />
+              />
+            </div>
 
-          <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
+            <div className="col-span-12 lg:col-span-6">
+              <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
+            </div>
 
-          <WhaleLiquidityPanel
+            <div className="col-span-12 lg:col-span-6">
+              <WhaleLiquidityPanel
             transfers={whales}
             whaleSummary={snap.whaleSummary}
             funding={funding}
             liquiditySymbol="BTCUSDT"
             exchangeFlow={snap.exchangeFlow}
             btcPriceUsd={btcMarket?.current_price}
-          />
+              />
+            </div>
 
-          <InstitutionalFlowPanel smartMoney={snap.smartMoneyAccumulation} />
+            <div className="col-span-12 lg:col-span-6">
+              <InstitutionalFlowPanel smartMoney={snap.smartMoneyAccumulation} />
+            </div>
 
-          <SectorRotationHeatmap rows={sectorRotation} />
+            <div className="col-span-12">
+              <SectorRotationHeatmap rows={sectorRotation} />
+            </div>
 
-          <AltcoinScannerTable rows={scannerRows} />
+            <div className="col-span-12">
+              <AltcoinScannerTable rows={scannerRows} />
+            </div>
 
-          <MarketPulsePanel inputs={pulseInputs} />
+            <div className="col-span-12">
+              <MarketPulsePanel inputs={pulseInputs} />
+            </div>
 
-          <AISummaryCard report={marketSnapshotReport} />
+            <div className="col-span-12 lg:col-span-6">
+              <AISummaryCard report={marketSnapshotReport} />
+            </div>
 
-          <AIFinalConclusion
-            sentiment={sentiment}
-            btcChange24h={btcMarket?.price_change_percentage_24h_in_currency}
-            ethChange24h={ethMarket?.price_change_percentage_24h_in_currency}
-            altChange24h={altChange24h}
-            watchlist={watchlist}
-          />
+            <div className="col-span-12 lg:col-span-6">
+              <AIFinalConclusion
+                sentiment={sentiment}
+                btcChange24h={btcMarket?.price_change_percentage_24h_in_currency}
+                ethChange24h={ethMarket?.price_change_percentage_24h_in_currency}
+                altChange24h={altChange24h}
+                watchlist={watchlist}
+              />
+            </div>
+          </div>
 
           <div>
             <p className="mb-2 text-[11px] uppercase tracking-wide text-ink-faint">Lainnya dari ElStand AI</p>
