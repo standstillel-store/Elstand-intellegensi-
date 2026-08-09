@@ -9,7 +9,7 @@ import { Footer } from "@/components/Footer";
 import { NavDrawer } from "@/components/mobile/NavDrawer";
 import { AIChatDock } from "@/components/AIChatDock";
 import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
-import { MacroIntelligence, type MacroImpactRow } from "@/components/dashboard/MacroIntelligence";
+import { GlobalIntelligenceMap, GlobalIntelligenceTimeline } from "@/components/intelligence/GlobalIntelligenceMap";
 import { AiEnergyWidget } from "@/components/dashboard/AiEnergyWidget";
 import { SystemStatusStrip } from "@/components/dashboard/SystemStatusStrip";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
@@ -185,37 +185,6 @@ export default async function Home() {
   const connectedSources = macroSources.filter(Boolean).length + (institutionalFlow.connected ? 1 : 0);
   const totalSources = macroSources.length + 1;
 
-  // Market Impact rows for Macro Intelligence — only built from readings
-  // that actually resolved this request (usd/gold/stocks/btc/eth). No
-  // fabricated "affected assets" list.
-  const marketImpact: MacroImpactRow[] = [];
-  if (usd?.changePct !== undefined) {
-    const assets: { label: string; direction: "up" | "down" }[] = [
-      { label: "DXY", direction: usd.changePct >= 0 ? "up" : "down" },
-    ];
-    if (gold?.changePct !== undefined) assets.push({ label: "Gold", direction: gold.changePct >= 0 ? "up" : "down" });
-    if (btcMarket?.price_change_percentage_24h_in_currency !== undefined)
-      assets.push({ label: "BTC", direction: btcMarket.price_change_percentage_24h_in_currency >= 0 ? "up" : "down" });
-    marketImpact.push({ trigger: "USD Strength", assets });
-  }
-  if (stocks?.indices.length) {
-    const assets: { label: string; direction: "up" | "down" }[] = [
-      { label: "Stocks", direction: stocksChangePct !== undefined && stocksChangePct >= 0 ? "up" : "down" },
-    ];
-    if (btcMarket?.price_change_percentage_24h_in_currency !== undefined)
-      assets.push({ label: "BTC", direction: btcMarket.price_change_percentage_24h_in_currency >= 0 ? "up" : "down" });
-    if (altChange24h !== undefined) assets.push({ label: "Altcoins", direction: altChange24h >= 0 ? "up" : "down" });
-    marketImpact.push({ trigger: "Risk Assets (Stocks)", assets });
-  }
-  if (fng) {
-    const assets: { label: string; direction: "up" | "down" }[] = [
-      { label: "Sentiment", direction: fng.now.value >= 50 ? "up" : "down" },
-    ];
-    if (ethMarket?.price_change_percentage_24h_in_currency !== undefined)
-      assets.push({ label: "ETH", direction: ethMarket.price_change_percentage_24h_in_currency >= 0 ? "up" : "down" });
-    marketImpact.push({ trigger: "Fear & Greed", assets });
-  }
-
   return (
     <main className="min-h-screen lg:pt-14">
       <AmbientBackground />
@@ -283,24 +252,79 @@ export default async function Home() {
               <RsiHeatmap data={rsiHeatmap} />
             </div>
 
-            {/* Old standalone News + Economic Calendar surfaces (formerly the
-                "News/Macro" nodes inside GlobalIntelligenceMap and
-                GlobalIntelligenceTimeline) are replaced by the connected
-                Macro Intelligence layer below: EVENT -> NEWS -> SENTIMENT ->
-                MARKET IMPACT -> INSIGHT, in one module. */}
-            <div className="col-span-12">
-              <MacroIntelligence
-                macroEvents={macroEvents}
-                newsItems={newsItems}
-                sentiment={sentiment}
-                nextHighImpact={nextHighImpact}
-                marketImpact={marketImpact}
-              />
-            </div>
+            {(() => {
+              const mapLiveInputs = {
+              sentiment,
+              macroEvents,
+              newsItems,
+              usd,
+              gold,
+              eur,
+              gbp,
+              jpy,
+              cny,
+              stocks,
+              totalMarketCapUsd: global?.total_market_cap.usd,
+              totalMarketCapChange24h: global?.market_cap_change_percentage_24h_usd,
+              totalVolume24hUsd,
+              btcDominance: global?.market_cap_percentage.btc,
+              ethDominance,
+              btc: btcMarket
+                ? {
+                    price: btcMarket.current_price,
+                    change24h: btcMarket.price_change_percentage_24h_in_currency,
+                    change7d: btcMarket.price_change_percentage_7d_in_currency,
+                    volume24h: btcMarket.total_volume,
+                  }
+                : undefined,
+              eth: ethMarket
+                ? {
+                    price: ethMarket.current_price,
+                    change24h: ethMarket.price_change_percentage_24h_in_currency,
+                    change7d: ethMarket.price_change_percentage_7d_in_currency,
+                    volume24h: ethMarket.total_volume,
+                  }
+                : undefined,
+              btcFundingRate: btcFunding?.lastFundingRate,
+              btcOpenInterestUsd: btcFunding?.openInterestValue,
+              ethFundingRate: ethFunding?.lastFundingRate,
+              ethOpenInterestUsd: ethFunding?.openInterestValue,
+              fngValue: fng?.now.value,
+              btcWhaleNote,
+              ethWhaleNote,
+              altseasonIndex: snap.altseason?.index,
+              altcoinTopGainer: topGainer
+                ? { symbol: topGainer.symbol.toUpperCase(), change24h: topGainer.price_change_percentage_24h_in_currency ?? 0 }
+                : undefined,
+              altcoinTopLoser: topLoser
+                ? { symbol: topLoser.symbol.toUpperCase(), change24h: topLoser.price_change_percentage_24h_in_currency ?? 0 }
+                : undefined,
+              sectorRotation,
+              altcoinScannerRows: scannerRows,
+              stablecoin: snap.stablecoin,
+              etfFlow: institutionalFlow,
+              };
+              return (
+                <>
+                  {/* Map + Heatmap sit in the same row and now stretch to equal
+                      height (items-stretch on the grid + h-full/flex-1 inside
+                      each card) — Relationship Timeline moved out to its own
+                      full-width row below so it no longer inflates only the
+                      map's column height. */}
+                  <div className="col-span-6">
+                    <GlobalIntelligenceMap finalConclusion={finalConclusion} live={mapLiveInputs} />
+                  </div>
 
-            <div className="col-span-12">
-              <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
-            </div>
+                  <div className="col-span-6">
+                    <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
+                  </div>
+
+                  <div className="col-span-12">
+                    <GlobalIntelligenceTimeline live={mapLiveInputs} />
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Order flow: BTC-only for now — see lib/intelligence/btcMicrostructure.ts.
                 col-span-7/-5 mirrors on mobile too now (was col-span-12 stacked)

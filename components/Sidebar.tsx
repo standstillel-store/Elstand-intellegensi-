@@ -27,6 +27,7 @@ const NAV_ITEMS = [
   { href: "/whale", label: "Whale Activity", icon: Waves },
   { href: "/news", label: "News", icon: Newspaper },
   { href: "/economic-calendar", label: "Economic Calendar", icon: CalendarDays },
+  { href: "/macro-intelligence", label: "Macro Intelligence", icon: Radar },
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
