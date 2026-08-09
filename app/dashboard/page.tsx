@@ -189,11 +189,11 @@ export default async function Home() {
   // that actually resolved this request (usd/gold/stocks/btc/eth). No
   // fabricated "affected assets" list.
   const marketImpact: MacroImpactRow[] = [];
-  if (usd) {
+  if (usd?.changePct !== undefined) {
     const assets: { label: string; direction: "up" | "down" }[] = [
       { label: "DXY", direction: usd.changePct >= 0 ? "up" : "down" },
     ];
-    if (gold) assets.push({ label: "Gold", direction: gold.changePct >= 0 ? "up" : "down" });
+    if (gold?.changePct !== undefined) assets.push({ label: "Gold", direction: gold.changePct >= 0 ? "up" : "down" });
     if (btcMarket?.price_change_percentage_24h_in_currency !== undefined)
       assets.push({ label: "BTC", direction: btcMarket.price_change_percentage_24h_in_currency >= 0 ? "up" : "down" });
     marketImpact.push({ trigger: "USD Strength", assets });
