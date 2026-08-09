@@ -16,6 +16,9 @@ import { TopMarketOverview } from "@/components/intelligence/TopMarketOverview";
 import { GlobalIntelligenceMap } from "@/components/intelligence/GlobalIntelligenceMap";
 import { RsiHeatmap } from "@/components/intelligence/RsiHeatmap";
 import { getRsiHeatmapData } from "@/lib/intelligence/rsiHeatmap";
+import { BtcOrderbookPanel } from "@/components/intelligence/BtcOrderbookPanel";
+import { BtcFundingPanel } from "@/components/intelligence/BtcFundingPanel";
+import { getBtcMicrostructure } from "@/lib/intelligence/btcMicrostructure";
 import { CryptoHeatmap } from "@/components/heatmap/CryptoHeatmap";
 import { WhaleLiquidityPanel } from "@/components/intelligence/WhaleLiquidityPanel";
 import { InstitutionalFlowPanel } from "@/components/intelligence/InstitutionalFlowPanel";
@@ -133,7 +136,11 @@ export default async function Home() {
   const ethFunding = funding.find((f) => f.symbol.toUpperCase() === "ETHUSDT");
   const btcWhaleNote = deriveAssetWhaleNote(whales, ["BTC"]);
   const ethWhaleNote = deriveAssetWhaleNote(whales, ["ETH", "WETH"]);
-  const [institutionalFlow, rsiHeatmap] = await Promise.all([getInstitutionalFlowData(), getRsiHeatmapData(markets)]);
+  const [institutionalFlow, rsiHeatmap, btcMicrostructure] = await Promise.all([
+    getInstitutionalFlowData(),
+    getRsiHeatmapData(markets),
+    getBtcMicrostructure(btcFunding, btcMarket?.current_price),
+  ]);
 
   const pulseInputs: MarketPulseInputs = {
     sentiment,
@@ -304,6 +311,14 @@ export default async function Home() {
 
             <div className="col-span-12 lg:col-span-6">
               <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
+            </div>
+
+            {/* Order flow: BTC-only for now — see lib/intelligence/btcMicrostructure.ts */}
+            <div className="col-span-12 lg:col-span-7">
+              <BtcOrderbookPanel initial={btcMicrostructure.orderbook} />
+            </div>
+            <div className="col-span-12 lg:col-span-5">
+              <BtcFundingPanel data={btcMicrostructure} />
             </div>
 
             <div className="col-span-12 lg:col-span-6">

@@ -91,6 +91,42 @@ export async function getOrderBookDepth(symbol: string, limit = 20): Promise<Ord
 }
 
 /**
+ * Recent open-interest history — Binance Futures' public
+ * /futures/data/openInterestHist endpoint — used to derive a real OI change
+ * (e.g. "OI up 4% over the last hour") instead of only ever showing one
+ * current snapshot.
+ */
+export interface OpenInterestPoint {
+  time: number;
+  openInterest: number;
+  openInterestValue: number;
+}
+
+export async function getOpenInterestHistory(
+  symbol: string,
+  period: "5m" | "15m" | "1h" | "4h" = "1h",
+  limit = 2
+): Promise<OpenInterestPoint[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  return cached(`bn:oi-hist:${pair}:${period}:${limit}`, 60_000, async () => {
+    const res = await fetch(`${BASE}/futures/data/openInterestHist?symbol=${pair}&period=${period}&limit=${limit}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) throw new Error(`Binance openInterestHist failed for ${pair}: ${res.status}`);
+    const raw = (await res.json()) as Array<{
+      timestamp: number;
+      sumOpenInterest: string;
+      sumOpenInterestValue: string;
+    }>;
+    return raw.map((r) => ({
+      time: r.timestamp,
+      openInterest: parseFloat(r.sumOpenInterest),
+      openInterestValue: parseFloat(r.sumOpenInterestValue),
+    }));
+  });
+}
+
+/**
  * OHLCV candles for ElVoid AI's scanning engine (support/resistance,
  * liquidity sweeps, market structure, etc. — see lib/elvoid/scanners.ts).
  * Uses the same public Binance Futures klines endpoint as the funding feed
