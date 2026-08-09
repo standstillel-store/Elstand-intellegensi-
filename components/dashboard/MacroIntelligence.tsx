@@ -237,7 +237,7 @@ export function MacroIntelligence({
           <p className="text-[13px] leading-relaxed text-ink">
             {sentiment.note ??
               (sentiment.reasons[0]
-                ? `${sentiment.reasons[0].label} tetap jadi katalis makro dominan untuk sesi trading berikutnya.`
+                ? `${sentiment.reasons[0].text} tetap jadi katalis makro dominan untuk sesi trading berikutnya.`
                 : "Belum cukup sinyal makro untuk sintesis saat ini.")}
           </p>
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[11px]">
