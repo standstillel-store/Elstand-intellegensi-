@@ -1,5 +1,4 @@
-import { AppShell } from "@/components/AppShell";
-import { MacroIntelligence, type MacroImpactRow, type WatchlistAsset } from "@/components/dashboard/MacroIntelligence";
+import { MacroIntelligence, type WatchlistAsset } from "@/components/dashboard/MacroIntelligence";
 import { getNews } from "@/lib/newsapi";
 import { getEconomicCalendar } from "@/lib/economiccalendar";
 import { getMacroEventsView, getNextHighImpactEvent } from "@/lib/intelligence/macroEvents";
@@ -17,10 +16,11 @@ export const metadata = {
 // /economic-calendar pages into one connected intelligence layer:
 // EVENT -> NEWS -> SENTIMENT -> MARKET IMPACT -> WATCHLIST -> INSIGHT.
 //
-// Both original pages (and their routes) stay untouched; this is a
-// separate page that reuses their real data sources plus a lightweight
-// watchlist read (BTC/ETH from CoinGecko, DXY/Gold from TwelveData) — no
-// full dashboard snapshot fetch needed here.
+// Deliberately does NOT use the shared AppShell — this page has its own
+// bespoke header (see MacroIntelligenceHeader), matching the reference
+// design 1:1 instead of stacking a second header under AppShell's.
+// Both /news and /economic-calendar stay untouched as standalone routes
+// (linked as "View All" targets from the panels below).
 // ---------------------------------------------------------------------------
 
 export default async function MacroIntelligencePage() {
@@ -42,6 +42,7 @@ export default async function MacroIntelligencePage() {
   if (btc)
     watchlist.push({
       symbol: "BTCUSDT",
+      name: "Bitcoin",
       price: btc.current_price,
       changePct: btc.price_change_percentage_24h_in_currency,
       series: btc.sparkline_in_7d?.price,
@@ -49,12 +50,13 @@ export default async function MacroIntelligencePage() {
   if (eth)
     watchlist.push({
       symbol: "ETHUSDT",
+      name: "Ethereum",
       price: eth.current_price,
       changePct: eth.price_change_percentage_24h_in_currency,
       series: eth.sparkline_in_7d?.price,
     });
-  if (usd) watchlist.push({ symbol: "DXY", price: usd.value, changePct: usd.changePct, series: usd.series });
-  if (gold) watchlist.push({ symbol: "XAUUSD", price: gold.value, changePct: gold.changePct, series: gold.series });
+  if (usd) watchlist.push({ symbol: "DXY", name: "U.S. Dollar Index", price: usd.value, changePct: usd.changePct, series: usd.series });
+  if (gold) watchlist.push({ symbol: "XAUUSD", name: "Gold", price: gold.value, changePct: gold.changePct, series: gold.series });
 
   // Lightweight sentiment read from the news feed itself — same pos/neg
   // count the old /news page already showed, reused here as "Macro
@@ -78,24 +80,28 @@ export default async function MacroIntelligencePage() {
     note: topHeadline ? `${topHeadline} tetap jadi katalis makro dominan untuk sesi trading berikutnya.` : undefined,
   };
 
-  // No dashboard-level market snapshot on this page, so Market Impact is
-  // intentionally left empty ("Waiting API" in the UI) rather than guessing
-  // asset direction from news alone.
-  const marketImpact: MacroImpactRow[] = [];
+  // Top Asset Focus — the currency behind the next high-impact event plus
+  // whichever watchlist assets are actually resolving right now. Real
+  // inputs only, no fixed/fabricated list.
+  const topAssetFocus = Array.from(
+    new Set(
+      [
+        calendar.find((e) => e.impact === "high")?.country,
+        btc ? "BTC" : undefined,
+        gold ? "GOLD" : undefined,
+      ].filter((v): v is string => Boolean(v)),
+    ),
+  ).slice(0, 3);
 
   return (
-    <AppShell
-      title="Macro Intelligence"
-      subtitle="Macro Events + Macro News + Watchlist dalam satu intelligence layer — dipakai ElVoid AI untuk Risk & Sentiment scan."
-    >
-      <MacroIntelligence
-        macroEvents={macroEvents}
-        newsItems={news}
-        sentiment={sentiment}
-        nextHighImpact={nextHighImpact}
-        marketImpact={marketImpact}
-        watchlist={watchlist}
-      />
-    </AppShell>
+    <MacroIntelligence
+      macroEvents={macroEvents}
+      calendar={calendar}
+      newsItems={news}
+      sentiment={sentiment}
+      nextHighImpact={nextHighImpact}
+      watchlist={watchlist}
+      topAssetFocus={topAssetFocus}
+    />
   );
 }
