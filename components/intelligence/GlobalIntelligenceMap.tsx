@@ -343,6 +343,17 @@ function TopBar({ global, finalConclusion }: { global: MarketMapNode; finalConcl
 // Bottom — Relationship Timeline.
 // ---------------------------------------------------------------------------
 
+// Exported on its own (not nested inside GlobalIntelligenceMap's card) so the
+// dashboard can place it as its own full-width row instead of stacking it
+// underneath the map — that stacking used to make the map+timeline column
+// far taller than the CryptoHeatmap column sitting next to it, even though
+// both were col-span-6. Same `live` input, same node data — just rendered
+// as a sibling row instead of a child of the map card.
+export function GlobalIntelligenceTimeline({ live }: { live: MarketMapLiveInputs }) {
+  const nodes = useMemo(() => buildMarketMapNodes(live), [live]);
+  return <RelationshipTimeline nodes={nodes} />;
+}
+
 function RelationshipTimeline({ nodes }: { nodes: MarketMapNode[] }) {
   const byId = (id: MarketMapNodeId) => nodes.find((n) => n.id === id);
   const global = byId("global");
@@ -358,7 +369,7 @@ function RelationshipTimeline({ nodes }: { nodes: MarketMapNode[] }) {
   ];
 
   return (
-    <div className="glow-card ambient-glow ambient-glow-gold relative mt-4 overflow-hidden p-4">
+    <div className="glow-card ambient-glow ambient-glow-gold relative overflow-hidden p-4">
       <SectionHeader code="TML" title="Relationship Timeline" hint="Bacaan terbaru per cabang" icon={<Landmark size={13} />} accent="gold" />
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
         {items.map((item) => (
@@ -649,10 +660,10 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
   }
 
   return (
-    <section className="relative">
+    <section className="relative flex h-full flex-col">
       <TopBar global={globalNode} finalConclusion={finalConclusion} />
 
-      <div className="glow-card ambient-glow ambient-glow-gold relative overflow-hidden p-0">
+      <div className="glow-card ambient-glow ambient-glow-gold relative flex-1 overflow-hidden p-0">
         <div className="border-b border-line p-4">
           <SectionHeader
             code="MAP"
@@ -700,7 +711,7 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
             <div
               ref={viewportRef}
               {...zoomPan.viewportHandlers}
-              style={{ ...zoomPan.viewportStyle, height: Math.min(canvasHeight, 640) }}
+              style={{ ...zoomPan.viewportStyle, height: Math.min(canvasHeight, MAP_FALLBACK_HEIGHT) }}
               className="bg-grid-animated relative overflow-hidden bg-bg"
               onDoubleClick={zoomPan.reset}
             >
@@ -829,8 +840,6 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
         onClose={() => setMobileSheetOpen(false)}
         onSelectNode={handleSelect}
       />
-
-      <RelationshipTimeline nodes={nodes} />
     </section>
   );
 }

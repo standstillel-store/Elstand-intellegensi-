@@ -13,7 +13,7 @@ import { AiEnergyWidget } from "@/components/dashboard/AiEnergyWidget";
 import { SystemStatusStrip } from "@/components/dashboard/SystemStatusStrip";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
 import { TopMarketOverview } from "@/components/intelligence/TopMarketOverview";
-import { GlobalIntelligenceMap } from "@/components/intelligence/GlobalIntelligenceMap";
+import { GlobalIntelligenceMap, GlobalIntelligenceTimeline } from "@/components/intelligence/GlobalIntelligenceMap";
 import { RsiHeatmap } from "@/components/intelligence/RsiHeatmap";
 import { getRsiHeatmapData } from "@/lib/intelligence/rsiHeatmap";
 import { BtcOrderbookPanel } from "@/components/intelligence/BtcOrderbookPanel";
@@ -252,10 +252,8 @@ export default async function Home() {
               <RsiHeatmap data={rsiHeatmap} />
             </div>
 
-            <div className="col-span-12 lg:col-span-6">
-              <GlobalIntelligenceMap
-            finalConclusion={finalConclusion}
-            live={{
+            {(() => {
+              const mapLiveInputs = {
               sentiment,
               macroEvents,
               newsItems,
@@ -305,13 +303,28 @@ export default async function Home() {
               altcoinScannerRows: scannerRows,
               stablecoin: snap.stablecoin,
               etfFlow: institutionalFlow,
-            }}
-              />
-            </div>
+              };
+              return (
+                <>
+                  {/* Map + Heatmap sit in the same row and now stretch to equal
+                      height (items-stretch on the grid + h-full/flex-1 inside
+                      each card) — Relationship Timeline moved out to its own
+                      full-width row below so it no longer inflates only the
+                      map's column height. */}
+                  <div className="col-span-12 lg:col-span-6">
+                    <GlobalIntelligenceMap finalConclusion={finalConclusion} live={mapLiveInputs} />
+                  </div>
 
-            <div className="col-span-12 lg:col-span-6">
-              <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
-            </div>
+                  <div className="col-span-12 lg:col-span-6">
+                    <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
+                  </div>
+
+                  <div className="col-span-12">
+                    <GlobalIntelligenceTimeline live={mapLiveInputs} />
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Order flow: BTC-only for now — see lib/intelligence/btcMicrostructure.ts */}
             <div className="col-span-12 lg:col-span-7">

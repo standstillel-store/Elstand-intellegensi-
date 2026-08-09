@@ -98,7 +98,7 @@ export function CryptoHeatmap({
   }, [markets, rugpullRisks, smartMoneyAccumulation, count]);
 
   return (
-    <div className="glow-card ambient-glow ambient-glow-gold p-4">
+    <div className="glow-card ambient-glow ambient-glow-gold flex h-full flex-col p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <SectionHeader code="HMP" title="Crypto Heatmap" hint={`${cells.length} aset`} icon={<Flame size={13} />} accent="gold" />
@@ -133,7 +133,7 @@ export function CryptoHeatmap({
         </div>
       </div>
 
-      <div className="scrollbar-none max-h-[460px] overflow-y-auto pr-0.5">
+      <div className="scrollbar-none min-h-[300px] flex-1 overflow-y-auto pr-0.5">
       <div
         className="grid gap-1.5"
         style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridAutoRows: "48px", gridAutoFlow: "dense" }}

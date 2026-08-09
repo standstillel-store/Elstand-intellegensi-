@@ -206,16 +206,33 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
           Order Book (depth chart) — per Zhwan's sketch, making use of the
           extra horizontal room instead of stacking everything vertically. */}
       <div className="lg:hidden">
+        {/* Indicators — same 4 cards as desktop's column 1, shown as a
+            2x2 grid on mobile so this view isn't missing info the
+            laptop/PC version has. */}
+        <div className="mb-2.5 grid grid-cols-2 gap-2">
+          {indicators.map((ind) => (
+            <div key={ind.label} className="rounded-lg border border-line bg-bg px-2.5 py-2">
+              <div className="text-[9px] uppercase tracking-wide text-ink-faint">{ind.label}</div>
+              <div className={`mono-num text-[12px] font-semibold ${ind.tone}`}>{ind.value}</div>
+            </div>
+          ))}
+        </div>
+
         <DepthChart asksTopDown={asksTopDown} bids={bids} maxCum={maxCum} mid={mid} flash={flash} className="h-32 sm:h-36" />
 
+        {/* Price ladder, 2 columns (asks | bids) — each row's own volume
+            bar fills in from the price side outward, same idea as the
+            desktop depth chart but per-row instead of a cumulative
+            staircase. Bumped from /10 to /25 opacity so the volume fill
+            actually reads on a phone screen instead of looking blank. */}
         <div className="mt-2.5 grid grid-cols-2 gap-x-2 text-[10.5px]">
           <div className="space-y-px">
             {asksTopDown.map((lvl) => {
-              const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
+              const pct = Math.max(8, (lvl.qty / (maxCum / DEPTH_ROWS)) * 26);
               return (
-                <div key={`ask-m-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
+                <div key={`ask-m-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[3px]">
                   <div
-                    className="absolute inset-y-0 right-0 bg-down/10 transition-[width] duration-700 ease-out"
+                    className="absolute inset-y-0 right-0 bg-down/25 transition-[width] duration-700 ease-out"
                     style={{ width: `${Math.min(100, pct)}%` }}
                   />
                   <span className="mono-num relative z-10 text-down">{fmtPrice(lvl.price)}</span>
@@ -226,11 +243,11 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
           </div>
           <div className="space-y-px">
             {bids.map((lvl) => {
-              const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
+              const pct = Math.max(8, (lvl.qty / (maxCum / DEPTH_ROWS)) * 26);
               return (
-                <div key={`bid-m-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
+                <div key={`bid-m-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[3px]">
                   <div
-                    className="absolute inset-y-0 left-0 bg-up/10 transition-[width] duration-700 ease-out"
+                    className="absolute inset-y-0 left-0 bg-up/25 transition-[width] duration-700 ease-out"
                     style={{ width: `${Math.min(100, pct)}%` }}
                   />
                   <span className="mono-num relative z-10 text-up">{fmtPrice(lvl.price)}</span>
@@ -261,7 +278,7 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
               return (
                 <div key={`ask-d-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
                   <div
-                    className="absolute inset-y-0 right-0 bg-down/10 transition-[width] duration-700 ease-out"
+                    className="absolute inset-y-0 right-0 bg-down/25 transition-[width] duration-700 ease-out"
                     style={{ width: `${Math.min(100, pct)}%` }}
                   />
                   <span className="mono-num relative z-10 text-down">{fmtPrice(lvl.price)}</span>
@@ -276,7 +293,7 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
               return (
                 <div key={`bid-d-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
                   <div
-                    className="absolute inset-y-0 left-0 bg-up/10 transition-[width] duration-700 ease-out"
+                    className="absolute inset-y-0 left-0 bg-up/25 transition-[width] duration-700 ease-out"
                     style={{ width: `${Math.min(100, pct)}%` }}
                   />
                   <span className="mono-num relative z-10 text-up">{fmtPrice(lvl.price)}</span>
