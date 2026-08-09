@@ -100,7 +100,7 @@ export function WhaleLiquidityPanel({
       : "—";
 
   return (
-    <div className="glow-card ambient-glow ambient-glow-gold p-4">
+    <div className="glow-card ambient-glow ambient-glow-gold h-full p-4">
       <SectionHeader code="WHL" title="Whale & Liquidity Intelligence" hint={liquidity.symbol} icon={<Waves size={13} />} accent="gold" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

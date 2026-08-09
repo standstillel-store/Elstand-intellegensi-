@@ -280,27 +280,21 @@ function GlobalOrb({
         isActive && "scale-[1.02]"
       )}
     >
-      <div className="relative flex h-[168px] w-[168px] items-center justify-center sm:h-[188px] sm:w-[188px]">
-        <span
-          className="absolute h-[104px] w-[104px] animate-ping rounded-full border border-signal/50 sm:h-[116px] sm:w-[116px]"
-          style={{ animationDuration: "3.2s" }}
-        />
-        <span className="absolute h-[156px] w-[156px] animate-orbitSlow rounded-full border border-dashed border-signal/20 sm:h-[176px] sm:w-[176px]" />
-        <span className="absolute h-[132px] w-[132px] animate-orbitSlowReverse rounded-full border border-signal/25 sm:h-[150px] sm:w-[150px]" />
+      <div className="relative flex h-[112px] w-[112px] items-center justify-center sm:h-[126px] sm:w-[126px]">
         <span
           className={clsx(
-            "absolute h-[116px] w-[116px] rounded-full border-2 transition-colors duration-500 sm:h-[130px] sm:w-[130px]",
+            "absolute h-[80px] w-[80px] rounded-full border-2 transition-colors duration-500 sm:h-[92px] sm:w-[92px]",
             STATUS_RING[sentimentStatus]
           )}
         />
-        <div className="ai-orb-core relative flex h-[100px] w-[100px] animate-coreBreathe items-center justify-center rounded-full shadow-glow-signal sm:h-[112px] sm:w-[112px]">
+        <div className="ai-orb-core relative flex h-[68px] w-[68px] animate-coreBreathe items-center justify-center rounded-full shadow-glow-signal sm:h-[78px] sm:w-[78px]">
           <div className="text-center leading-none">
-            <p className="mono-num text-2xl font-bold text-ink sm:text-3xl">{node.confidence !== undefined ? `${node.confidence}%` : "—"}</p>
-            <p className="mt-1 text-[8px] uppercase tracking-wider text-ink/70">AI Hub</p>
+            <p className="mono-num text-lg font-bold text-ink sm:text-xl">{node.confidence !== undefined ? `${node.confidence}%` : "—"}</p>
+            <p className="mt-1 text-[7px] uppercase tracking-wider text-ink/70">AI Hub</p>
           </div>
         </div>
       </div>
-      <span className="text-[11px] font-bold uppercase tracking-wide text-ink">Global Market</span>
+      <span className="text-[10px] font-bold uppercase tracking-wide text-ink">Global Market</span>
     </div>
   );
 }

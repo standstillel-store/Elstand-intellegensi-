@@ -43,7 +43,7 @@ export function AIFinalConclusion({
   ];
 
   return (
-    <div className="glow-card ambient-glow ambient-glow-ai overflow-hidden">
+    <div className="glow-card ambient-glow ambient-glow-ai h-full overflow-hidden">
       <div className="border-b border-line/70 bg-bg-raised px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-signal/30 bg-signal/10 text-signal-glow">

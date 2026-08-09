@@ -84,7 +84,7 @@ function VerdictHero({ report }: { report: TerminalReport }) {
   const statusStyle = TONE_STYLES[report.statusTone ?? "neutral"];
   const actionStyle = TONE_STYLES[report.actionTone ?? "neutral"];
   return (
-    <div className="ambient-glow ambient-glow-ai relative overflow-hidden rounded-xl border border-signal/25 bg-gradient-to-br from-signal/10 via-bg-raised to-bg-raised p-4">
+    <div className="ambient-glow ambient-glow-ai relative h-full overflow-hidden rounded-xl border border-signal/25 bg-gradient-to-br from-signal/10 via-bg-raised to-bg-raised p-4">
       <div className="flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-signal/30 bg-signal/15 text-signal-glow">
           <Sparkles size={16} />

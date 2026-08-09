@@ -311,11 +311,11 @@ export default async function Home() {
                       each card) — Relationship Timeline moved out to its own
                       full-width row below so it no longer inflates only the
                       map's column height. */}
-                  <div className="col-span-12 lg:col-span-6">
+                  <div className="col-span-6">
                     <GlobalIntelligenceMap finalConclusion={finalConclusion} live={mapLiveInputs} />
                   </div>
 
-                  <div className="col-span-12 lg:col-span-6">
+                  <div className="col-span-6">
                     <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
                   </div>
 
@@ -334,7 +334,7 @@ export default async function Home() {
               <BtcFundingPanel data={btcMicrostructure} />
             </div>
 
-            <div className="col-span-12 lg:col-span-6">
+            <div className="col-span-6 lg:col-span-4">
               <WhaleLiquidityPanel
             transfers={whales}
             whaleSummary={snap.whaleSummary}
@@ -345,7 +345,7 @@ export default async function Home() {
               />
             </div>
 
-            <div className="col-span-12 lg:col-span-6">
+            <div className="col-span-6 lg:col-span-4">
               <InstitutionalFlowPanel smartMoney={snap.smartMoneyAccumulation} />
             </div>
 
@@ -361,11 +361,11 @@ export default async function Home() {
               <MarketPulsePanel inputs={pulseInputs} />
             </div>
 
-            <div className="col-span-12 lg:col-span-6">
+            <div className="col-span-6 lg:col-span-4">
               <AISummaryCard report={marketSnapshotReport} />
             </div>
 
-            <div className="col-span-12 lg:col-span-6">
+            <div className="col-span-6 lg:col-span-4">
               <AIFinalConclusion
                 sentiment={sentiment}
                 btcChange24h={btcMarket?.price_change_percentage_24h_in_currency}
