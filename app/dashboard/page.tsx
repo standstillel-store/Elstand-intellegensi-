@@ -14,6 +14,8 @@ import { SystemStatusStrip } from "@/components/dashboard/SystemStatusStrip";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
 import { TopMarketOverview } from "@/components/intelligence/TopMarketOverview";
 import { GlobalIntelligenceMap } from "@/components/intelligence/GlobalIntelligenceMap";
+import { RsiHeatmap } from "@/components/intelligence/RsiHeatmap";
+import { getRsiHeatmapData } from "@/lib/intelligence/rsiHeatmap";
 import { CryptoHeatmap } from "@/components/heatmap/CryptoHeatmap";
 import { WhaleLiquidityPanel } from "@/components/intelligence/WhaleLiquidityPanel";
 import { InstitutionalFlowPanel } from "@/components/intelligence/InstitutionalFlowPanel";
@@ -131,7 +133,7 @@ export default async function Home() {
   const ethFunding = funding.find((f) => f.symbol.toUpperCase() === "ETHUSDT");
   const btcWhaleNote = deriveAssetWhaleNote(whales, ["BTC"]);
   const ethWhaleNote = deriveAssetWhaleNote(whales, ["ETH", "WETH"]);
-  const institutionalFlow = await getInstitutionalFlowData();
+  const [institutionalFlow, rsiHeatmap] = await Promise.all([getInstitutionalFlowData(), getRsiHeatmapData(markets)]);
 
   const pulseInputs: MarketPulseInputs = {
     sentiment,
@@ -236,6 +238,11 @@ export default async function Home() {
             fng={fng ? { value: fng.now.value, classification: fng.now.classification } : undefined}
             sentiment={sentiment}
               />
+            </div>
+
+            {/* Hero: market-wide RSI condition, real klines + real RSI-14 — see lib/intelligence/rsiHeatmap.ts */}
+            <div className="col-span-12">
+              <RsiHeatmap data={rsiHeatmap} />
             </div>
 
             <div className="col-span-12 lg:col-span-6">
