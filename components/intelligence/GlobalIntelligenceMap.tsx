@@ -780,14 +780,14 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
                       hidden one — which would silently break the edge
                       lines drawn to that node. Each node here mounts
                       exactly once. */}
-                  <div className="grid grid-cols-2 items-center gap-2 lg:grid-cols-5 lg:gap-3">
-                    {renderNodeCard("jpy", "lg:col-start-1 lg:row-start-1")}
-                    {renderNodeCard("btc", "lg:col-start-5 lg:row-start-1")}
+                  <div className="grid grid-cols-5 items-center gap-2 sm:gap-3">
+                    {renderNodeCard("jpy", "col-start-1 row-start-1")}
+                    {renderNodeCard("btc", "col-start-5 row-start-1")}
 
-                    {renderNodeCard("forex", "lg:col-start-1 lg:row-start-2")}
-                    {renderNodeCard("crypto", "lg:col-start-5 lg:row-start-2")}
+                    {renderNodeCard("forex", "col-start-1 row-start-2")}
+                    {renderNodeCard("crypto", "col-start-5 row-start-2")}
 
-                    <div className="col-span-2 flex items-center justify-center lg:col-start-2 lg:col-span-3 lg:row-start-2">
+                    <div className="col-start-2 col-span-3 row-start-2 flex items-center justify-center">
                       <GlobalOrb
                         node={globalNode}
                         sentimentStatus={live.sentiment.status}
@@ -797,8 +797,8 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
                       />
                     </div>
 
-                    {renderNodeCard("gold", "lg:col-start-1 lg:row-start-3")}
-                    {renderNodeCard("eth", "lg:col-start-5 lg:row-start-3")}
+                    {renderNodeCard("gold", "col-start-1 row-start-3")}
+                    {renderNodeCard("eth", "col-start-5 row-start-3")}
                   </div>
 
                   <div className="mx-auto mt-2.5 max-w-xs lg:max-w-sm">{renderNodeCard("altcoin")}</div>
