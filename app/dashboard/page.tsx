@@ -326,15 +326,17 @@ export default async function Home() {
               );
             })()}
 
-            {/* Order flow: BTC-only for now — see lib/intelligence/btcMicrostructure.ts */}
-            <div className="col-span-12 lg:col-span-7">
+            {/* Order flow: BTC-only for now — see lib/intelligence/btcMicrostructure.ts.
+                col-span-7/-5 mirrors on mobile too now (was col-span-12 stacked)
+                so Order Book sits beside Funding & OI like the laptop layout. */}
+            <div className="col-span-7 lg:col-span-7">
               <BtcOrderbookPanel initial={btcMicrostructure.orderbook} />
             </div>
-            <div className="col-span-12 lg:col-span-5">
+            <div className="col-span-5 lg:col-span-5">
               <BtcFundingPanel data={btcMicrostructure} />
             </div>
 
-            <div className="col-span-6 lg:col-span-4">
+            <div className="col-span-6 lg:col-span-6">
               <WhaleLiquidityPanel
             transfers={whales}
             whaleSummary={snap.whaleSummary}
@@ -345,7 +347,7 @@ export default async function Home() {
               />
             </div>
 
-            <div className="col-span-6 lg:col-span-4">
+            <div className="col-span-6 lg:col-span-6">
               <InstitutionalFlowPanel smartMoney={snap.smartMoneyAccumulation} />
             </div>
 
@@ -361,11 +363,11 @@ export default async function Home() {
               <MarketPulsePanel inputs={pulseInputs} />
             </div>
 
-            <div className="col-span-6 lg:col-span-4">
+            <div className="col-span-6 lg:col-span-6">
               <AISummaryCard report={marketSnapshotReport} />
             </div>
 
-            <div className="col-span-6 lg:col-span-4">
+            <div className="col-span-6 lg:col-span-6">
               <AIFinalConclusion
                 sentiment={sentiment}
                 btcChange24h={btcMarket?.price_change_percentage_24h_in_currency}

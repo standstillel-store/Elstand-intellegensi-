@@ -247,7 +247,14 @@ function NodeCard({
 }
 
 // ---------------------------------------------------------------------------
-// The center node — bigger, breathing, tone-reactive ring, sonar ping.
+// The center node — kept small and unlabeled on purpose. This used to be a
+// big breathing orb with "Global Market" text underneath, which ate a lot
+// of vertical space and made the map feel cramped/bulky next to the crypto
+// heatmap. It's still a real clickable node (edges from jpy/forex/gold and
+// to btc/crypto/eth all terminate here — registerRef must stay wired or
+// those lines break), just rendered as a minimal hub dot instead of a
+// headline element, so the map reads as a graph/infographic rather than a
+// dashboard widget with its own hero.
 // ---------------------------------------------------------------------------
 
 function GlobalOrb({
@@ -280,21 +287,17 @@ function GlobalOrb({
         isActive && "scale-[1.02]"
       )}
     >
-      <div className="relative flex h-[112px] w-[112px] items-center justify-center sm:h-[126px] sm:w-[126px]">
+      <div className="relative flex h-[56px] w-[56px] items-center justify-center sm:h-[64px] sm:w-[64px]">
         <span
           className={clsx(
-            "absolute h-[80px] w-[80px] rounded-full border-2 transition-colors duration-500 sm:h-[92px] sm:w-[92px]",
+            "absolute h-[44px] w-[44px] rounded-full border-2 transition-colors duration-500 sm:h-[50px] sm:w-[50px]",
             STATUS_RING[sentimentStatus]
           )}
         />
-        <div className="ai-orb-core relative flex h-[68px] w-[68px] animate-coreBreathe items-center justify-center rounded-full shadow-glow-signal sm:h-[78px] sm:w-[78px]">
-          <div className="text-center leading-none">
-            <p className="mono-num text-lg font-bold text-ink sm:text-xl">{node.confidence !== undefined ? `${node.confidence}%` : "—"}</p>
-            <p className="mt-1 text-[7px] uppercase tracking-wider text-ink/70">AI Hub</p>
-          </div>
+        <div className="ai-orb-core relative flex h-[34px] w-[34px] animate-coreBreathe items-center justify-center rounded-full shadow-glow-signal sm:h-[38px] sm:w-[38px]">
+          <p className="mono-num text-[10px] font-bold text-ink sm:text-xs">{node.confidence !== undefined ? `${node.confidence}%` : "—"}</p>
         </div>
       </div>
-      <span className="text-[10px] font-bold uppercase tracking-wide text-ink">Global Market</span>
     </div>
   );
 }
@@ -564,7 +567,7 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef(new Map<MarketMapNodeId, HTMLDivElement>());
   const [lines, setLines] = useState<EdgeLine[]>([]);
-  const [canvasHeight, setCanvasHeight] = useState(MAP_FALLBACK_HEIGHT);
+  const [, setCanvasHeight] = useState(MAP_FALLBACK_HEIGHT);
 
   const zoomPan = useZoomPan(viewportRef, containerRef, { reducedMotion, minScale: 0.5, maxScale: 1.6 });
 
@@ -657,7 +660,7 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
     <section className="relative flex h-full flex-col">
       <TopBar global={globalNode} finalConclusion={finalConclusion} />
 
-      <div className="glow-card ambient-glow ambient-glow-gold relative flex-1 overflow-hidden p-0">
+      <div className="glow-card ambient-glow ambient-glow-gold relative flex flex-1 flex-col overflow-hidden p-0">
         <div className="border-b border-line p-4">
           <SectionHeader
             code="MAP"
@@ -668,10 +671,10 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
           />
         </div>
 
-        <div className="flex flex-col lg:flex-row lg:items-stretch">
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch">
           <NodeIntelPanel node={selectedNode} allNodes={nodes} edges={MARKET_MAP_EDGES} mode="sidebar" onSelectNode={handleSelect} />
 
-          <div className="relative min-w-0 flex-1">
+          <div className="relative flex min-w-0 min-h-0 flex-1 flex-col">
             <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-line bg-bg-surface/90 p-1 backdrop-blur">
               <button
                 type="button"
@@ -705,8 +708,8 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
             <div
               ref={viewportRef}
               {...zoomPan.viewportHandlers}
-              style={{ ...zoomPan.viewportStyle, height: Math.min(canvasHeight, MAP_FALLBACK_HEIGHT) }}
-              className="bg-grid-animated relative overflow-hidden bg-bg"
+              style={{ ...zoomPan.viewportStyle, minHeight: MAP_FALLBACK_HEIGHT }}
+              className="bg-grid-animated relative h-full min-h-[460px] flex-1 overflow-hidden bg-bg"
               onDoubleClick={zoomPan.reset}
             >
               <div ref={containerRef} style={zoomPan.contentStyle} className="relative px-3 py-4">
