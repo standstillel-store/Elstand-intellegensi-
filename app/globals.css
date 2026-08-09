@@ -395,35 +395,24 @@ body {
    Sits at negative z-index behind the card's own background so it never
    intercepts clicks, and `isolation: isolate` keeps that negative z-index
    from leaking through to page-level stacking. Pair with exactly one
-   `.ambient-glow-*` tone class — `.ambient-glow` alone renders nothing. */
+   `.ambient-glow-*` tone class — `.ambient-glow` alone renders nothing.
+
+   DISABLED per Zhwan's request: the animated background bloom (gold/blue/
+   etc.) read as too much ambient color across the dashboard. Cards using
+   these classes are now flat — `.ambient-glow` still sets `isolation`
+   (harmless, no visual effect on its own) but `::before` no longer paints
+   anything, so every `ambient-glow-gold` / `ambient-glow-ai` / etc.
+   classname already in every component's JSX becomes an inert no-op
+   rather than needing to be removed file-by-file. Color stays on live
+   text/indicators (up/down/gold values, live dots, flash-on-update
+   accents) — those are untouched by this change. Delete this comment
+   block and the two lines below it to bring the glow back if wanted. */
 .ambient-glow {
   position: relative;
   isolation: isolate;
 }
 .ambient-glow::before {
-  content: "";
-  position: absolute;
-  inset: -18px;
-  z-index: -1;
-  border-radius: inherit;
-  filter: blur(32px);
-  pointer-events: none;
-  animation: ambientBreathe 5s ease-in-out infinite;
-}
-.ambient-glow-gold::before {
-  background: radial-gradient(ellipse at 50% 35%, rgba(212, 175, 55, 0.3), transparent 72%);
-}
-.ambient-glow-ai::before {
-  background: radial-gradient(ellipse at 50% 35%, rgb(var(--signal-glow-rgb) / 0.32), transparent 72%);
-}
-.ambient-glow-up::before {
-  background: radial-gradient(ellipse at 50% 35%, rgba(0, 230, 118, 0.22), transparent 72%);
-}
-.ambient-glow-down::before {
-  background: radial-gradient(ellipse at 50% 35%, rgba(255, 82, 82, 0.22), transparent 72%);
-}
-.ambient-glow-cyan::before {
-  background: radial-gradient(ellipse at 50% 35%, rgba(34, 211, 238, 0.26), transparent 72%);
+  content: none;
 }
 
 /* Animated twin of the existing static .bg-grid texture (unchanged, still

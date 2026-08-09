@@ -28,11 +28,9 @@ function fmtQty(n: number) {
 
 /** Builds a cumulative staircase path (SVG) from best price outward — same
  *  shape as the reference: a step chart that fills as depth accumulates,
- *  not a bar-per-level chart. viewBox is 0..100 wide, 0..100 tall; `side`
- *  controls whether the fill grows away from the spread (asks, left→right
- *  reads top-down; bids, mirrored) — here both sides share one component
- *  and are mirrored via CSS `scale-x-[-1]` on the asks half instead of
- *  duplicating the path math. */
+ *  not a bar-per-level chart. viewBox is 0..100 wide, 0..100 tall; both
+ *  sides share this one function and are mirrored via CSS `scale-x-[-1]`
+ *  on the asks half instead of duplicating the path math. */
 function buildStaircasePath(cumulative: number[], maxCumulative: number): string {
   if (!cumulative.length) return "";
   const n = cumulative.length;
@@ -46,6 +44,55 @@ function buildStaircasePath(cumulative: number[], maxCumulative: number): string
   });
   d += ` L 100 100 Z`;
   return d;
+}
+
+function DepthChart({
+  asksTopDown,
+  bids,
+  maxCum,
+  mid,
+  flash,
+  className = "",
+}: {
+  asksTopDown: { cum: number }[];
+  bids: { cum: number }[];
+  maxCum: number;
+  mid: number;
+  flash: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={`relative overflow-hidden rounded-lg border border-line bg-bg ${className}`}>
+      <div className="grid h-full grid-cols-2">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full scale-x-[-1]">
+          <path
+            d={buildStaircasePath(asksTopDown.map((a) => a.cum).reverse(), maxCum)}
+            fill="rgba(255,82,82,0.16)"
+            stroke="#FF5252"
+            strokeWidth={0.6}
+            className="transition-all duration-700 ease-out"
+          />
+        </svg>
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
+          <path
+            d={buildStaircasePath(bids.map((b) => b.cum), maxCum)}
+            fill="rgba(0,230,118,0.16)"
+            stroke="#00E676"
+            strokeWidth={0.6}
+            className="transition-all duration-700 ease-out"
+          />
+        </svg>
+      </div>
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line" />
+      <div
+        className={`pointer-events-none absolute left-1/2 top-1.5 -translate-x-1/2 rounded bg-bg-raised px-1.5 py-0.5 text-[10px] font-semibold transition-colors ${
+          flash ? "text-gold" : "text-ink"
+        }`}
+      >
+        <span className="mono-num">{fmtPrice(mid)}</span>
+      </div>
+    </div>
+  );
 }
 
 export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | undefined }) {
@@ -102,12 +149,14 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
       spread,
       spreadPct,
       imbalancePct,
+      bidVol,
+      askVol,
     };
   }, [book]);
 
   if (!derived) {
     return (
-      <div className="glow-card ambient-glow ambient-glow-gold overflow-hidden p-4">
+      <div className="rounded-xl border border-line bg-bg-raised p-4">
         <div className="flex items-center gap-2.5">
           <LiveDot tone="up" />
           <SectionHeader code="BOOK" title="BTC Order Book" hint="Binance Futures" icon={<Layers size={13} />} accent="up" />
@@ -119,14 +168,21 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
     );
   }
 
-  const { bids, asks, maxCum, mid, spread, spreadPct, imbalancePct } = derived;
+  const { bids, asks, maxCum, mid, spread, spreadPct, imbalancePct, bidVol, askVol } = derived;
   // Reversed so the row nearest the spread sits at the bottom of the ask
   // half and the top of the bid half — mirrors the reference layout where
   // both books read "outward" from the price in the middle.
   const asksTopDown = [...asks].reverse();
 
+  const indicators = [
+    { label: "Mid Price", value: fmtPrice(mid), tone: "text-ink" },
+    { label: "Spread", value: `${spread.toFixed(1)} (${spreadPct.toFixed(4)}%)`, tone: "text-ink-muted" },
+    { label: "Bid Volume", value: fmtQty(bidVol), tone: "text-up" },
+    { label: "Ask Volume", value: fmtQty(askVol), tone: "text-down" },
+  ];
+
   return (
-    <div className="glow-card ambient-glow ambient-glow-gold overflow-hidden p-4">
+    <div className="rounded-xl border border-line bg-bg-raised p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <LiveDot tone={stale ? "amber" : "up"} />
@@ -144,76 +200,98 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
         </div>
       </div>
 
-      {/* Staircase depth chart — asks (red) fill leftward from the spread,
-          bids (green) fill leftward from the spread, mirrored via scale-x
-          so both share the same path-building code above. */}
-      <div className="relative h-32 overflow-hidden rounded-lg border border-line bg-bg sm:h-36">
-        <div className="grid h-full grid-cols-2">
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full scale-x-[-1]">
-            <path
-              d={buildStaircasePath(asksTopDown.map((a) => a.cum).reverse(), maxCum)}
-              fill="rgba(255,82,82,0.16)"
-              stroke="#FF5252"
-              strokeWidth={0.6}
-              className="transition-all duration-700 ease-out"
-            />
-          </svg>
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
-            <path
-              d={buildStaircasePath(bids.map((b) => b.cum), maxCum)}
-              fill="rgba(0,230,118,0.16)"
-              stroke="#00E676"
-              strokeWidth={0.6}
-              className="transition-all duration-700 ease-out"
-            />
-          </svg>
-        </div>
-        <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line" />
-        <div
-          className={`pointer-events-none absolute left-1/2 top-1.5 -translate-x-1/2 rounded bg-bg-raised px-1.5 py-0.5 text-[10px] font-semibold transition-colors ${
-            flash ? "text-gold" : "text-ink"
-          }`}
-        >
-          <span className="mono-num">{fmtPrice(mid)}</span>
+      {/* Mobile/tablet (<1024px): stacked — chart on top, price ladder
+          below, same as before. Desktop/laptop (lg: 1024px+): three
+          columns side by side — Indicators | Harga (price ladder) |
+          Order Book (depth chart) — per Zhwan's sketch, making use of the
+          extra horizontal room instead of stacking everything vertically. */}
+      <div className="lg:hidden">
+        <DepthChart asksTopDown={asksTopDown} bids={bids} maxCum={maxCum} mid={mid} flash={flash} className="h-32 sm:h-36" />
+
+        <div className="mt-2.5 grid grid-cols-2 gap-x-2 text-[10.5px]">
+          <div className="space-y-px">
+            {asksTopDown.map((lvl) => {
+              const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
+              return (
+                <div key={`ask-m-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
+                  <div
+                    className="absolute inset-y-0 right-0 bg-down/10 transition-[width] duration-700 ease-out"
+                    style={{ width: `${Math.min(100, pct)}%` }}
+                  />
+                  <span className="mono-num relative z-10 text-down">{fmtPrice(lvl.price)}</span>
+                  <span className="mono-num relative z-10 text-ink-faint">{fmtQty(lvl.qty)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="space-y-px">
+            {bids.map((lvl) => {
+              const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
+              return (
+                <div key={`bid-m-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-up/10 transition-[width] duration-700 ease-out"
+                    style={{ width: `${Math.min(100, pct)}%` }}
+                  />
+                  <span className="mono-num relative z-10 text-up">{fmtPrice(lvl.price)}</span>
+                  <span className="mono-num relative z-10 text-ink-faint">{fmtQty(lvl.qty)}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Tight price ladder — thin spread row front-and-center, exact
-          prices + sizes on either side, matching the reference layout. */}
-      <div className="mt-2.5 grid grid-cols-2 gap-x-2 text-[10.5px]">
-        <div className="space-y-px">
-          {asksTopDown.map((lvl) => {
-            const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
-            return (
-              <div key={`ask-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
-                <div
-                  className="absolute inset-y-0 right-0 bg-down/10 transition-[width] duration-700 ease-out"
-                  style={{ width: `${Math.min(100, pct)}%` }}
-                />
-                <span className="mono-num relative z-10 text-down">{fmtPrice(lvl.price)}</span>
-                <span className="mono-num relative z-10 text-ink-faint">{fmtQty(lvl.qty)}</span>
-              </div>
-            );
-          })}
+      <div className="hidden lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,1.4fr)] lg:gap-3">
+        {/* Column 1 — Indicators */}
+        <div className="flex flex-col gap-2">
+          {indicators.map((ind) => (
+            <div key={ind.label} className="rounded-lg border border-line bg-bg px-2.5 py-2">
+              <div className="text-[9px] uppercase tracking-wide text-ink-faint">{ind.label}</div>
+              <div className={`mono-num text-[12px] font-semibold ${ind.tone}`}>{ind.value}</div>
+            </div>
+          ))}
         </div>
-        <div className="space-y-px">
-          {bids.map((lvl) => {
-            const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
-            return (
-              <div key={`bid-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
-                <div
-                  className="absolute inset-y-0 left-0 bg-up/10 transition-[width] duration-700 ease-out"
-                  style={{ width: `${Math.min(100, pct)}%` }}
-                />
-                <span className="mono-num relative z-10 text-up">{fmtPrice(lvl.price)}</span>
-                <span className="mono-num relative z-10 text-ink-faint">{fmtQty(lvl.qty)}</span>
-              </div>
-            );
-          })}
+
+        {/* Column 2 — Harga (price ladder) */}
+        <div className="grid grid-cols-2 gap-x-2 text-[10.5px]">
+          <div className="space-y-px">
+            {asksTopDown.map((lvl) => {
+              const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
+              return (
+                <div key={`ask-d-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
+                  <div
+                    className="absolute inset-y-0 right-0 bg-down/10 transition-[width] duration-700 ease-out"
+                    style={{ width: `${Math.min(100, pct)}%` }}
+                  />
+                  <span className="mono-num relative z-10 text-down">{fmtPrice(lvl.price)}</span>
+                  <span className="mono-num relative z-10 text-ink-faint">{fmtQty(lvl.qty)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="space-y-px">
+            {bids.map((lvl) => {
+              const pct = Math.max(6, (lvl.qty / (maxCum / DEPTH_ROWS)) * 18);
+              return (
+                <div key={`bid-d-${lvl.price}`} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-[2.5px]">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-up/10 transition-[width] duration-700 ease-out"
+                    style={{ width: `${Math.min(100, pct)}%` }}
+                  />
+                  <span className="mono-num relative z-10 text-up">{fmtPrice(lvl.price)}</span>
+                  <span className="mono-num relative z-10 text-ink-faint">{fmtQty(lvl.qty)}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
+
+        {/* Column 3 — Order Book (depth chart) */}
+        <DepthChart asksTopDown={asksTopDown} bids={bids} maxCum={maxCum} mid={mid} flash={flash} className="h-full min-h-[220px]" />
       </div>
 
-      <div className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg bg-bg-raised py-1.5 text-[10px] text-ink-faint">
+      <div className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg bg-bg py-1.5 text-[10px] text-ink-faint">
         Spread <span className="mono-num text-ink">{spread.toFixed(1)}</span>
         <span className="text-ink-faint/60">·</span>
         <span className="mono-num text-ink-muted">{spreadPct.toFixed(4)}%</span>
@@ -221,3 +299,4 @@ export function BtcOrderbookPanel({ initial }: { initial: OrderBookSnapshot | un
     </div>
   );
 }
+

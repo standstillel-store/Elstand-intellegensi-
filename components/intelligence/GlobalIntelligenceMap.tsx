@@ -726,7 +726,7 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
                   ))}
                 </svg>
 
-                <div className="relative z-10 mx-auto max-w-5xl">
+                <div className="relative z-10 mx-auto max-w-5xl lg:max-w-6xl xl:max-w-7xl">
                   {/* Support row — News / Stocks / Macro / Sentiment. Kept as a
                       compact strip above the spine rather than boxed into the
                       old 3-col grid, so the wide "AI Core" layout below reads
@@ -739,22 +739,47 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
                     {renderNodeCard("sentiment")}
                   </div>
 
-                  {/* AI Core spine — wide horizontal layout:
+                  {/* AI Core spine — single grid, single render per node
+                      (no filler divs, no order-* tricks, no double-mount).
+                      DOM order is identical at both breakpoints: jpy, btc,
+                      forex, crypto, orb, gold, eth.
+
+                      Mobile/tablet (<1024px, grid-cols-2): pure natural
+                      auto-flow —
+                        JPY   | BTC
+                        Forex | Crypto
+                        [ Orb — col-span-2, auto-starts its own row ]
+                        Gold  | ETH
+
+                      Desktop/laptop (lg: 1024px+ — matching what "PC" means
+                      on real hardware, not the 640px sm: breakpoint that
+                      fired far too early before) — every element gets an
+                      explicit lg:col-start + lg:row-start, independent of
+                      DOM order:
                         JPY  ·        ·  BTC
                         Forex → Orb ← Crypto
                         XAU  ·        ·  ETH
-                              Altcoin
-                      Every id here (jpy, gold, btc, eth, altcoin) is a real
-                      existing node from lib/intelligence/marketMap.ts — same
-                      NodeCard component, same click/expand/drawer behavior as
-                      every other node, just arranged to match the sketch. */}
-                  <div className="grid grid-cols-3 items-center gap-2 sm:grid-cols-5 sm:gap-3">
-                    {renderNodeCard("jpy", "col-span-1")}
-                    <div className="hidden sm:block" />
-                    {renderNodeCard("btc", "col-span-1")}
 
-                    {renderNodeCard("forex", "col-span-1 sm:col-start-1")}
-                    <div className="col-span-1 flex items-center justify-center sm:col-start-2 sm:col-span-3">
+                      jpy/gold/btc/eth/altcoin are real existing node ids
+                      from lib/intelligence/marketMap.ts — same NodeCard,
+                      same click/expand/drawer behavior as every other
+                      node, just arranged to match the sketch. Rendering
+                      any of these — especially the Orb — twice would be a
+                      real bug: registerRef writes into a single shared Map
+                      keyed by node id (see setNodeRef above), so two
+                      mounted instances of the same id race to own that
+                      ref, and whichever mounts last wins even if it's the
+                      hidden one — which would silently break the edge
+                      lines drawn to that node. Each node here mounts
+                      exactly once. */}
+                  <div className="grid grid-cols-2 items-center gap-2 lg:grid-cols-5 lg:gap-3">
+                    {renderNodeCard("jpy", "lg:col-start-1 lg:row-start-1")}
+                    {renderNodeCard("btc", "lg:col-start-5 lg:row-start-1")}
+
+                    {renderNodeCard("forex", "lg:col-start-1 lg:row-start-2")}
+                    {renderNodeCard("crypto", "lg:col-start-5 lg:row-start-2")}
+
+                    <div className="col-span-2 flex items-center justify-center lg:col-start-2 lg:col-span-3 lg:row-start-2">
                       <GlobalOrb
                         node={globalNode}
                         sentimentStatus={live.sentiment.status}
@@ -763,14 +788,12 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
                         registerRef={setNodeRef("global")}
                       />
                     </div>
-                    {renderNodeCard("crypto", "col-span-1 sm:col-start-5")}
 
-                    {renderNodeCard("gold", "col-span-1")}
-                    <div className="hidden sm:block" />
-                    {renderNodeCard("eth", "col-span-1")}
+                    {renderNodeCard("gold", "lg:col-start-1 lg:row-start-3")}
+                    {renderNodeCard("eth", "lg:col-start-5 lg:row-start-3")}
                   </div>
 
-                  <div className="mx-auto mt-2.5 max-w-xs sm:max-w-sm">{renderNodeCard("altcoin")}</div>
+                  <div className="mx-auto mt-2.5 max-w-xs lg:max-w-sm">{renderNodeCard("altcoin")}</div>
                 </div>
 
                 {expandedIds.size > 0 && (
