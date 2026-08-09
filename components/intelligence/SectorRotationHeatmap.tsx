@@ -63,7 +63,7 @@ export function SectorRotationHeatmap({ rows }: { rows: SectorRotationRow[] }) {
     <div className="glow-card ambient-glow ambient-glow-gold p-4">
       <SectionHeader code="ROT" title="Sector Rotation" hint="24h momentum" icon={<Layers size={13} />} accent="gold" />
 
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3">
         {sorted.map((row) => {
           const rgb = TONE_RGB[row.trendTone];
           const intensity = clampIntensity(row.momentum);
