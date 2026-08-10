@@ -6,7 +6,6 @@ import { getUsdReading } from "@/lib/intelligence/sources/usd";
 import { getGoldReading } from "@/lib/intelligence/sources/gold";
 import { getTopMarkets } from "@/lib/coingecko";
 import type { GlobalSentimentReading } from "@/lib/intelligence/globalSentiment";
-import { DollarSign, Gem } from "lucide-react";
 
 export const metadata = {
   title: "Macro Intelligence | ELSTAND INTELLIGENCE",
@@ -65,7 +64,7 @@ export default async function MacroIntelligencePage() {
       price: usd.value,
       changePct: usd.changePct,
       series: usd.series,
-      fallbackIcon: DollarSign,
+      fallbackKind: "usd",
       fallbackBg: "bg-up/15 text-up",
     });
   if (gold)
@@ -75,7 +74,7 @@ export default async function MacroIntelligencePage() {
       price: gold.value,
       changePct: gold.changePct,
       series: gold.series,
-      fallbackIcon: Gem,
+      fallbackKind: "gold",
       fallbackBg: "bg-gold/15 text-gold",
     });
 

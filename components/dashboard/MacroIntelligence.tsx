@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Calendar, ChevronRight, Clock, MessageSquare, Scale, Shield, Target, TrendingUp, Zap, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Calendar, ChevronRight, Clock, DollarSign, Gem, MessageSquare, Scale, Shield, Target, TrendingUp, Zap, type LucideIcon } from "lucide-react";
 import type { MacroEventView } from "@/lib/intelligence/macroEvents";
 import type { NewsItem, EconomicEvent } from "@/lib/types";
 import type { GlobalSentimentReading } from "@/lib/intelligence/globalSentiment";
@@ -32,10 +32,22 @@ export interface WatchlistAsset {
   series?: number[];
   /** Real logo URL (CoinGecko) when available — e.g. BTC/ETH. */
   icon?: string;
-  /** Fallback badge for assets without a real logo (DXY, XAUUSD, ...). */
-  fallbackIcon?: LucideIcon;
+  /**
+   * Fallback badge for assets without a real logo (DXY, XAUUSD, ...).
+   * A key, not the icon component itself — this object crosses the
+   * Server -> Client boundary (built in app/macro-intelligence/page.tsx,
+   * a Server Component) as a prop, and React function components can't be
+   * serialized across that boundary. The actual LucideIcon lookup happens
+   * in AssetIcon below, entirely on the client side.
+   */
+  fallbackKind?: "usd" | "gold";
   fallbackBg?: string;
 }
+
+const FALLBACK_ICONS: Record<NonNullable<WatchlistAsset["fallbackKind"]>, LucideIcon> = {
+  usd: DollarSign,
+  gold: Gem,
+};
 
 function formatCountdown(hoursAway: number): string {
   const abs = Math.abs(hoursAway);
@@ -295,8 +307,8 @@ function NextEventBanner({ event }: { event: MacroEventView }) {
 }
 
 function AssetIcon({ asset, size = 24 }: { asset: WatchlistAsset; size?: number }) {
-  if (asset.fallbackIcon) {
-    const Icon = asset.fallbackIcon;
+  const Icon = asset.fallbackKind ? FALLBACK_ICONS[asset.fallbackKind] : undefined;
+  if (Icon) {
     return (
       <span
         className={`flex shrink-0 items-center justify-center rounded-full ${asset.fallbackBg ?? "bg-line/40 text-ink-faint"}`}
