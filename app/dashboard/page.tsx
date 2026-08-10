@@ -306,16 +306,19 @@ export default async function Home() {
               };
               return (
                 <>
-                  {/* Map + Heatmap sit in the same row and now stretch to equal
-                      height (items-stretch on the grid + h-full/flex-1 inside
-                      each card) — Relationship Timeline moved out to its own
-                      full-width row below so it no longer inflates only the
-                      map's column height. */}
-                  <div className="col-span-6">
+                  {/* Map + Heatmap sit in the same row on wider screens and
+                      stretch to equal height (items-stretch on the grid +
+                      h-full/flex-1 inside each card). On narrow phones they
+                      stack to full width — both are dense enough (node
+                      graph / ticker grid) that squeezing them into a fixed
+                      50% column on a ~360px screen just truncates every
+                      label. Relationship Timeline stays its own full-width
+                      row below. */}
+                  <div className="col-span-12 sm:col-span-6">
                     <GlobalIntelligenceMap finalConclusion={finalConclusion} live={mapLiveInputs} />
                   </div>
 
-                  <div className="col-span-6">
+                  <div className="col-span-12 sm:col-span-6">
                     <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
                   </div>
 
@@ -327,16 +330,18 @@ export default async function Home() {
             })()}
 
             {/* Order flow: BTC-only for now — see lib/intelligence/btcMicrostructure.ts.
-                col-span-7/-5 mirrors on mobile too now (was col-span-12 stacked)
-                so Order Book sits beside Funding & OI like the laptop layout. */}
-            <div className="col-span-7 lg:col-span-7">
+                Stacks full-width on narrow phones (sm:col-span-7/5 only from
+                ~640px up) — the fixed 7/5 split on a ~360px screen was
+                clipping numbers on both panels. Still sits side-by-side like
+                the laptop layout from small-tablet width up. */}
+            <div className="col-span-12 sm:col-span-7">
               <BtcOrderbookPanel initial={btcMicrostructure.orderbook} />
             </div>
-            <div className="col-span-5 lg:col-span-5">
+            <div className="col-span-12 sm:col-span-5">
               <BtcFundingPanel data={btcMicrostructure} />
             </div>
 
-            <div className="col-span-6 lg:col-span-6">
+            <div className="col-span-12 sm:col-span-6">
               <WhaleLiquidityPanel
             transfers={whales}
             whaleSummary={snap.whaleSummary}
@@ -347,7 +352,7 @@ export default async function Home() {
               />
             </div>
 
-            <div className="col-span-6 lg:col-span-6">
+            <div className="col-span-12 sm:col-span-6">
               <InstitutionalFlowPanel smartMoney={snap.smartMoneyAccumulation} />
             </div>
 
@@ -363,11 +368,11 @@ export default async function Home() {
               <MarketPulsePanel inputs={pulseInputs} />
             </div>
 
-            <div className="col-span-6 lg:col-span-6">
+            <div className="col-span-12 sm:col-span-6">
               <AISummaryCard report={marketSnapshotReport} />
             </div>
 
-            <div className="col-span-6 lg:col-span-6">
+            <div className="col-span-12 sm:col-span-6">
               <AIFinalConclusion
                 sentiment={sentiment}
                 btcChange24h={btcMarket?.price_change_percentage_24h_in_currency}
