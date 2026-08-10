@@ -6,7 +6,7 @@ import { getEconomicCalendar } from "../economiccalendar";
 import { generateSignal, type GeneratedSignal } from "./engine";
 import { getStrategyCalibration } from "./performance";
 import { getWallet } from "./paperTrader";
-import { ELVOID_WATCHLIST } from "./watchlist";
+import { getWatchlistCoins } from "./watchlist";
 import { getStablecoinSupply } from "../stablecoins";
 import { getFearGreed } from "../alternativeme";
 import { getUsdReading } from "../intelligence/sources/usd";
@@ -100,10 +100,10 @@ export async function buildSignalForSymbol(
   });
 }
 
-/** Scans the curated watchlist and returns fresh signals sorted by Confidence, highest first. */
-export async function scanWatchlist(limit = ELVOID_WATCHLIST.length): Promise<GeneratedSignal[]> {
-  const ctx = await buildScanContext();
-  const symbols = ELVOID_WATCHLIST.slice(0, limit);
+/** Scans the user's watchlist (lib/elvoid/watchlist.ts) and returns fresh signals sorted by Confidence, highest first. */
+export async function scanWatchlist(limit?: number): Promise<GeneratedSignal[]> {
+  const [ctx, allCoins] = await Promise.all([buildScanContext(), getWatchlistCoins()]);
+  const symbols = typeof limit === "number" ? allCoins.slice(0, limit) : allCoins;
   const results = await Promise.all(symbols.map((s) => buildSignalForSymbol(s, ctx).catch(() => null)));
   return results.filter((r): r is GeneratedSignal => r !== null).sort((a, b) => b.confidence - a.confidence);
 }

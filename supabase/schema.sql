@@ -152,6 +152,23 @@ insert into ai_statistics (id) values (1) on conflict (id) do nothing;
 insert into paper_wallet (id) values (1) on conflict (id) do nothing;
 
 -- ----------------------------------------------------------------------------
+-- watchlist_items — coins "Scan Market" covers (AI Signal -> Watchlist tab).
+-- User-editable (add/remove) instead of the old hardcoded ELVOID_WATCHLIST
+-- array in lib/elvoid/watchlist.ts. Seeded with the same 15 symbols below so
+-- behavior is unchanged for existing deployments until someone edits it.
+-- ----------------------------------------------------------------------------
+create table if not exists watchlist_items (
+  id uuid primary key default gen_random_uuid(),
+  coin text not null unique,                    -- e.g. "BTC"
+  added_at timestamptz not null default now()
+);
+
+insert into watchlist_items (coin) values
+  ('BTC'), ('ETH'), ('SOL'), ('BNB'), ('XRP'), ('DOGE'), ('ADA'), ('AVAX'),
+  ('LINK'), ('SUI'), ('PEPE'), ('WIF'), ('ARB'), ('OP'), ('TON')
+on conflict (coin) do nothing;
+
+-- ----------------------------------------------------------------------------
 -- Row Level Security
 -- ----------------------------------------------------------------------------
 -- This is a single-user paper-trading tool with no login. The app's API
@@ -163,6 +180,7 @@ alter table ai_signals enable row level security;
 alter table ai_journal enable row level security;
 alter table ai_statistics enable row level security;
 alter table paper_wallet enable row level security;
+alter table watchlist_items enable row level security;
 
 -- ----------------------------------------------------------------------------
 -- Storage bucket for trade screenshots (AI Journal / Paper Trader)

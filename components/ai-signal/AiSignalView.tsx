@@ -7,6 +7,7 @@ import { SignalCardPro } from "@/components/ai-signal-pro/SignalCardPro";
 import { ChartAnalysisView } from "@/components/ai-signal-pro/ChartAnalysisView";
 import { Disclaimer } from "@/components/Disclaimer";
 import { SkeletonGrid } from "@/components/ui/Skeleton";
+import { WatchlistPanel } from "@/components/ai-signal/WatchlistPanel";
 import type { AiSignal, OrderType, TradeGrade } from "@/lib/elvoid/types";
 import { GRADE_ORDER } from "@/lib/elvoid/types";
 import { evaluateEntryConfirmation } from "@/lib/elvoid/confirmation";
@@ -154,7 +155,7 @@ export function AiSignalView() {
             tab === "watchlist" ? "border-signal/50 bg-signal/15 text-signal-glow" : "border-line text-ink-muted hover:text-ink"
           )}
         >
-          <ListChecks size={13} /> Watchlist Signals
+          <ListChecks size={13} /> Watchlist
         </button>
       </div>
 
@@ -189,6 +190,8 @@ export function AiSignalView() {
               {scanning ? "Scanning market…" : "Scan Market"}
             </button>
           </div>
+
+          <WatchlistPanel onSignalsChanged={load} />
 
           {error && <p className="text-sm text-down">{error}</p>}
 
