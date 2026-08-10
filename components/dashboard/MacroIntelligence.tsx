@@ -1,3 +1,5 @@
+"use client";
+
 import { AlertTriangle, Calendar, ChevronRight, Clock, MessageSquare, Scale, Shield, Target, TrendingUp, Zap, type LucideIcon } from "lucide-react";
 import type { MacroEventView } from "@/lib/intelligence/macroEvents";
 import type { NewsItem, EconomicEvent } from "@/lib/types";
