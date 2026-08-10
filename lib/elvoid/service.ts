@@ -100,10 +100,50 @@ export async function buildSignalForSymbol(
   });
 }
 
-/** Scans the user's watchlist (lib/elvoid/watchlist.ts) and returns fresh signals sorted by Confidence, highest first. */
-export async function scanWatchlist(limit?: number): Promise<GeneratedSignal[]> {
-  const [ctx, allCoins] = await Promise.all([buildScanContext(), getWatchlistCoins()]);
-  const symbols = typeof limit === "number" ? allCoins.slice(0, limit) : allCoins;
+// Stablecoins never make useful "mover" signals (no directional move to
+// read) — excluded from the broad-scan sample below.
+const STABLE_SYMBOLS = new Set(["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "USDS", "PYUSD"]);
+
+/**
+ * Picks a rotating sample of volatile/"micin"-style movers from the wider
+ * market (outside the fixed watchlist) so "Scan Market" doesn't return the
+ * same ~15 coins every time. Ranked by |24h change| (biggest movers first),
+ * then a random slice of that pool is taken each call so back-to-back scans
+ * surface different names instead of always the same top-N.
+ */
+function pickBroadMovers(markets: CoinMarket[], exclude: Set<string>, count: number): string[] {
+  const candidates = markets
+    .filter((m) => !STABLE_SYMBOLS.has(m.symbol.toUpperCase()) && !exclude.has(m.symbol.toUpperCase()))
+    .filter((m) => typeof m.price_change_percentage_24h_in_currency === "number")
+    .sort((a, b) => Math.abs(b.price_change_percentage_24h_in_currency!) - Math.abs(a.price_change_percentage_24h_in_currency!))
+    .slice(0, Math.max(count * 4, 30)); // a wider pool of the most-active movers, then sample from it
+
+  // Fisher-Yates shuffle so each scan call surfaces a different subset of
+  // that active pool instead of always the same top-N.
+  const pool = [...candidates];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count).map((m) => m.symbol.toUpperCase());
+}
+
+/**
+ * Scans the user's watchlist (lib/elvoid/watchlist.ts) PLUS a rotating batch
+ * of volatile movers from the wider market, and returns fresh signals sorted
+ * by Confidence, highest first. Previously this only ever scanned the fixed
+ * watchlist, so "Scan Market" always surfaced the same ~15 coins — this
+ * keeps every watchlist coin covered (so WatchlistPanel's "Scan Market di
+ * atas scan semua coin di sini" copy stays true) while adding variety on
+ * top so smaller/volatile ("micin") coins outside the watchlist show up too.
+ * Pass `extraCount: 0` to scan the watchlist only (unchanged old behavior).
+ */
+export async function scanWatchlist(limit?: number, extraCount = 8): Promise<GeneratedSignal[]> {
+  const [ctx, watchlistCoins] = await Promise.all([buildScanContext(), getWatchlistCoins()]);
+  const watchlistSet = new Set(watchlistCoins.map((c) => c.toUpperCase()));
+  const broad = extraCount > 0 ? pickBroadMovers(ctx.markets, watchlistSet, extraCount) : [];
+  const merged = [...watchlistCoins, ...broad];
+  const symbols = typeof limit === "number" ? merged.slice(0, limit) : merged;
   const results = await Promise.all(symbols.map((s) => buildSignalForSymbol(s, ctx).catch(() => null)));
   return results.filter((r): r is GeneratedSignal => r !== null).sort((a, b) => b.confidence - a.confidence);
 }

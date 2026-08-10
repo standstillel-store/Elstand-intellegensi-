@@ -8,27 +8,26 @@ import {
   X,
   LayoutDashboard,
   Radar,
-  Wallet,
-  ClipboardList,
   ScanSearch,
-  Waves,
-  Briefcase,
   Settings,
   BookOpen,
-  CandlestickChart,
+  LineChart,
 } from "lucide-react";
 import clsx from "clsx";
 
+// AI PERFORMANCE CONSOLIDATION (see PHASE7-8 notes in CHANGES.md): Portfolio,
+// AI Journal, and Paper Trader are no longer top-level nav items — their
+// routes/components/API/data model are untouched, they're just reached from
+// inside /ai-performance now instead of the hamburger. Same for Live Trading
+// and Whale Activity, which stay linked-but-unlisted (route still works,
+// just not advertised in nav) per the same "remove from nav ≠ delete" rule.
+// Token Scanner stays in nav (explicitly kept per spec).
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/ai-signal", label: "AI Signal", icon: Radar },
-  { href: "/paper-trader", label: "Paper Trader", icon: Wallet },
-  { href: "/trading", label: "Live Trading", icon: CandlestickChart },
-  { href: "/ai-journal", label: "AI Journal", icon: ClipboardList },
-  { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
-  { href: "/whale", label: "Whale Activity", icon: Waves },
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/macro-intelligence", label: "Macro Intelligence", icon: Radar },
-  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
+  { href: "/ai-signal", label: "AI Signal", icon: Radar },
+  { href: "/ai-performance", label: "AI Performance", icon: LineChart },
+  { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

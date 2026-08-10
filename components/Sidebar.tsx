@@ -2,29 +2,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import {
-  LayoutDashboard,
-  Radar,
-  Wallet,
-  ClipboardList,
-  ScanSearch,
-  Waves,
-  Briefcase,
-  Settings,
-  BookOpen,
-  CandlestickChart,
-} from "lucide-react";
+import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart } from "lucide-react";
 
+// AI PERFORMANCE CONSOLIDATION: Portfolio / AI Journal / Paper Trader are no
+// longer top-level nav items — routes, components, API, and data model are
+// untouched, they're reached from inside /ai-performance now. Live Trading
+// and Whale Activity stay linked-but-unlisted the same way (route still
+// live, just not in nav). Token Scanner stays in nav (explicitly kept per
+// spec). See lib/elvoid/performance.ts and app/ai-performance/page.tsx for
+// where the consolidated sections now live.
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/ai-signal", label: "AI Signal", icon: Radar },
-  { href: "/paper-trader", label: "Paper Trader", icon: Wallet },
-  { href: "/trading", label: "Live Trading", icon: CandlestickChart },
-  { href: "/ai-journal", label: "AI Journal", icon: ClipboardList },
-  { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
-  { href: "/whale", label: "Whale Activity", icon: Waves },
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/macro-intelligence", label: "Macro Intelligence", icon: Radar },
-  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
+  { href: "/ai-signal", label: "AI Signal", icon: Radar },
+  { href: "/ai-performance", label: "AI Performance", icon: LineChart },
+  { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

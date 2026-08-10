@@ -1,8 +1,40 @@
-import { redirect } from "next/navigation";
+import { AppShell } from "@/components/AppShell";
+import { AiPerformanceView } from "@/components/ai-performance/AiPerformanceView";
+import { getWallet, getDefaultWallet, getStatistics, getDefaultStatistics } from "@/lib/elvoid/paperTrader";
+import { listSignals } from "@/lib/elvoid/signals";
+import { getPerformanceReport, getJournalEntries } from "@/lib/elvoid/performance";
 
-// AI Performance was folded into the "Performance" tab on /ai-journal during
-// the 2026-07 redesign (one stats surface instead of two competing pages).
-// Kept as a redirect so old bookmarks/links don't 404.
-export default function AiPerformanceRedirect() {
-  redirect("/ai-journal");
+// AI PERFORMANCE — single source of truth for "how good is the AI doing".
+// Every number here is re-read from the exact same tables Portfolio, AI
+// Journal, and Paper Trader already used (paper_wallet, ai_statistics,
+// ai_signals, ai_journal) — nothing new is computed or duplicated, this page
+// just presents them together. Those three routes/components still exist
+// and still work (reachable via the "View full ->" buttons below); this is
+// additive, not a replacement.
+export const metadata = { title: "AI Performance | ELSTAND INTELLIGENCE" };
+export const revalidate = 30;
+
+export default async function AiPerformancePage() {
+  const [wallet, stats, openSignals, report, recentJournal] = await Promise.all([
+    getWallet(),
+    getStatistics(),
+    listSignals({ status: ["new", "open", "tp1_hit"], limit: 50 }),
+    getPerformanceReport(),
+    getJournalEntries(10),
+  ]);
+
+  return (
+    <AppShell
+      title="AI Performance"
+      subtitle="AI trading performance, execution history, and portfolio analytics."
+    >
+      <AiPerformanceView
+        wallet={wallet ?? getDefaultWallet()}
+        stats={stats ?? getDefaultStatistics()}
+        openSignals={openSignals}
+        report={report}
+        recentJournal={recentJournal}
+      />
+    </AppShell>
+  );
 }
