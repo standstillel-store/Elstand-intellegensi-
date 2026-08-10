@@ -98,13 +98,30 @@ export function AiSignalView() {
 
   async function handleExecute(signal: AiSignal, orderType: OrderType) {
     setExecutingId(signal.id);
+    setError(null);
     try {
-      await fetch("/api/paper-trader/execute", {
+      const raw = await fetch("/api/paper-trader/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signalId: signal.id, orderType }),
       });
+      // Previously the response here was never checked — if executeSignal()
+      // returned { error: "..." } (400), this silently did nothing: the
+      // button just stopped spinning with no feedback, so the trade looked
+      // like it never happened even though nothing actually failed loudly.
+      let res: { error?: string; message?: string } | null = null;
+      try {
+        res = await raw.json();
+      } catch {
+        // no/invalid JSON body — fall through to the generic error below
+      }
+      if (!raw.ok || res?.error) {
+        setError(res?.message ?? res?.error ?? `Execute gagal (HTTP ${raw.status}) — coba refresh dan cek lagi status sinyalnya.`);
+        return;
+      }
       await load();
+    } catch {
+      setError("Execute gagal — koneksi ke server terputus atau timeout. Coba lagi sebentar.");
     } finally {
       setExecutingId(null);
     }
