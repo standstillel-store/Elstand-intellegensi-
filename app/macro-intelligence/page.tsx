@@ -6,6 +6,7 @@ import { getUsdReading } from "@/lib/intelligence/sources/usd";
 import { getGoldReading } from "@/lib/intelligence/sources/gold";
 import { getTopMarkets } from "@/lib/coingecko";
 import type { GlobalSentimentReading } from "@/lib/intelligence/globalSentiment";
+import { DollarSign, Gem } from "lucide-react";
 
 export const metadata = {
   title: "Macro Intelligence | ELSTAND INTELLIGENCE",
@@ -46,6 +47,7 @@ export default async function MacroIntelligencePage() {
       price: btc.current_price,
       changePct: btc.price_change_percentage_24h_in_currency,
       series: btc.sparkline_in_7d?.price,
+      icon: btc.image,
     });
   if (eth)
     watchlist.push({
@@ -54,9 +56,28 @@ export default async function MacroIntelligencePage() {
       price: eth.current_price,
       changePct: eth.price_change_percentage_24h_in_currency,
       series: eth.sparkline_in_7d?.price,
+      icon: eth.image,
     });
-  if (usd) watchlist.push({ symbol: "DXY", name: "U.S. Dollar Index", price: usd.value, changePct: usd.changePct, series: usd.series });
-  if (gold) watchlist.push({ symbol: "XAUUSD", name: "Gold", price: gold.value, changePct: gold.changePct, series: gold.series });
+  if (usd)
+    watchlist.push({
+      symbol: "DXY",
+      name: "U.S. Dollar Index",
+      price: usd.value,
+      changePct: usd.changePct,
+      series: usd.series,
+      fallbackIcon: DollarSign,
+      fallbackBg: "bg-up/15 text-up",
+    });
+  if (gold)
+    watchlist.push({
+      symbol: "XAUUSD",
+      name: "Gold",
+      price: gold.value,
+      changePct: gold.changePct,
+      series: gold.series,
+      fallbackIcon: Gem,
+      fallbackBg: "bg-gold/15 text-gold",
+    });
 
   // Lightweight sentiment read from the news feed itself — same pos/neg
   // count the old /news page already showed, reused here as "Macro

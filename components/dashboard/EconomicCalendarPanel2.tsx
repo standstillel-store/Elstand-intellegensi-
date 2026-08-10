@@ -35,23 +35,40 @@ export function EconomicCalendarPanel({ events }: { events: EconomicEvent[] }) {
 
   const currencies = useMemo(() => Array.from(new Set(events.map((e) => e.country))).sort(), [events]);
 
-  const filtered = useMemo(() => {
+  const byRange = useMemo(() => {
     const now = new Date();
     const todayStart = startOfDay(now).getTime();
     const tomorrowStart = todayStart + 86400000;
     const weekEnd = todayStart + 7 * 86400000;
 
-    return events
-      .filter((e) => {
-        const t = new Date(e.date).getTime();
-        if (range === "today") return t >= todayStart && t < tomorrowStart;
-        if (range === "tomorrow") return t >= tomorrowStart && t < tomorrowStart + 86400000;
-        return t >= todayStart && t < weekEnd;
-      })
-      .filter((e) => impactFilter === "all" || e.impact === impactFilter)
-      .filter((e) => currencyFilter === "all" || e.country === currencyFilter)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [events, range, impactFilter, currencyFilter]);
+    const inRange = (e: EconomicEvent, r: "today" | "tomorrow" | "week") => {
+      const t = new Date(e.date).getTime();
+      if (r === "today") return t >= todayStart && t < tomorrowStart;
+      if (r === "tomorrow") return t >= tomorrowStart && t < tomorrowStart + 86400000;
+      return t >= todayStart && t < weekEnd;
+    };
+
+    return {
+      today: events.filter((e) => inRange(e, "today")),
+      tomorrow: events.filter((e) => inRange(e, "tomorrow")),
+      week: events.filter((e) => inRange(e, "week")),
+    };
+  }, [events]);
+
+  // "Today" can legitimately be empty (quiet calendar day, or nothing left
+  // after the last release) — rather than a dead empty card, fall back to
+  // showing the rest of the week so there's always something real to scan.
+  const usingFallback = range === "today" && byRange.today.length === 0 && byRange.week.length > 0;
+  const rangeEvents = usingFallback ? byRange.week : byRange[range];
+
+  const filtered = useMemo(
+    () =>
+      rangeEvents
+        .filter((e) => impactFilter === "all" || e.impact === impactFilter)
+        .filter((e) => currencyFilter === "all" || e.country === currencyFilter)
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+    [rangeEvents, impactFilter, currencyFilter],
+  );
 
   const byDay = useMemo(() => {
     const map = new Map<string, EconomicEvent[]>();
@@ -114,6 +131,10 @@ export function EconomicCalendarPanel({ events }: { events: EconomicEvent[] }) {
           Today <ChevronDown size={13} />
         </span>
       </div>
+
+      {usingFallback ? (
+        <p className="mb-2 text-[11px] text-amber">Tidak ada event tersisa hari ini &mdash; menampilkan sisa minggu ini.</p>
+      ) : null}
 
       {filtered.length === 0 ? (
         <p className="py-8 text-center text-xs text-ink-faint">Tidak ada event untuk filter ini.</p>
