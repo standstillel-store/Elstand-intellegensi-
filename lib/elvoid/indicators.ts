@@ -238,3 +238,227 @@ export function calcMacd(candles: Candle[], fast = 12, slow = 26, signalPeriod =
     crossover,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Additional indicators for the AI Signal "Indicators Suite" panel. Same
+// rules as above: pure functions, real OHLCV in, numbers out, nothing
+// fabricated — every function below returns `undefined` (or an
+// "insufficient data" flag where relevant) when there simply isn't enough
+// history yet, instead of guessing.
+// ---------------------------------------------------------------------------
+
+export interface BollingerReading {
+  upper: number;
+  middle: number;
+  lower: number;
+  bandwidth: number; // (upper-lower)/middle, as a plain ratio
+  percentB: number; // where the last close sits within the bands, 0..1 (can exceed if outside)
+}
+
+export function calcBollinger(candles: Candle[], period = 20, stdDevMult = 2): BollingerReading | undefined {
+  if (candles.length < period) return undefined;
+  const closes = candles.map((c) => c.close);
+  const window = closes.slice(-period);
+  const middle = window.reduce((s, v) => s + v, 0) / period;
+  const variance = window.reduce((s, v) => s + (v - middle) ** 2, 0) / period;
+  const stdDev = Math.sqrt(variance);
+  const upper = middle + stdDevMult * stdDev;
+  const lower = middle - stdDevMult * stdDev;
+  const last = closes[closes.length - 1];
+  return {
+    upper,
+    middle,
+    lower,
+    bandwidth: middle !== 0 ? (upper - lower) / middle : 0,
+    percentB: upper !== lower ? (last - lower) / (upper - lower) : 0.5,
+  };
+}
+
+export interface AdxReading {
+  adx: number;
+  plusDI: number;
+  minusDI: number;
+  trendStrength: "weak" | "developing" | "strong";
+}
+
+/** Wilder's ADX/+DI/-DI. Needs roughly 2x period candles for the smoothing to settle. */
+export function calcAdx(candles: Candle[], period = 14): AdxReading | undefined {
+  if (candles.length < period * 2 + 1) return undefined;
+  const plusDM: number[] = [0];
+  const minusDM: number[] = [0];
+  const tr: number[] = [0];
+  for (let i = 1; i < candles.length; i++) {
+    const up = candles[i].high - candles[i - 1].high;
+    const down = candles[i - 1].low - candles[i].low;
+    plusDM.push(up > down && up > 0 ? up : 0);
+    minusDM.push(down > up && down > 0 ? down : 0);
+    tr.push(
+      Math.max(
+        candles[i].high - candles[i].low,
+        Math.abs(candles[i].high - candles[i - 1].close),
+        Math.abs(candles[i].low - candles[i - 1].close)
+      )
+    );
+  }
+  const smooth = (series: number[]): number[] => {
+    const out: number[] = new Array(series.length).fill(NaN);
+    let sum = series.slice(1, period + 1).reduce((s, v) => s + v, 0);
+    out[period] = sum;
+    for (let i = period + 1; i < series.length; i++) {
+      sum = sum - sum / period + series[i];
+      out[i] = sum;
+    }
+    return out;
+  };
+  const trSm = smooth(tr);
+  const plusSm = smooth(plusDM);
+  const minusSm = smooth(minusDM);
+
+  const plusDIArr = trSm.map((v, i) => (v ? (plusSm[i] / v) * 100 : NaN));
+  const minusDIArr = trSm.map((v, i) => (v ? (minusSm[i] / v) * 100 : NaN));
+  const dx = plusDIArr.map((p, i) => {
+    const m = minusDIArr[i];
+    const sum = p + m;
+    return sum ? (Math.abs(p - m) / sum) * 100 : NaN;
+  });
+
+  const validDx = dx.filter((v) => !Number.isNaN(v));
+  if (validDx.length < period) return undefined;
+  const adxSeries = ema(validDx, period);
+  const adx = adxSeries[adxSeries.length - 1];
+  const plusDI = plusDIArr[plusDIArr.length - 1];
+  const minusDI = minusDIArr[minusDIArr.length - 1];
+
+  return {
+    adx,
+    plusDI,
+    minusDI,
+    trendStrength: adx >= 40 ? "strong" : adx >= 20 ? "developing" : "weak",
+  };
+}
+
+export interface VwapReading {
+  vwap: number;
+  deviationPct: number; // last close vs VWAP, as %
+}
+
+/**
+ * Cumulative VWAP over whatever candle window was loaded (this page has no
+ * exchange session boundary to anchor to, so it's "VWAP since the loaded
+ * window" rather than a calendar-session VWAP — labeled as such in the UI).
+ */
+export function calcVwap(candles: Candle[]): VwapReading | undefined {
+  if (!candles.length) return undefined;
+  let cumPV = 0;
+  let cumVol = 0;
+  for (const c of candles) {
+    const typical = (c.high + c.low + c.close) / 3;
+    cumPV += typical * c.volume;
+    cumVol += c.volume;
+  }
+  if (cumVol <= 0) return undefined;
+  const vwap = cumPV / cumVol;
+  const last = candles[candles.length - 1].close;
+  return { vwap, deviationPct: ((last - vwap) / vwap) * 100 };
+}
+
+export interface IchimokuReading {
+  tenkan: number;
+  kijun: number;
+  senkouA: number;
+  senkouB: number;
+  cloud: "bullish" | "bearish" | "flat";
+  priceVsCloud: "above" | "below" | "inside";
+}
+
+/** Standard 9/26/52 Ichimoku. Senkou A/B are reported at their current (unshifted) value — this panel shows current state, not a forward-projected cloud drawing. */
+export function calcIchimoku(candles: Candle[]): IchimokuReading | undefined {
+  if (candles.length < 52) return undefined;
+  const donchianMid = (period: number, endIdx: number) => {
+    const window = candles.slice(Math.max(0, endIdx - period + 1), endIdx + 1);
+    const high = Math.max(...window.map((c) => c.high));
+    const low = Math.min(...window.map((c) => c.low));
+    return (high + low) / 2;
+  };
+  const lastIdx = candles.length - 1;
+  const tenkan = donchianMid(9, lastIdx);
+  const kijun = donchianMid(26, lastIdx);
+  const senkouA = (tenkan + kijun) / 2;
+  const senkouB = donchianMid(52, lastIdx);
+  const last = candles[lastIdx].close;
+  const cloudTop = Math.max(senkouA, senkouB);
+  const cloudBottom = Math.min(senkouA, senkouB);
+  return {
+    tenkan,
+    kijun,
+    senkouA,
+    senkouB,
+    cloud: senkouA > senkouB ? "bullish" : senkouA < senkouB ? "bearish" : "flat",
+    priceVsCloud: last > cloudTop ? "above" : last < cloudBottom ? "below" : "inside",
+  };
+}
+
+export interface SupertrendReading {
+  value: number;
+  direction: "up" | "down";
+  flippedThisBar: boolean;
+}
+
+/** Standard ATR-based Supertrend (multiplier x ATR period), computed candle-by-candle so the direction flip is genuine, not just a snapshot. */
+export function calcSupertrend(candles: Candle[], period = 10, multiplier = 3): SupertrendReading | undefined {
+  if (candles.length < period + 2) return undefined;
+  const atrSeries = atr(candles, period);
+  let direction: "up" | "down" = "up";
+  let st = candles[0].close;
+  let flipped = false;
+  for (let i = period; i < candles.length; i++) {
+    const c = candles[i];
+    const a = atrSeries[i];
+    if (Number.isNaN(a)) continue;
+    const mid = (c.high + c.low) / 2;
+    const upperBand = mid + multiplier * a;
+    const lowerBand = mid - multiplier * a;
+    const prevDirection = direction;
+    if (c.close > st) direction = "up";
+    else if (c.close < st) direction = "down";
+    st = direction === "up" ? Math.max(lowerBand, i > period && prevDirection === "up" ? st : lowerBand) : Math.min(upperBand, i > period && prevDirection === "down" ? st : upperBand);
+    flipped = i === candles.length - 1 && prevDirection !== direction;
+  }
+  return { value: st, direction, flippedThisBar: flipped };
+}
+
+export interface VolumeProfileBucket {
+  priceLow: number;
+  priceHigh: number;
+  volume: number;
+}
+
+export interface VolumeProfileReading {
+  buckets: VolumeProfileBucket[];
+  pocPrice: number; // Point of Control — price bucket with the most traded volume
+  maxVolume: number;
+}
+
+/** Splits the visible candle range into `bins` equal price buckets and sums each candle's real volume into whichever bucket its close falls in. */
+export function calcVolumeProfile(candles: Candle[], bins = 12): VolumeProfileReading | undefined {
+  if (candles.length < 5) return undefined;
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const max = Math.max(...highs);
+  const min = Math.min(...lows);
+  if (max <= min) return undefined;
+  const step = (max - min) / bins;
+  const buckets: VolumeProfileBucket[] = Array.from({ length: bins }, (_, i) => ({
+    priceLow: min + i * step,
+    priceHigh: min + (i + 1) * step,
+    volume: 0,
+  }));
+  for (const c of candles) {
+    let idx = Math.floor((c.close - min) / step);
+    idx = Math.max(0, Math.min(bins - 1, idx));
+    buckets[idx].volume += c.volume;
+  }
+  const maxVolume = Math.max(...buckets.map((b) => b.volume), 1e-9);
+  const poc = buckets.reduce((best, b) => (b.volume > best.volume ? b : best), buckets[0]);
+  return { buckets, pocPrice: (poc.priceLow + poc.priceHigh) / 2, maxVolume };
+}

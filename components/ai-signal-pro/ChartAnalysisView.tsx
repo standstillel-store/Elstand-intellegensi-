@@ -270,7 +270,7 @@ export function ChartAnalysisView() {
       </div>
 
       {/* Indicators Suite — directly below the Chart + Order Book workspace */}
-      <IndicatorsSuitePanel symbol={symbol} />
+      <IndicatorsSuitePanel symbol={symbol} candles={candles} />
 
       {/* AI Market Bias + AI Reasoning — full width, after the indicators */}
       <div className="space-y-4">
