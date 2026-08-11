@@ -53,6 +53,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
   const [failCount, setFailCount] = useState(0);
   const [flash, setFlash] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +63,11 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
     setFailCount(0);
 
     async function poll() {
-      controllerRef.current?.abort();
+      // Skip this tick instead of aborting a still-pending request — a slow
+      // (but eventually successful) response should never be counted as a
+      // failure just because the next 3s tick fired first.
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       const controller = new AbortController();
       controllerRef.current = controller;
       try {
@@ -82,8 +87,11 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
         setFailCount(0);
         setFlash(true);
         setTimeout(() => setFlash(false), 260);
-      } catch {
-        if (!cancelled) setFailCount((f) => f + 1);
+      } catch (err) {
+        const isAbort = err instanceof DOMException && err.name === "AbortError";
+        if (!cancelled && !isAbort) setFailCount((f) => f + 1);
+      } finally {
+        inFlightRef.current = false;
       }
     }
 
