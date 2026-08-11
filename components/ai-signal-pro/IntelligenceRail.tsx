@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, Waves, Building2, Newspaper } from "lucide-react";
+import { Waves, Building2, Newspaper } from "lucide-react";
 import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
 import { RadialGauge } from "@/components/ui/RadialGauge";
@@ -63,37 +63,6 @@ export function IntelligenceRail({ symbol, signal }: { symbol: string; signal: A
   const newsToShow = relevantNews.length ? relevantNews : news.slice(0, 3);
 
   const rng = useMemo(() => mulberry32(seedFromString(symbol + (signal?.entry ?? 0))), [symbol, signal?.entry]);
-  const basePrice = signal?.entry ?? 100;
-
-  // Order Book "feels alive": re-tick every ~1.8s so sizes/spread visibly
-  // breathe, without fully reshuffling the book each render.
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1800);
-    return () => clearInterval(id);
-  }, []);
-  const tickRng = useMemo(() => mulberry32(seedFromString(`${symbol}:${tick}`)), [symbol, tick]);
-
-  const orderBook = useMemo(() => {
-    const spreadBps = (2 + rng() * 6) * (0.9 + tickRng() * 0.2);
-    const spread = (basePrice * spreadBps) / 10000;
-    const bids = Array.from({ length: 5 }, (_, i) => ({
-      price: basePrice - spread / 2 - i * spread * (0.6 + rng() * 0.8),
-      size: (0.4 + rng() * 6) * (0.85 + tickRng() * 0.3),
-    }));
-    const asks = Array.from({ length: 5 }, (_, i) => ({
-      price: basePrice + spread / 2 + i * spread * (0.6 + rng() * 0.8),
-      size: (0.4 + rng() * 6) * (0.85 + tickRng() * 0.3),
-    }));
-    const maxSize = Math.max(...bids.map((b) => b.size), ...asks.map((a) => a.size));
-    return { bids, asks, spread, spreadBps, maxSize };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rng, tickRng, basePrice]);
-
-  /** Heat intensity: bigger size relative to the book's max = more saturated fill, same idea as a real depth-chart heatmap. */
-  function heatOpacity(size: number, maxSize: number): number {
-    return 0.08 + (size / maxSize) * 0.28;
-  }
 
   const breadth = useMemo(() => {
     const advancers = Math.round(35 + rng() * 45);
@@ -193,51 +162,6 @@ export function IntelligenceRail({ symbol, signal }: { symbol: string; signal: A
           ) : (
             <p className="py-3 text-center text-[11px] text-ink-faint">{symbol}USDT tidak tersedia di Binance Futures.</p>
           )}
-        </div>
-      </div>
-
-      {/* Order Book — simulated depth, clearly tagged (no free public order-book feed wired for this page yet) */}
-      <div className="glow-card p-4">
-        <div className="mb-1 flex items-center justify-between">
-          <SectionHeader code="OB" title="Order Book" hint={`Spread ${orderBook.spreadBps.toFixed(1)} bps`} />
-          <div className="flex items-center gap-1.5">
-            <span className="live-dot bg-signal" />
-            <SimulatedTag />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 text-[11px]">
-          <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-ink-faint">
-              <BookOpen size={11} /> Bids
-            </p>
-            <div className="space-y-1">
-              {orderBook.bids.map((b, i) => (
-                <div key={i} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-1">
-                  <div
-                    className="absolute inset-y-0 right-0 bg-up transition-all duration-700 ease-out"
-                    style={{ width: `${(b.size / orderBook.maxSize) * 100}%`, opacity: heatOpacity(b.size, orderBook.maxSize) }}
-                  />
-                  <span className="mono-num relative text-up transition-all duration-700">{formatUsd(b.price)}</span>
-                  <span className="mono-num relative text-ink-muted transition-all duration-700">{b.size.toFixed(3)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="mb-1.5 flex items-center justify-end gap-1.5 text-ink-faint">Asks</p>
-            <div className="space-y-1">
-              {orderBook.asks.map((a, i) => (
-                <div key={i} className="relative flex items-center justify-between overflow-hidden rounded px-1.5 py-1">
-                  <div
-                    className="absolute inset-y-0 left-0 bg-down transition-all duration-700 ease-out"
-                    style={{ width: `${(a.size / orderBook.maxSize) * 100}%`, opacity: heatOpacity(a.size, orderBook.maxSize) }}
-                  />
-                  <span className="mono-num relative text-ink-muted transition-all duration-700">{a.size.toFixed(3)}</span>
-                  <span className="mono-num relative text-down transition-all duration-700">{formatUsd(a.price)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 

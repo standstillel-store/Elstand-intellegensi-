@@ -9,6 +9,8 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { Badge, SideBadge } from "@/components/ui/Badge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { IntelligenceRail } from "./IntelligenceRail";
+import { OrderBookPanel } from "./OrderBookPanel";
+import { IndicatorsSuitePanel } from "./IndicatorsSuitePanel";
 import { formatUsd } from "@/lib/format";
 import type { Candle, ScanResult, OrderType, TradeGrade } from "@/lib/elvoid/types";
 import type { ChartLevels } from "./TradingChart";
@@ -231,7 +233,8 @@ export function ChartAnalysisView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
+      {/* Chart | Order Book — primary trading workspace, ~60/40 on desktop */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="glow-card overflow-hidden p-2">
           {candlesLoading ? (
             <div className="flex h-[440px] items-center justify-center gap-2 text-sm text-ink-muted">
@@ -263,17 +266,24 @@ export function ChartAnalysisView() {
           </div>
         </div>
 
-        <div className="space-y-4">
-          {analyzing && <SkeletonCard lines={8} />}
+        <OrderBookPanel symbol={symbol} referencePrice={signal?.entry ?? null} />
+      </div>
 
-          {!analyzing && !signal && (
-            <div className="glow-card flex flex-col items-center gap-2 p-6 text-center">
-              <Minus size={20} className="text-ink-faint" />
-              <p className="text-sm text-ink-muted">{message ?? "Belum ada setup yang jelas untuk kombinasi ini."}</p>
-            </div>
-          )}
+      {/* Indicators Suite — directly below the Chart + Order Book workspace */}
+      <IndicatorsSuitePanel symbol={symbol} />
 
-          {!analyzing && signal && (
+      {/* AI Market Bias + AI Reasoning — full width, after the indicators */}
+      <div className="space-y-4">
+        {analyzing && <SkeletonCard lines={8} />}
+
+        {!analyzing && !signal && (
+          <div className="glow-card flex flex-col items-center gap-2 p-6 text-center">
+            <Minus size={20} className="text-ink-faint" />
+            <p className="text-sm text-ink-muted">{message ?? "Belum ada setup yang jelas untuk kombinasi ini."}</p>
+          </div>
+        )}
+
+        {!analyzing && signal && (
             <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="glow-card space-y-4 p-4">
               <SectionHeader code="AI" title="Market Bias" hint={signal.timeframe} />
 
@@ -405,8 +415,8 @@ export function ChartAnalysisView() {
             </motion.div>
           )}
         </div>
-      </div>
 
+      {/* Market Intelligence — secondary context, after the AI analysis */}
       <IntelligenceRail symbol={symbol} signal={signal} />
     </div>
   );
