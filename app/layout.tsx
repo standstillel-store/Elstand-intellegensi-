@@ -7,6 +7,7 @@ import { TokenAnalyzerProvider } from "@/components/token-analyzer/TokenAnalyzer
 import { TokenAnalyzerDrawer } from "@/components/token-analyzer/TokenAnalyzerDrawer";
 import { ThemePreferenceProvider } from "@/components/ThemePreferenceProvider";
 import { Web3Provider } from "@/components/providers/Web3Provider";
+import { PaperTraderAutoSync } from "@/components/providers/PaperTraderAutoSync";
 
 const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 const mono = JetBrains_Mono({
@@ -48,6 +49,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang="en" className={`${sans.variable} ${mono.variable} ${display.variable}`}>
       <body className="bg-bg text-ink font-sans antialiased">
         <ThemePreferenceProvider />
+        <PaperTraderAutoSync />
         <Web3Provider cookies={cookieHeader}>
           <TokenAnalyzerProvider>
             {children}
