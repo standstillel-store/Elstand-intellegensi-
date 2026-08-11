@@ -21,10 +21,6 @@ interface Status {
 export function SettingsView({ initialWallet }: { initialWallet: PaperWallet }) {
   const [wallet, setWallet] = useState(initialWallet);
   const [riskInput, setRiskInput] = useState(String(initialWallet.risk_per_trade));
-  const [autoExecute, setAutoExecute] = useState(initialWallet.auto_execute);
-  const [autoExecuteMinGrade, setAutoExecuteMinGrade] = useState<PaperWallet["auto_execute_min_grade"]>(
-    initialWallet.auto_execute_min_grade
-  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
@@ -47,25 +43,7 @@ export function SettingsView({ initialWallet }: { initialWallet: PaperWallet }) 
       const res = await fetch("/api/paper-trader/wallet", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ riskPercent: value, autoExecute, autoExecuteMinGrade }),
-      }).then((r) => r.json());
-      if (res.wallet) {
-        setWallet(res.wallet);
-        setSaved(true);
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleSaveAiEngine() {
-    setSaving(true);
-    setSaved(false);
-    try {
-      const res = await fetch("/api/paper-trader/wallet", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ riskPercent: wallet.risk_per_trade, autoExecute, autoExecuteMinGrade }),
+        body: JSON.stringify({ riskPercent: value }),
       }).then((r) => r.json());
       if (res.wallet) {
         setWallet(res.wallet);
@@ -113,21 +91,7 @@ export function SettingsView({ initialWallet }: { initialWallet: PaperWallet }) 
 
       <GeneralSection />
       <AppearanceSection />
-      <AiEngineSection
-        autoExecute={autoExecute}
-        autoExecuteMinGrade={autoExecuteMinGrade}
-        onToggleAutoExecute={() => {
-          setAutoExecute((v) => !v);
-          setSaved(false);
-        }}
-        onChangeGrade={(g) => {
-          setAutoExecuteMinGrade(g);
-          setSaved(false);
-        }}
-        onSave={handleSaveAiEngine}
-        saving={saving}
-        saved={saved}
-      />
+      <AiEngineSection />
       <AiEnergySection />
       <PaperTradingSection
         wallet={wallet}

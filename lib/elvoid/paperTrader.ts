@@ -26,6 +26,16 @@ const DEFAULT_WALLET: PaperWallet = {
   updated_at: new Date(0).toISOString(),
 };
 
+/**
+ * Auto-execute is now a hardcoded, always-on behavior — not a user-facing
+ * Settings toggle (removed from Settings UI; the `auto_execute` /
+ * `auto_execute_min_grade` columns on `paper_wallet` are kept for schema
+ * compat but no longer read for this decision). Every freshly-generated
+ * signal (from Scan Market or single-coin Analyze) meeting this minimum
+ * grade is auto-opened as a Market Order in the paper trader.
+ */
+export const AUTO_EXECUTE_MIN_GRADE: PaperWallet["auto_execute_min_grade"] = "A";
+
 export function getDefaultWallet(): PaperWallet {
   return { ...DEFAULT_WALLET, updated_at: new Date().toISOString() };
 }

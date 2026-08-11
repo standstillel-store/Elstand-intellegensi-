@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { scanWatchlist } from "@/lib/elvoid/service";
 import { insertSignals } from "@/lib/elvoid/signals";
-import { getWallet, executeSignal, gradeMeetsThreshold } from "@/lib/elvoid/paperTrader";
+import { executeSignal, gradeMeetsThreshold, AUTO_EXECUTE_MIN_GRADE } from "@/lib/elvoid/paperTrader";
 import type { AiSignal } from "@/lib/elvoid/types";
 import type { GeneratedSignal } from "@/lib/elvoid/engine";
 import { reserveEnergy, settleEnergy } from "@/lib/energyGate";
@@ -21,13 +21,11 @@ async function attachAiScanner(generated: GeneratedSignal[]) {
   return aiScanner;
 }
 
-/** AI auto-execute: opt-in via Settings. Only fires for freshly-persisted signals — never for the unsaved-fallback path (no Supabase, nothing to track anyway). */
+/** AI auto-execute: always on (hardcoded, see AUTO_EXECUTE_MIN_GRADE). Only fires for freshly-persisted signals — never for the unsaved-fallback path (no Supabase, nothing to track anyway). */
 async function autoExecuteQualifying(saved: AiSignal[]): Promise<string[]> {
-  const wallet = await getWallet();
-  if (!wallet?.auto_execute) return [];
   const executedIds: string[] = [];
   for (const signal of saved) {
-    if (!signal.trade_grade || !gradeMeetsThreshold(signal.trade_grade, wallet.auto_execute_min_grade)) continue;
+    if (!signal.trade_grade || !gradeMeetsThreshold(signal.trade_grade, AUTO_EXECUTE_MIN_GRADE)) continue;
     const result = await executeSignal(signal.id, "market");
     if (!("error" in result)) executedIds.push(signal.id);
   }

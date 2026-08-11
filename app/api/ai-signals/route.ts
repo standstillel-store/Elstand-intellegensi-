@@ -4,6 +4,7 @@ import { listSignals, insertSignal } from "@/lib/elvoid/signals";
 import type { SignalStatus } from "@/lib/elvoid/types";
 import type { GeneratedSignal } from "@/lib/elvoid/engine";
 import { reserveEnergy, settleEnergy } from "@/lib/energyGate";
+import { executeSignal, gradeMeetsThreshold, AUTO_EXECUTE_MIN_GRADE } from "@/lib/elvoid/paperTrader";
 import { runAiOracle, runAiTechnicalAnalyst, runAiConfidenceEngine, isAiCoreConfigured } from "@/lib/ai/core/router";
 
 // Phase: AI CORE ENGINE — opt-in only (POST body `includeAiReasoning: true`).
@@ -77,8 +78,14 @@ export async function POST(req: Request) {
     const aiReasoning = includeAiReasoning ? await attachAiReasoning(generated) : null;
     const saved = await insertSignal(generated);
     if (saved) {
+      // Auto-execute: always on (hardcoded, see AUTO_EXECUTE_MIN_GRADE in lib/elvoid/paperTrader.ts).
+      let autoExecuted = false;
+      if (saved.trade_grade && gradeMeetsThreshold(saved.trade_grade, AUTO_EXECUTE_MIN_GRADE)) {
+        const result = await executeSignal(saved.id, "market");
+        autoExecuted = !("error" in result);
+      }
       if (gate.reservation) await settleEnergy(gate.reservation, true);
-      return NextResponse.json({ signal: saved, persisted: true, ...(aiReasoning ? { aiReasoning } : {}) });
+      return NextResponse.json({ signal: saved, persisted: true, autoExecuted, ...(aiReasoning ? { aiReasoning } : {}) });
     }
 
     // Supabase not configured — still return the freshly generated signal so

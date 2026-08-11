@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Radar, Loader2, LineChart, ListChecks } from "lucide-react";
 import clsx from "clsx";
 import { SignalCardPro } from "@/components/ai-signal-pro/SignalCardPro";
@@ -17,6 +17,7 @@ type Tab = "chart" | "watchlist";
 const GRADE_FILTERS: TradeGrade[] = ["A++", "A+", "A", "B+", "B", "C"];
 
 export function AiSignalView() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>(searchParams.get("tab") === "watchlist" ? "watchlist" : "chart");
   const [signals, setSignals] = useState<AiSignal[]>([]);
@@ -62,6 +63,11 @@ export function AiSignalView() {
         setError(
           "Scan selesai tapi 0 sinyal ditemukan. Biasanya ini berarti data candle Binance tidak bisa diakses dari server (Binance memblokir IP asal Amerika Serikat) — pastikan Vercel Function region di-set ke luar AS (mis. sin1), lalu redeploy."
         );
+      } else if (Array.isArray(res.autoExecuted) && res.autoExecuted.length > 0) {
+        // Signal(s) qualified and got auto-executed into the paper trader —
+        // jump straight to Paper Trader so the user sees the new position(s).
+        router.push("/paper-trader");
+        return;
       }
       await load();
     } catch {
@@ -87,8 +93,16 @@ export function AiSignalView() {
         return;
       }
       const res = await raw.json();
-      if (res.error) setError(res.message ?? res.error);
-      else await load();
+      if (res.error) {
+        setError(res.message ?? res.error);
+      } else if (res.autoExecuted) {
+        // Signal qualified and got auto-executed into the paper trader —
+        // jump straight to Paper Trader so the user sees the new position.
+        router.push("/paper-trader");
+        return;
+      } else {
+        await load();
+      }
     } catch {
       setError("Analyze gagal — koneksi ke server terputus atau timeout. Coba lagi sebentar.");
     } finally {

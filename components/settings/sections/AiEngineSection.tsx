@@ -1,27 +1,14 @@
 "use client";
-import { Cpu, Gauge, Save, Check } from "lucide-react";
+import { Cpu, Gauge } from "lucide-react";
 import { usePreferences } from "@/lib/hooks/usePreferences";
 import type { AiSpeed, AiPersonality } from "@/lib/preferences";
-import type { TradeGrade } from "@/lib/elvoid/types";
-import { SettingsCard, SettingsRow, ToggleSwitch, SegmentedControl } from "../SettingsCard";
+import { SettingsCard, SettingsRow, SegmentedControl } from "../SettingsCard";
 
-export function AiEngineSection({
-  autoExecute,
-  autoExecuteMinGrade,
-  onToggleAutoExecute,
-  onChangeGrade,
-  onSave,
-  saving,
-  saved,
-}: {
-  autoExecute: boolean;
-  autoExecuteMinGrade: TradeGrade;
-  onToggleAutoExecute: () => void;
-  onChangeGrade: (g: TradeGrade) => void;
-  onSave: () => void;
-  saving: boolean;
-  saved: boolean;
-}) {
+// Auto-Execute is no longer a Settings toggle — it's hardcoded and always on
+// (see AUTO_EXECUTE_MIN_GRADE in lib/elvoid/paperTrader.ts). Every signal
+// from Scan Market / Analyze that meets that grade auto-opens as a Market
+// Order and the user is taken straight to Paper Trader.
+export function AiEngineSection() {
   const { prefs, update } = usePreferences();
   const { aiEngine } = prefs;
 
@@ -30,36 +17,8 @@ export function AiEngineSection({
       id="ai-engine"
       icon={Cpu}
       title="AI Engine"
-      description="Perilaku ElVoid AI saat scan & auto-execute sinyal."
+      description="Perilaku ElVoid AI saat scan sinyal. Auto-execute ke Paper Trader berjalan otomatis di setiap sinyal yang memenuhi Trade Grade minimum."
     >
-      <SettingsRow
-        label="Auto-Execute"
-        hint="Otomatis buka Market Order untuk sinyal baru dari Scan Market yang memenuhi Trade Grade minimum."
-      >
-        <ToggleSwitch checked={autoExecute} onChange={onToggleAutoExecute} />
-      </SettingsRow>
-
-      {autoExecute && (
-        <SettingsRow label="Minimum Trade Grade">
-          <SegmentedControl
-            value={autoExecuteMinGrade}
-            options={(["A++", "A+", "A", "B+", "B", "C+", "C"] as TradeGrade[]).map((g) => ({ value: g, label: g }))}
-            onChange={onChangeGrade}
-          />
-        </SettingsRow>
-      )}
-
-      <SettingsRow label="Save Auto-Execute settings">
-        <button
-          onClick={onSave}
-          disabled={saving}
-          className="flex items-center gap-1.5 rounded-md bg-signal px-3.5 py-2 text-xs font-medium text-white hover:bg-signal-glow disabled:opacity-50"
-        >
-          {saved ? <Check size={13} /> : <Save size={13} />}
-          {saving ? "Menyimpan…" : saved ? "Tersimpan" : "Simpan"}
-        </button>
-      </SettingsRow>
-
       <div className="terminal-divider py-1 text-[10px] uppercase tracking-wider">Signal Tuning Preview</div>
 
       <SettingsRow

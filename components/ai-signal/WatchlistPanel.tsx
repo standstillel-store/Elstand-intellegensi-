@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, X, Radar, Loader2 } from "lucide-react";
 import clsx from "clsx";
 
@@ -72,6 +73,7 @@ function relativeTime(iso: string): string {
  * "Analyze" box above uses.
  */
 export function WatchlistPanel({ onSignalsChanged }: { onSignalsChanged?: () => void }) {
+  const router = useRouter();
   const [items, setItems] = useState<WatchlistRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCoin, setNewCoin] = useState("");
@@ -147,7 +149,14 @@ export function WatchlistPanel({ onSignalsChanged }: { onSignalsChanged?: () => 
         body: JSON.stringify({ coin }),
       });
       const res = await raw.json();
-      if (res.error) setError(res.message ?? res.error);
+      if (res.error) {
+        setError(res.message ?? res.error);
+      } else if (res.autoExecuted) {
+        // Signal qualified and got auto-executed into the paper trader —
+        // jump straight to Paper Trader so the user sees the new position.
+        router.push("/paper-trader");
+        return;
+      }
       await load();
       onSignalsChanged?.();
     } catch {
