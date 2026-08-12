@@ -159,7 +159,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
 
   if (!derived) {
     return (
-      <div className="glow-card relative flex h-full flex-col overflow-hidden p-4">
+      <div className="glow-card relative flex flex-col overflow-hidden p-4 xl:h-[520px]">
         <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-signal/10 blur-3xl" />
         <SectionHeader code="OB" title="Order Book (Live)" hint={`${symbol}USDT`} icon={<Layers size={13} />} />
         <div className="flex h-52 flex-1 items-center justify-center rounded-md border border-dashed border-line text-center text-[11px] text-ink-faint">
@@ -176,7 +176,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
   const ladderBids = bids.slice(0, 12);
 
   return (
-    <div className="glow-card relative flex h-full flex-col overflow-hidden p-4">
+    <div className="glow-card relative flex flex-col overflow-hidden p-4 xl:h-[520px]">
       <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-signal/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -left-16 h-56 w-56 rounded-full bg-up/5 blur-3xl" />
 
@@ -250,7 +250,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
             <span className="text-right">Size</span>
             <span className="text-right">Total</span>
           </div>
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto">
             {ladderAsks.map((a) => (
               <div key={`ask-${a.price}`} className="relative grid grid-cols-3 items-center overflow-hidden px-2 py-[3px] text-[10.5px]">
                 <div className="absolute inset-y-0 right-0 bg-down/12" style={{ width: `${Math.min(100, (a.cum / maxCum) * 100)}%` }} />

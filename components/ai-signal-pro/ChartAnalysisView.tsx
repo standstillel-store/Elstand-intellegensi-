@@ -233,19 +233,17 @@ export function ChartAnalysisView() {
         </div>
       </div>
 
-      {/* Chart | Order Book — primary trading workspace, 2:1 width ratio, matched height on desktop */}
-      <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-[2fr_1fr]">
-        <div className="glow-card flex h-full flex-col overflow-hidden p-2">
+      {/* Chart | Order Book — 2:1 width ratio, BOTH panels pinned to the same fixed height on desktop (matched, not "stretch" which lets whichever has more content force the row taller). Stacks to natural height on mobile. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr] xl:items-stretch">
+        <div className="glow-card flex flex-col overflow-hidden p-2 xl:h-[520px]">
           {candlesLoading ? (
-            <div className="flex min-h-[440px] flex-1 items-center justify-center gap-2 text-sm text-ink-muted">
+            <div className="flex h-[440px] items-center justify-center gap-2 text-sm text-ink-muted">
               <Loader2 size={16} className="animate-spin" /> Memuat candle {symbol}…
             </div>
           ) : candles.length ? (
-            <div className="flex-1">
-              <TradingChart symbol={symbol} interval={timeframe} candles={candles} levels={levels} height={440} />
-            </div>
+            <TradingChart symbol={symbol} interval={timeframe} candles={candles} levels={levels} height={440} />
           ) : (
-            <div className="flex min-h-[440px] flex-1 items-center justify-center text-sm text-ink-muted">
+            <div className="flex h-[440px] items-center justify-center text-sm text-ink-muted">
               Data candle tidak tersedia untuk {symbol}USDT di Binance Futures.
             </div>
           )}
