@@ -30,12 +30,12 @@ function InsufficientData({ symbol, label = "" }: { symbol: string; label?: stri
 /** Big-panel card wrapper for RSI / MACD / Volume Profile — the three always-visible hero charts. */
 function HeroCard({ code, title, hint, children }: { code: string; title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="hover-glow relative flex h-full min-h-[11rem] flex-col overflow-hidden rounded-xl border border-line bg-bg-raised/60 p-2.5 sm:p-3">
+    <div className="hover-glow relative overflow-hidden rounded-xl border border-line bg-bg-raised/60 p-2.5 sm:p-3">
       <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-signal/10 blur-2xl" />
       <div className="relative mb-1.5">
         <SectionHeader code={code} title={title} hint={hint} />
       </div>
-      <div className="relative flex-1">{children}</div>
+      <div className="relative">{children}</div>
     </div>
   );
 }
@@ -74,7 +74,7 @@ function LightTile({
     >
       <div className="text-[9.5px] font-semibold uppercase tracking-wide text-ink-muted">{label}</div>
       {children ? (
-        <div className="my-1 flex-1">{children}</div>
+        <div className="my-1">{children}</div>
       ) : (
         <div className={clsx("mono-num mt-1 text-[15px] font-bold", VALUE_TONE[valueTone ?? "neutral"])}>{value}</div>
       )}
@@ -106,14 +106,14 @@ function RsiChart({ series, last }: { series: number[]; last: number }) {
   const points = tail.map((v, i) => `${(i / (tail.length - 1)) * 100},${yFor(v)}`).join(" ");
   const tone = last >= 70 ? "#FF5252" : last <= 30 ? "#00E676" : "#A78BFA";
   return (
-    <div className="flex h-full flex-col">
+    <div>
       <div className="mb-1 flex items-baseline gap-1.5">
         <span className="text-[9px] uppercase tracking-wide text-ink-faint">RSI (14)</span>
         <span className="mono-num text-[13px] font-bold" style={{ color: tone }}>
           {last.toFixed(2)}
         </span>
       </div>
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-16 w-full flex-1 sm:h-20">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="block h-14 w-full sm:h-16">
         {[70, 30].map((level) => (
           <line key={level} x1={0} x2={100} y1={yFor(level)} y2={yFor(level)} stroke="rgba(255,255,255,0.22)" strokeDasharray="3 2" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
         ))}
@@ -157,14 +157,14 @@ function MacdChart({
   const lineFor = (arr: number[]) => arr.map((v, i) => `${(i / (arr.length - 1)) * 100},${yFor(v)}`).join(" ");
 
   return (
-    <div className="flex h-full flex-col">
+    <div>
       <div className="mb-1 flex flex-wrap items-baseline gap-x-1.5 text-[9px]">
         <span className="uppercase tracking-wide text-ink-faint">MACD</span>
         <span className="mono-num font-bold text-signal-glow">{macd.toFixed(1)}</span>
         <span className="mono-num font-bold text-amber">{signal.toFixed(1)}</span>
         <span className={`mono-num font-bold ${hist >= 0 ? "text-up" : "text-down"}`}>{hist.toFixed(1)}</span>
       </div>
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-16 w-full flex-1 sm:h-20">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="block h-14 w-full sm:h-16">
         <line x1={0} x2={100} y1={yFor(0)} y2={yFor(0)} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
         {hTail.map((v, i) => {
           if (Number.isNaN(v)) return null;
@@ -194,12 +194,12 @@ function VolumeProfileChart({
 }) {
   const sorted = [...buckets].sort((a, b) => b.priceHigh - a.priceHigh);
   return (
-    <div className="flex h-full flex-col">
+    <div>
       <div className="mb-1 flex items-baseline justify-between text-[9px]">
         <span className="uppercase tracking-wide text-ink-faint">Volume Profile</span>
         {lastPrice !== undefined && <span className="mono-num text-up">{formatUsd(lastPrice)}</span>}
       </div>
-      <div className="flex-1 space-y-[2px] overflow-hidden">
+      <div className="space-y-[2px] overflow-hidden">
         {sorted.map((b) => {
           const mid = (b.priceLow + b.priceHigh) / 2;
           const isPoc = Math.abs(mid - pocPrice) < 1e-9;
