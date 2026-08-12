@@ -1,3 +1,4 @@
+
 "use client";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
@@ -233,9 +234,9 @@ export function ChartAnalysisView() {
         </div>
       </div>
 
-      {/* Chart | Order Book — 2:1 width ratio, BOTH panels pinned to the same fixed height on desktop (matched, not "stretch" which lets whichever has more content force the row taller). Stacks to natural height on mobile. */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr] xl:items-stretch">
-        <div className="glow-card flex flex-col overflow-hidden p-2 xl:h-[520px]">
+      {/* Chart | Order Book — 2:1 width ratio. Each card sizes to its own natural content height (no forced/capped height) so nothing — especially the order book's buy side — gets cut off. */}
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[2fr_1fr]">
+        <div className="glow-card overflow-hidden p-2">
           {candlesLoading ? (
             <div className="flex h-[440px] items-center justify-center gap-2 text-sm text-ink-muted">
               <Loader2 size={16} className="animate-spin" /> Memuat candle {symbol}…
