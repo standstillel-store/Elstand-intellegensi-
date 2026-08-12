@@ -22,6 +22,14 @@ import {
   scanStablecoinFlow,
   scanSentiment,
   scanMacro,
+  scanRsi,
+  scanMovingAverages,
+  scanVwap,
+  scanAdx,
+  scanBollinger,
+  scanIchimoku,
+  scanSupertrend,
+  scanVolumeProfile,
   findOrderBlockZone,
 } from "./scanners";
 
@@ -134,6 +142,14 @@ export const CONFLUENCE_FACTOR_KEYS: { label: string; keys: string[] }[] = [
   { label: "News", keys: ["news_sentiment"] },
   { label: "Macro", keys: ["macro"] },
   { label: "Sentiment", keys: ["sentiment"] },
+  { label: "RSI", keys: ["rsi"] },
+  { label: "Moving Averages", keys: ["moving_averages"] },
+  { label: "VWAP", keys: ["vwap"] },
+  { label: "ADX", keys: ["adx"] },
+  { label: "Bollinger Bands", keys: ["bollinger"] },
+  { label: "Ichimoku", keys: ["ichimoku"] },
+  { label: "Supertrend", keys: ["supertrend"] },
+  { label: "Volume Profile", keys: ["volume_profile"] },
 ];
 
 /** Counts how many of the 12 named factors have a scan agreeing with `side`, out of every scan available (directional + extended) so Order Block/FVG/Funding/OI/Macro/Sentiment — presentational-only for Confidence — still count toward Trade Grade. */
@@ -157,13 +173,26 @@ function countConfluence(allScans: ScanResult[], side: SignalSide): { count: num
  * a guarantee — just a finer-grained at-a-glance label than the old 4-tier
  * scale.
  */
+/**
+ * A++ through C — confluence-based grade (Phase 2.8). Reads Confidence
+ * (unchanged 9-scanner math, see generateSignal) alongside how many of the
+ * NAMED factors line up, expressed as a RATIO of matched/total rather than
+ * a raw count — so adding more named factors (e.g. the Indicators Suite
+ * scanners: RSI/Moving Averages/VWAP/ADX/Bollinger/Ichimoku/Supertrend/
+ * Volume Profile) never silently makes grading harder or easier just
+ * because the denominator changed. Ratios below are numerically identical
+ * to the original 12-factor thresholds (9/12, 8/12, 6/12, 5/12, 3/12,
+ * 2/12) — still a re-read of other numbers already computed elsewhere,
+ * not a separate model, and still never a guarantee.
+ */
 function computeTradeGrade(confidence: number, confluenceCount: number, riskLevel: "low" | "medium" | "high"): TradeGrade {
-  if (confidence >= 85 && confluenceCount >= 9 && riskLevel === "low") return "A++";
-  if (confidence >= 78 && confluenceCount >= 8 && riskLevel !== "high") return "A+";
-  if (confidence >= 68 && confluenceCount >= 6) return "A";
-  if (confidence >= 58 && confluenceCount >= 5) return "B+";
-  if (confidence >= 46 && confluenceCount >= 3) return "B";
-  if (confidence >= 35 || confluenceCount >= 2) return "C+";
+  const ratio = confluenceCount / CONFLUENCE_FACTOR_KEYS.length;
+  if (confidence >= 85 && ratio >= 0.75 && riskLevel === "low") return "A++";
+  if (confidence >= 78 && ratio >= 0.667 && riskLevel !== "high") return "A+";
+  if (confidence >= 68 && ratio >= 0.5) return "A";
+  if (confidence >= 58 && ratio >= 0.417) return "B+";
+  if (confidence >= 46 && ratio >= 0.25) return "B";
+  if (confidence >= 35 || ratio >= 0.167) return "C+";
   return "C";
 }
 
@@ -323,6 +352,16 @@ export function generateSignal(params: {
     scanStablecoinFlow(stableChange24hUsd),
     scanMacro(dxyChangePct),
     scanSentiment(fngValue),
+    // Indicators Suite scanners — same RSI/EMA/SMA/VWAP/ADX/Bollinger/
+    // Ichimoku/Supertrend/Volume Profile the user sees on the chart page.
+    scanRsi(candles),
+    scanMovingAverages(candles),
+    scanVwap(candles),
+    scanAdx(candles),
+    scanBollinger(candles),
+    scanIchimoku(candles),
+    scanSupertrend(candles),
+    scanVolumeProfile(candles),
   ];
 
   const strategy = classifyStrategy(directional, side);
@@ -364,9 +403,20 @@ export function generateSignal(params: {
     .slice(0, 5)
     .map((s) => `${s.label}: ${s.detail}`);
 
+  // Indicators Suite highlights — same scanners as above, surfaced here so
+  // the reasoning text visibly reflects what the Indicators Suite panel
+  // shows, not just a silent confluence-count bump.
+  const indicatorKeys = new Set(["rsi", "moving_averages", "vwap", "adx", "bollinger", "ichimoku", "supertrend", "volume_profile"]);
+  const topIndicatorReasons = extraReasoning
+    .filter((s) => indicatorKeys.has(s.key) && s.bias === (side === "LONG" ? "bullish" : "bearish") && s.weight > 0)
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 3)
+    .map((s) => `${s.label}: ${s.detail}`);
+
   const reasonLines = [
-    `ElVoid AI membaca ${corroborating} dari 9 kategori indikator inti condong ${side === "LONG" ? "bullish" : "bearish"} untuk ${symbol} (${confluenceCount}/12 total confluence untuk Trade Grade).`,
+    `ElVoid AI membaca ${corroborating} dari 9 kategori indikator inti condong ${side === "LONG" ? "bullish" : "bearish"} untuk ${symbol} (${confluenceCount}/${CONFLUENCE_FACTOR_KEYS.length} total confluence untuk Trade Grade, termasuk Indicators Suite).`,
     ...topReasons,
+    ...topIndicatorReasons,
     `Risk Assessment (${risk.level.toUpperCase()}): ${risk.detail}`,
     "Ini adalah probability berbasis data, bukan kepastian — selalu terapkan position sizing yang disiplin.",
   ];

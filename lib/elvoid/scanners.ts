@@ -1,7 +1,7 @@
 import type { Candle, ScanResult } from "./types";
 import type { NewsItem, WhaleTransfer, EconomicEvent, FundingInfo } from "../types";
 import type { SrLevel, TrendReading, SwingPoint } from "./indicators";
-import { calcMacd } from "./indicators";
+import { calcMacd, rsi, ema, sma, calcVwap, calcAdx, calcBollinger, calcIchimoku, calcSupertrend, calcVolumeProfile } from "./indicators";
 
 // ---------------------------------------------------------------------------
 // ElVoid AI's 10 required scan categories. Each function is a small, pure,
@@ -654,4 +654,107 @@ export function scanMacro(dxyChangePct?: number): ScanResult {
     return res("macro", "Macro", "bearish", 6, `DXY menguat ${dxyChangePct.toFixed(2)}% (24h) — dolar yang lebih kuat cenderung menekan aset risiko termasuk crypto.`);
   }
   return res("macro", "Macro", "neutral", 0, `DXY relatif flat (${dxyChangePct.toFixed(2)}%) — belum ada tekanan makro yang jelas dari sisi dolar.`);
+}
+
+// ---------------------------------------------------------------------------
+// Indicators Suite → confluence factors. These read the exact same
+// functions that power the Indicators Suite panel (lib/elvoid/indicators.ts)
+// — same RSI, same EMA/SMA, same VWAP/ADX/Bollinger/Ichimoku/Supertrend/
+// Volume Profile the user sees on the chart page — so "what the AI reads"
+// and "what the Indicators Suite shows" are provably the same numbers.
+//
+// Like the other extraReasoning scanners (FVG/OB/Funding/OI/SMT/MACD/
+// Stablecoin/Macro/Sentiment) above, these feed Trade Grade confluence and
+// the reasoning text but deliberately do NOT touch `side`/entry/sl/tp or
+// the 9-scanner Confidence math — so a signal's historical Confidence
+// calibration stays exactly as it always was; these only add more
+// visible, real, explainable context on top. ATR is intentionally not a
+// confluence vote here — it's a volatility magnitude, not a directional
+// bias, so making up a "bullish/bearish ATR" would be fabricating a
+// signal ATR was never designed to give.
+// ---------------------------------------------------------------------------
+
+/** RSI (14) — momentum confirmation. >55 leans bullish, <45 leans bearish, the neutral band in between contributes nothing (RSI alone in the middle isn't a real signal). */
+export function scanRsi(candles: Candle[]): ScanResult {
+  const closes = candles.map((c) => c.close);
+  const series = rsi(closes, 14);
+  const last = series.at(-1);
+  if (last === undefined || Number.isNaN(last)) return res("rsi", "RSI", "neutral", 0, "Candle belum cukup untuk RSI(14).");
+  if (last > 55) return res("rsi", "RSI", "bullish", last > 70 ? 4 : 6, `RSI(14) ${last.toFixed(1)} — momentum bullish${last > 70 ? " (mendekati overbought, waspada koreksi)" : ""}.`);
+  if (last < 45) return res("rsi", "RSI", "bearish", last < 30 ? 4 : 6, `RSI(14) ${last.toFixed(1)} — momentum bearish${last < 30 ? " (mendekati oversold, waspada bounce)" : ""}.`);
+  return res("rsi", "RSI", "neutral", 0, `RSI(14) ${last.toFixed(1)} — netral, tidak condong ke arah manapun.`);
+}
+
+/** EMA20/50 + SMA20/50 cross agreement — only votes when both moving-average pairs agree, so a single noisy cross doesn't count as full confluence. */
+export function scanMovingAverages(candles: Candle[]): ScanResult {
+  if (candles.length < 50) return res("moving_averages", "Moving Averages", "neutral", 0, "Candle belum cukup untuk EMA/SMA 50.");
+  const closes = candles.map((c) => c.close);
+  const ema20 = ema(closes, 20).at(-1)!;
+  const ema50 = ema(closes, 50).at(-1)!;
+  const sma20 = sma(closes, 20).at(-1)!;
+  const sma50 = sma(closes, 50).at(-1)!;
+  const emaUp = ema20 > ema50;
+  const smaUp = sma20 > sma50;
+  if (emaUp && smaUp) return res("moving_averages", "Moving Averages", "bullish", 6, `EMA20>EMA50 (${ema20.toFixed(2)} > ${ema50.toFixed(2)}) dan SMA20>SMA50 — kedua rata-rata bergerak sepakat naik.`);
+  if (!emaUp && !smaUp) return res("moving_averages", "Moving Averages", "bearish", 6, `EMA20<EMA50 (${ema20.toFixed(2)} < ${ema50.toFixed(2)}) dan SMA20<SMA50 — kedua rata-rata bergerak sepakat turun.`);
+  return res("moving_averages", "Moving Averages", "neutral", 0, "EMA dan SMA sedang berselisih arah (crossing) — belum ada konfirmasi tren dari moving average.");
+}
+
+/** VWAP (dihitung dari window candle yang dimuat) — harga di atas VWAP = pembeli mendominasi window ini, dan sebaliknya. */
+export function scanVwap(candles: Candle[]): ScanResult {
+  const vwap = calcVwap(candles);
+  if (!vwap) return res("vwap", "VWAP", "neutral", 0, "Data volume belum cukup untuk VWAP.");
+  if (vwap.deviationPct > 0.15) return res("vwap", "VWAP", "bullish", 4, `Harga ${vwap.deviationPct.toFixed(2)}% di atas VWAP window ini.`);
+  if (vwap.deviationPct < -0.15) return res("vwap", "VWAP", "bearish", 4, `Harga ${Math.abs(vwap.deviationPct).toFixed(2)}% di bawah VWAP window ini.`);
+  return res("vwap", "VWAP", "neutral", 0, "Harga berada tepat di sekitar VWAP — tidak ada dominasi jelas.");
+}
+
+/** ADX/+DI/-DI — only votes when ADX signals a real trend (>=20); a low-ADX chop never contributes a fake directional vote. */
+export function scanAdx(candles: Candle[]): ScanResult {
+  const adx = calcAdx(candles);
+  if (!adx) return res("adx", "ADX", "neutral", 0, "Candle belum cukup untuk ADX(14).");
+  if (adx.adx < 20) return res("adx", "ADX", "neutral", 0, `ADX ${adx.adx.toFixed(1)} — tren masih lemah/choppy, tidak dihitung sebagai konfirmasi arah.`);
+  const weight = adx.trendStrength === "strong" ? 7 : 5;
+  if (adx.plusDI > adx.minusDI) return res("adx", "ADX", "bullish", weight, `ADX ${adx.adx.toFixed(1)} (${adx.trendStrength}), +DI ${adx.plusDI.toFixed(1)} > -DI ${adx.minusDI.toFixed(1)}.`);
+  if (adx.minusDI > adx.plusDI) return res("adx", "ADX", "bearish", weight, `ADX ${adx.adx.toFixed(1)} (${adx.trendStrength}), -DI ${adx.minusDI.toFixed(1)} > +DI ${adx.plusDI.toFixed(1)}.`);
+  return res("adx", "ADX", "neutral", 0, `ADX ${adx.adx.toFixed(1)} — +DI dan -DI berimbang.`);
+}
+
+/** Bollinger %B — reads position within the bands as trend continuation context (not mean-reversion), consistent with the rest of this trend-following engine. */
+export function scanBollinger(candles: Candle[]): ScanResult {
+  const bb = calcBollinger(candles);
+  if (!bb) return res("bollinger", "Bollinger Bands", "neutral", 0, "Candle belum cukup untuk Bollinger Bands(20).");
+  if (bb.percentB > 0.6) return res("bollinger", "Bollinger Bands", "bullish", 3, `%B ${(bb.percentB * 100).toFixed(0)}% — harga di paruh atas band, bias bullish.`);
+  if (bb.percentB < 0.4) return res("bollinger", "Bollinger Bands", "bearish", 3, `%B ${(bb.percentB * 100).toFixed(0)}% — harga di paruh bawah band, bias bearish.`);
+  return res("bollinger", "Bollinger Bands", "neutral", 0, `%B ${(bb.percentB * 100).toFixed(0)}% — harga di tengah band, netral.`);
+}
+
+/** Ichimoku cloud position — a well-established trend filter: price trading above/below the cloud, not just one moving average. */
+export function scanIchimoku(candles: Candle[]): ScanResult {
+  const ich = calcIchimoku(candles);
+  if (!ich) return res("ichimoku", "Ichimoku", "neutral", 0, "Candle belum cukup untuk Ichimoku (butuh minimal 52 candle).");
+  if (ich.priceVsCloud === "above") return res("ichimoku", "Ichimoku", "bullish", 6, `Harga di atas cloud (Senkou A ${ich.senkouA.toFixed(2)} / B ${ich.senkouB.toFixed(2)}), cloud ${ich.cloud}.`);
+  if (ich.priceVsCloud === "below") return res("ichimoku", "Ichimoku", "bearish", 6, `Harga di bawah cloud (Senkou A ${ich.senkouA.toFixed(2)} / B ${ich.senkouB.toFixed(2)}), cloud ${ich.cloud}.`);
+  return res("ichimoku", "Ichimoku", "neutral", 0, "Harga sedang di dalam cloud — belum ada sinyal arah yang jelas.");
+}
+
+/** Supertrend direction — a strong, widely-used trend-following flip signal; extra weight on the bar it just flipped since that's the highest-conviction moment for this indicator. */
+export function scanSupertrend(candles: Candle[]): ScanResult {
+  const st = calcSupertrend(candles);
+  if (!st) return res("supertrend", "Supertrend", "neutral", 0, "Candle belum cukup untuk Supertrend(10,3).");
+  const weight = st.flippedThisBar ? 8 : 5;
+  const flipNote = st.flippedThisBar ? " Baru flip arah di candle terakhir." : "";
+  if (st.direction === "up") return res("supertrend", "Supertrend", "bullish", weight, `Supertrend ${st.value.toFixed(2)}, arah UP.${flipNote}`);
+  return res("supertrend", "Supertrend", "bearish", weight, `Supertrend ${st.value.toFixed(2)}, arah DOWN.${flipNote}`);
+}
+
+/** Volume Profile POC — price trading above the highest-volume node (acceptance above value) leans bullish, below leans bearish; skipped when the profile itself is too flat/undefined. */
+export function scanVolumeProfile(candles: Candle[]): ScanResult {
+  const vp = calcVolumeProfile(candles, 10);
+  const last = candles.at(-1)?.close;
+  if (!vp || last === undefined) return res("volume_profile", "Volume Profile", "neutral", 0, "Candle belum cukup untuk Volume Profile.");
+  const distPct = ((last - vp.pocPrice) / vp.pocPrice) * 100;
+  if (distPct > 0.1) return res("volume_profile", "Volume Profile", "bullish", 3, `Harga ${distPct.toFixed(2)}% di atas POC (${vp.pocPrice.toFixed(2)}) — acceptance di atas value area.`);
+  if (distPct < -0.1) return res("volume_profile", "Volume Profile", "bearish", 3, `Harga ${Math.abs(distPct).toFixed(2)}% di bawah POC (${vp.pocPrice.toFixed(2)}) — acceptance di bawah value area.`);
+  return res("volume_profile", "Volume Profile", "neutral", 0, `Harga persis di sekitar POC (${vp.pocPrice.toFixed(2)}).`);
 }

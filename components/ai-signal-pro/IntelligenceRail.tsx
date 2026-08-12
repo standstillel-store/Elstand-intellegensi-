@@ -7,29 +7,8 @@ import { RadialGauge } from "@/components/ui/RadialGauge";
 import { SimulatedTag } from "@/components/ui/SimulatedTag";
 import { Badge } from "@/components/ui/Badge";
 import { formatUsd, timeAgo } from "@/lib/format";
-import type { FundingInfo, WhaleTransfer, NewsItem, FearGreedPoint } from "@/lib/types";
+import type { FundingInfo, WhaleTransfer, NewsItem, FearGreedPoint, CoinMarket } from "@/lib/types";
 import type { TradeGrade } from "@/lib/elvoid/types";
-
-// --- tiny seeded PRNG so "simulated" panels stay stable per symbol instead
-// of reshuffling every render, without needing any new dependency. ---------
-function seedFromString(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-function mulberry32(seed: number) {
-  let a = seed;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 interface AnalyzeSignalLike {
   side: "LONG" | "SHORT";
@@ -40,11 +19,20 @@ interface AnalyzeSignalLike {
   entry: number;
 }
 
+interface OiFlow {
+  deltaValueUsd: number;
+  deltaPct: number;
+  windowHours: number;
+}
+
 export function IntelligenceRail({ symbol, signal }: { symbol: string; signal: AnalyzeSignalLike | null }) {
   const [funding, setFunding] = useState<FundingInfo[]>([]);
   const [fng, setFng] = useState<{ now: FearGreedPoint } | null>(null);
   const [whales, setWhales] = useState<WhaleTransfer[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [markets, setMarkets] = useState<CoinMarket[]>([]);
+  const [oiFlow, setOiFlow] = useState<OiFlow | null>(null);
+  const [oiFlowError, setOiFlowError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,27 +40,44 @@ export function IntelligenceRail({ symbol, signal }: { symbol: string; signal: A
     fetch("/api/feargreed").then((r) => r.json()).then((d) => !cancelled && d?.now && setFng(d)).catch(() => {});
     fetch("/api/whales").then((r) => r.json()).then((d) => !cancelled && setWhales(d.transfers ?? [])).catch(() => {});
     fetch("/api/news").then((r) => r.json()).then((d) => !cancelled && setNews(Array.isArray(d) ? d : d.news ?? [])).catch(() => {});
+    // Market Breadth — real: count actual 24h advancers/decliners across the top-150 coins by market cap (CoinGecko), not a simulated split.
+    fetch("/api/market").then((r) => r.json()).then((d) => !cancelled && setMarkets(Array.isArray(d?.markets) ? d.markets : [])).catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setOiFlow(null);
+    setOiFlowError(false);
+    fetch(`/api/oi-flow?symbol=${encodeURIComponent(symbol)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d.error) setOiFlowError(true);
+        else setOiFlow(d);
+      })
+      .catch(() => !cancelled && setOiFlowError(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
 
   const symbolFunding = funding.find((f) => f.symbol.toUpperCase() === `${symbol.toUpperCase()}USDT`);
   const relevantWhales = whales.filter((w) => w.asset.toUpperCase().includes(symbol.toUpperCase())).slice(0, 3);
   const relevantNews = news.filter((n) => n.title.toUpperCase().includes(symbol.toUpperCase())).slice(0, 3);
   const newsToShow = relevantNews.length ? relevantNews : news.slice(0, 3);
 
-  const rng = useMemo(() => mulberry32(seedFromString(symbol + (signal?.entry ?? 0))), [symbol, signal?.entry]);
-
   const breadth = useMemo(() => {
-    const advancers = Math.round(35 + rng() * 45);
-    return { advancers, decliners: 100 - advancers };
-  }, [rng]);
+    if (!markets.length) return null;
+    const withChange = markets.filter((m) => typeof m.price_change_percentage_24h_in_currency === "number");
+    if (!withChange.length) return null;
+    const advancers = withChange.filter((m) => (m.price_change_percentage_24h_in_currency ?? 0) >= 0).length;
+    const advancersPct = Math.round((advancers / withChange.length) * 100);
+    return { advancersPct, declinersPct: 100 - advancersPct, sampleSize: withChange.length };
+  }, [markets]);
 
-  const institutional = useMemo(() => {
-    const flow = Math.round((rng() - 0.45) * 40); // in $M, can be negative
-    return flow;
-  }, [rng]);
 
   return (
     <div className="space-y-4">
@@ -120,21 +125,27 @@ export function IntelligenceRail({ symbol, signal }: { symbol: string; signal: A
           </div>
         </div>
 
-        {/* Market Breadth — simulated composite */}
+        {/* Market Breadth — real: top-150 coins by market cap, real 24h change from CoinGecko */}
         <div className="glow-card p-4">
           <SectionHeader code="BREADTH" title="Market Breadth" />
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-[11px] text-ink-faint">Advancers vs Decliners</span>
-            <SimulatedTag />
+            {breadth && <span className="text-[9px] text-ink-faint">Top {breadth.sampleSize} coin</span>}
           </div>
-          <div className="flex h-2 overflow-hidden rounded-full bg-bg-raised">
-            <div className="h-full bg-up" style={{ width: `${breadth.advancers}%` }} />
-            <div className="h-full bg-down" style={{ width: `${breadth.decliners}%` }} />
-          </div>
-          <div className="mono-num mt-1.5 flex justify-between text-[11px]">
-            <span className="text-up">{breadth.advancers}% up</span>
-            <span className="text-down">{breadth.decliners}% down</span>
-          </div>
+          {breadth ? (
+            <>
+              <div className="flex h-2 overflow-hidden rounded-full bg-bg-raised">
+                <div className="h-full bg-up" style={{ width: `${breadth.advancersPct}%` }} />
+                <div className="h-full bg-down" style={{ width: `${breadth.declinersPct}%` }} />
+              </div>
+              <div className="mono-num mt-1.5 flex justify-between text-[11px]">
+                <span className="text-up">{breadth.advancersPct}% up</span>
+                <span className="text-down">{breadth.declinersPct}% down</span>
+              </div>
+            </>
+          ) : (
+            <p className="py-3 text-center text-[11px] text-ink-faint">Memuat data pasar…</p>
+          )}
         </div>
 
         {/* Funding & Open Interest — real, keyless Binance Futures public feed */}
@@ -166,11 +177,11 @@ export function IntelligenceRail({ symbol, signal }: { symbol: string; signal: A
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Whale Activity — real if Alchemy feed is configured, else honest sim preview */}
+        {/* Whale Activity — real if ALCHEMY_API_KEY is configured; otherwise an honest empty state, never a fabricated row */}
         <div className="glow-card p-4">
           <div className="mb-1 flex items-center justify-between">
             <SectionHeader code="WHALE" title="Whale Activity" />
-            {!relevantWhales.length && <SimulatedTag />}
+            {!whales.length && <SimulatedTag />}
           </div>
           {relevantWhales.length ? (
             <ul className="space-y-2">
@@ -185,37 +196,36 @@ export function IntelligenceRail({ symbol, signal }: { symbol: string; signal: A
               ))}
             </ul>
           ) : (
-            <div className="space-y-2 opacity-70">
-              <p className="text-[11px] text-ink-faint">
-                {whales.length ? `Belum ada transfer besar untuk ${symbol}.` : "Preview — hubungkan ALCHEMY_API_KEY untuk data whale live."}
-              </p>
-              <li className="flex items-center justify-between text-[11px]">
-                <span className="flex items-center gap-1.5 text-ink-muted">
-                  <Waves size={11} className="text-up" /> {symbol}
-                </span>
-                <span className="mono-num text-ink">{formatUsd(250_000 + rng() * 900_000)}</span>
-                <span className="text-ink-faint">{Math.round(rng() * 40)}m ago</span>
-              </li>
-            </div>
+            <p className="py-3 text-center text-[11px] text-ink-faint">
+              {whales.length ? `Belum ada transfer besar untuk ${symbol}.` : "ALCHEMY_API_KEY belum diset — belum ada feed whale live."}
+            </p>
           )}
         </div>
 
-        {/* Institutional Flow — no free source exists yet (see lib/intelligence/institutionalFlow.ts) — simulated by design, tagged */}
+        {/* Institution / Positioning Flow — real Binance Futures Open Interest 24h change (proxy). No free legitimate institutional/ETF flow API exists, so this is honestly labeled as an OI-based positioning proxy rather than pretending to be ETF flow. */}
         <div className="glow-card p-4">
           <div className="mb-1 flex items-center justify-between">
-            <SectionHeader code="INST" title="Institution" />
-            <SimulatedTag />
+            <SectionHeader code="OI-FLOW" title="Positioning Flow" hint="OI Δ24h" />
           </div>
-          <div className="flex items-center gap-3 py-1">
-            <Building2 size={22} className={institutional >= 0 ? "text-up" : "text-down"} />
-            <div>
-              <p className={`mono-num text-lg font-bold ${institutional >= 0 ? "text-up" : "text-down"}`}>
-                {institutional >= 0 ? "+" : ""}
-                {institutional}M
-              </p>
-              <p className="text-[10px] text-ink-faint">Net ETF-style flow, 24h</p>
+          {oiFlow ? (
+            <div className="flex items-center gap-3 py-1">
+              <Building2 size={22} className={oiFlow.deltaValueUsd >= 0 ? "text-up" : "text-down"} />
+              <div>
+                <p className={`mono-num text-lg font-bold ${oiFlow.deltaValueUsd >= 0 ? "text-up" : "text-down"}`}>
+                  {oiFlow.deltaValueUsd >= 0 ? "+" : ""}
+                  {formatUsd(oiFlow.deltaValueUsd)}
+                </p>
+                <p className="text-[10px] text-ink-faint">
+                  Open Interest {symbol}USDT, {oiFlow.windowHours}h terakhir ({oiFlow.deltaPct >= 0 ? "+" : ""}
+                  {oiFlow.deltaPct.toFixed(2)}%)
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <p className="py-3 text-center text-[11px] text-ink-faint">
+              {oiFlowError ? `${symbol}USDT tidak tersedia di Binance Futures.` : "Memuat data Open Interest…"}
+            </p>
+          )}
         </div>
 
         {/* News Impact — real feed, client-side impact heuristic */}
