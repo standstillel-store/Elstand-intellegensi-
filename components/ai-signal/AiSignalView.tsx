@@ -284,9 +284,9 @@ export function AiSignalView() {
           </div>
 
           {loading ? (
-            <SkeletonGrid count={4} className="grid-cols-2 xl:grid-cols-4" />
+            <SkeletonGrid count={4} className="grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" />
           ) : filtered.length ? (
-            <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-4 lg:grid-cols-3 xl:grid-cols-4">
               {filtered.map((s) => (
                 <SignalCardPro key={s.id} signal={s} onExecute={(orderType) => handleExecute(s, orderType)} executing={executingId === s.id} />
               ))}

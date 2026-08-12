@@ -75,6 +75,7 @@ export function TradingChart({
   levels,
   height = 440,
   wsUrl,
+  compact = false,
 }: {
   symbol: string;
   interval: string;
@@ -83,6 +84,8 @@ export function TradingChart({
   height?: number;
   /** Full WebSocket URL for live candle updates. Defaults to Binance's public Spot mainnet stream (existing behavior) — pass this to point the chart at Testnet/Futures instead (see lib/binance/wsUrl.ts). */
   wsUrl?: string;
+  /** Mini/card context (e.g. Watchlist grid tiles): hides the overlay-toggle chip row, the live badge, and the ATR/ADX readout — those are sized for the big 440px Chart Analysis view and just crowd a ~180px card. Also defaults every extra overlay off so the small candle area stays readable; EMA + entry/SL/TP levels still draw. */
+  compact?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -100,8 +103,11 @@ export function TradingChart({
   const supertrendRef = useRef<ISeriesApi<"Line"> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
-  // All 6 price-scale overlays default ON — they render inside this same chart, not as separate widgets.
-  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ sma: true, vwap: true, bollinger: true, ichimoku: true, supertrend: true });
+  // All 6 price-scale overlays default ON for the full chart — but OFF in compact mode, where a tiny
+  // canvas plus the chip row that toggles them would just overlap and look crowded (candles + EMA + levels is enough).
+  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>(
+    compact ? { sma: false, vwap: false, bollinger: false, ichimoku: false, supertrend: false } : { sma: true, vwap: true, bollinger: true, ichimoku: true, supertrend: true }
+  );
   // ATR/ADX are oscillators (different scale from price) so they can't be drawn as chart lines without
   // wrecking the candle scale — shown instead as a compact readout inside the chart, same as TradingView does.
   const [atrAdx, setAtrAdx] = useState<{ atr: number | null; adx: number | null; plusDI: number | null; minusDI: number | null }>({
@@ -322,51 +328,57 @@ export function TradingChart({
 
   return (
     <div className="relative">
-      <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-full border border-line bg-bg/80 px-2 py-1 text-[10px] backdrop-blur">
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${
-            wsStatus === "live" ? "bg-up animate-pulseGlow" : wsStatus === "connecting" ? "bg-amber animate-pulse" : "bg-ink-faint"
-          }`}
-        />
-        <span className="text-ink-faint">{wsStatus === "live" ? "Live" : wsStatus === "connecting" ? "Connecting…" : "Offline"}</span>
-      </div>
+      {!compact && (
+        <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-full border border-line bg-bg/80 px-2 py-1 text-[10px] backdrop-blur">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              wsStatus === "live" ? "bg-up animate-pulseGlow" : wsStatus === "connecting" ? "bg-amber animate-pulse" : "bg-ink-faint"
+            }`}
+          />
+          <span className="text-ink-faint">{wsStatus === "live" ? "Live" : wsStatus === "connecting" ? "Connecting…" : "Offline"}</span>
+        </div>
+      )}
 
-      {/* Overlay toggles — merge EMA/SMA/VWAP/Bollinger/Ichimoku/Supertrend into the SAME chart instead of separate widgets. EMA stays always-on (unchanged prior behavior); the rest are opt-in so the chart doesn't get crowded by default. */}
-      <div className="absolute left-2 top-2 z-10 flex flex-wrap gap-1">
-        <span className="rounded-full border border-signal/40 bg-bg/80 px-2 py-0.5 text-[9px] font-medium text-signal-glow backdrop-blur">EMA</span>
-        {OVERLAY_DEFS.map((o) => (
-          <button
-            key={o.key}
-            onClick={() => toggleOverlay(o.key)}
-            className={clsx(
-              "rounded-full border px-2 py-0.5 text-[9px] font-medium backdrop-blur transition-colors",
-              overlays[o.key] ? "border-white/30 bg-bg/90 text-ink" : "border-line/60 bg-bg/60 text-ink-faint hover:text-ink-muted"
-            )}
-            style={overlays[o.key] ? { color: o.color, borderColor: `${o.color}66` } : undefined}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      {/* Overlay toggles — merge EMA/SMA/VWAP/Bollinger/Ichimoku/Supertrend into the SAME chart instead of separate widgets. EMA stays always-on (unchanged prior behavior); the rest are opt-in so the chart doesn't get crowded by default. Hidden entirely in compact mode — no room for a chip row on a ~180px card, and IndicatorsSuitePanel below already covers the readouts. */}
+      {!compact && (
+        <div className="absolute left-2 top-2 z-10 flex flex-wrap gap-1">
+          <span className="rounded-full border border-signal/40 bg-bg/80 px-2 py-0.5 text-[9px] font-medium text-signal-glow backdrop-blur">EMA</span>
+          {OVERLAY_DEFS.map((o) => (
+            <button
+              key={o.key}
+              onClick={() => toggleOverlay(o.key)}
+              className={clsx(
+                "rounded-full border px-2 py-0.5 text-[9px] font-medium backdrop-blur transition-colors",
+                overlays[o.key] ? "border-white/30 bg-bg/90 text-ink" : "border-line/60 bg-bg/60 text-ink-faint hover:text-ink-muted"
+              )}
+              style={overlays[o.key] ? { color: o.color, borderColor: `${o.color}66` } : undefined}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div ref={containerRef} style={{ height }} className="w-full" />
 
-      {/* ATR/ADX readout — oscillators can't be overlaid as price lines, so shown as compact text inside the chart per the required layout (all 8 indicators live inside this same chart card). */}
-      <div className="absolute bottom-2 left-2 z-10 flex items-center gap-2 rounded-md border border-line bg-bg/80 px-2 py-1 text-[9px] backdrop-blur">
-        <span className="text-ink-faint">
-          ATR(14) <span className="mono-num font-semibold text-amber">{atrAdx.atr !== null ? atrAdx.atr.toFixed(2) : "—"}</span>
-        </span>
-        <span className="h-2.5 w-px bg-line" />
-        <span className="text-ink-faint">
-          ADX(14) <span className="mono-num font-semibold text-ink">{atrAdx.adx !== null ? atrAdx.adx.toFixed(1) : "—"}</span>
-          {atrAdx.plusDI !== null && atrAdx.minusDI !== null && (
-            <>
-              {" "}
-              <span className="text-up">+DI {atrAdx.plusDI.toFixed(1)}</span> <span className="text-down">-DI {atrAdx.minusDI.toFixed(1)}</span>
-            </>
-          )}
-        </span>
-      </div>
+      {/* ATR/ADX readout — oscillators can't be overlaid as price lines, so shown as compact text inside the chart per the required layout (all 8 indicators live inside this same chart card). Hidden in compact mode for the same crowding reason as the toggle chips. */}
+      {!compact && (
+        <div className="absolute bottom-2 left-2 z-10 flex items-center gap-2 rounded-md border border-line bg-bg/80 px-2 py-1 text-[9px] backdrop-blur">
+          <span className="text-ink-faint">
+            ATR(14) <span className="mono-num font-semibold text-amber">{atrAdx.atr !== null ? atrAdx.atr.toFixed(2) : "—"}</span>
+          </span>
+          <span className="h-2.5 w-px bg-line" />
+          <span className="text-ink-faint">
+            ADX(14) <span className="mono-num font-semibold text-ink">{atrAdx.adx !== null ? atrAdx.adx.toFixed(1) : "—"}</span>
+            {atrAdx.plusDI !== null && atrAdx.minusDI !== null && (
+              <>
+                {" "}
+                <span className="text-up">+DI {atrAdx.plusDI.toFixed(1)}</span> <span className="text-down">-DI {atrAdx.minusDI.toFixed(1)}</span>
+              </>
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -167,7 +167,7 @@ function VolumeProfileChart({
  * from the same OHLCV `candles` already loaded for the chart — no duplicate
  * fetch, no fabricated numbers.
  */
-export function IndicatorsSuitePanel({ symbol, candles }: { symbol: string; candles: Candle[] }) {
+export function IndicatorsSuitePanel({ symbol, candles, compact = false }: { symbol: string; candles: Candle[]; compact?: boolean }) {
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
   const lastPrice = closes.at(-1);
 
@@ -188,7 +188,7 @@ export function IndicatorsSuitePanel({ symbol, candles }: { symbol: string; cand
   const volumeProfile = useMemo(() => calcVolumeProfile(candles, 10), [candles]);
 
   return (
-    <div className="glow-card relative overflow-hidden p-3 sm:p-4">
+    <div className={clsx("glow-card relative overflow-hidden", compact ? "p-2.5" : "p-3 sm:p-4")}>
       <div className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-signal/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -right-24 h-64 w-64 rounded-full bg-smartmoney/10 blur-3xl" />
 
@@ -196,8 +196,8 @@ export function IndicatorsSuitePanel({ symbol, candles }: { symbol: string; cand
         <SectionHeader code="IND" title="Indicators Suite" hint={symbol} icon={<Activity size={13} />} />
       </div>
 
-      {/* RSI | MACD | Volume Profile — three always-visible hero charts, sized to fit mobile without a long scroll */}
-      <div className="relative grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+      {/* RSI | MACD | Volume Profile — three always-visible hero charts. `sm:grid-cols-3` is a viewport-width breakpoint, not a container query, so it only makes sense when this panel spans a wide area (Chart Analysis). Inside a narrow Watchlist card (compact) it's forced to 1 column instead — otherwise the 3-column grid triggers off the full page width while the actual card is 1/3–1/4 of that, squeezing the RSI/MACD/VP numbers together. */}
+      <div className={clsx("relative grid grid-cols-1 gap-2.5", !compact && "sm:grid-cols-3")}>
         <HeroCard code="RSI" title="RSI">
           {Number.isNaN(lastRsi ?? NaN) ? <InsufficientData symbol={symbol} label="RSI" /> : <RsiChart series={rsiSeries} last={lastRsi!} lastPrice={lastPrice} />}
         </HeroCard>

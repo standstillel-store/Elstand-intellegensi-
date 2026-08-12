@@ -55,12 +55,12 @@ export function SignalChartMini({ symbol, timeframe, levels }: { symbol: string;
             <Loader2 size={13} className="animate-spin" /> Memuat chart {symbol}…
           </div>
         ) : candles.length ? (
-          <TradingChart symbol={symbol} interval={timeframe} candles={candles} levels={levels} height={180} />
+          <TradingChart symbol={symbol} interval={timeframe} candles={candles} levels={levels} height={180} compact />
         ) : (
           <div className="flex h-[180px] items-center justify-center text-[11px] text-ink-faint">Data candle tidak tersedia.</div>
         )}
       </div>
-      <IndicatorsSuitePanel symbol={symbol} candles={candles} />
+      <IndicatorsSuitePanel symbol={symbol} candles={candles} compact />
     </div>
   );
 }
