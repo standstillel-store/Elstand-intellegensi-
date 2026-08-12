@@ -159,7 +159,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
 
   if (!derived) {
     return (
-      <div className="glow-card relative flex flex-col overflow-hidden p-4 xl:h-[520px]">
+      <div className="glow-card relative flex flex-col overflow-hidden p-4">
         <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-signal/10 blur-3xl" />
         <SectionHeader code="OB" title="Order Book (Live)" hint={`${symbol}USDT`} icon={<Layers size={13} />} />
         <div className="flex h-52 flex-1 items-center justify-center rounded-md border border-dashed border-line text-center text-[11px] text-ink-faint">
@@ -172,12 +172,12 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
   const { bids, asks, maxCum, mid, spread, spreadPct, imbalancePct, pressure } = derived;
   const asksTopDown = [...asks].reverse();
   // Combined ladder: asks (red, descending toward spread) on top, spread row, bids (green, descending from spread) below — one continuous price column like a real exchange ladder.
-  // 8 rows per side (not 12) so both ask AND bid rows fit inside the fixed xl:h-[520px] card at once — no scrolling needed to see the buy side.
-  const ladderAsks = asksTopDown.slice(-8);
-  const ladderBids = bids.slice(0, 8);
+  // Full 12 rows per side, card grows to fit — no fixed/capped height, so the buy (bid) side never gets cut off.
+  const ladderAsks = asksTopDown.slice(-12);
+  const ladderBids = bids.slice(0, 12);
 
   return (
-    <div className="glow-card relative flex flex-col overflow-hidden p-4 xl:h-[520px]">
+    <div className="glow-card relative flex flex-col overflow-hidden p-4">
       <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-signal/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -left-16 h-56 w-56 rounded-full bg-up/5 blur-3xl" />
 
@@ -283,4 +283,4 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
       </div>
     </div>
   );
-                }
+}
