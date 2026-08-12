@@ -9,6 +9,7 @@ import { useTokenAnalyzer } from "@/components/token-analyzer/TokenAnalyzerConte
 import type { AiSignal, ScanResult, OrderType, TradeGrade } from "@/lib/elvoid/types";
 import { evaluateEntryConfirmation } from "@/lib/elvoid/confirmation";
 import { SignalProgress } from "./SignalProgress";
+import { SignalChartMini } from "./SignalChartMini";
 import { KnowledgeTerm } from "@/components/ui/KnowledgeTerm";
 
 type DisplayStatus = "running" | "win" | "loss" | "invalidated" | "expired" | "breakeven" | "pending";
@@ -149,43 +150,13 @@ export function SignalCardPro({
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div>
-          <div className="mb-1 flex items-center justify-between text-[11px]">
-            <span className="text-ink-faint">Confidence</span>
-            <span className="mono-num font-semibold text-signal-glow">{signal.confidence}%</span>
-          </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-raised">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${signal.confidence}%` }}
-              transition={{ duration: 0.6, ease: "easeOut" }}
-              className="h-full rounded-full bg-signal"
-            />
-          </div>
-        </div>
-        {signal.probability_tp !== null && (
-          <div>
-            <div className="mb-1 flex items-center justify-between text-[11px]">
-              <span className="text-ink-faint">Prob. TP</span>
-              <span className="mono-num font-semibold text-up">{signal.probability_tp}%</span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-raised">
-              <div className="h-full rounded-full bg-up" style={{ width: `${signal.probability_tp}%` }} />
-            </div>
-          </div>
-        )}
-        {signal.probability_sl !== null && (
-          <div>
-            <div className="mb-1 flex items-center justify-between text-[11px]">
-              <span className="text-ink-faint">Prob. SL</span>
-              <span className="mono-num font-semibold text-down">{signal.probability_sl}%</span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-raised">
-              <div className="h-full rounded-full bg-down" style={{ width: `${signal.probability_sl}%` }} />
-            </div>
-          </div>
-        )}
+      {/* Chart + indikator (RSI/MACD/Volume Profile) — persis sama dengan tab Chart Analysis, sekarang melekat di tiap kartu sinyal */}
+      <div className="mt-3 border-t border-line pt-3">
+        <SignalChartMini
+          symbol={signal.coin}
+          timeframe={signal.timeframe}
+          levels={{ side: signal.side, entry: signal.entry, sl: signal.sl, tp1: signal.tp1, tp2: signal.tp2, tp3: signal.tp3 ?? null }}
+        />
       </div>
 
       <div className="mono-num mt-3 grid grid-cols-3 gap-2 text-xs sm:grid-cols-6">
@@ -291,6 +262,46 @@ export function SignalCardPro({
       )}
 
       <p className="mt-3 text-[12px] leading-relaxed text-ink-muted">{signal.reason}</p>
+
+      {/* Confidence / Prob. TP / Prob. SL — sama seperti bagian yang dilingkari di AI Signal, diulang di bawah Reason untuk tiap kartu */}
+      <div className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3 sm:grid-cols-3">
+        <div>
+          <div className="mb-1 flex items-center justify-between text-[11px]">
+            <span className="text-ink-faint">Confidence</span>
+            <span className="mono-num font-semibold text-signal-glow">{signal.confidence}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-raised">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${signal.confidence}%` }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+              className="h-full rounded-full bg-signal"
+            />
+          </div>
+        </div>
+        {signal.probability_tp !== null && (
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[11px]">
+              <span className="text-ink-faint">Prob. TP</span>
+              <span className="mono-num font-semibold text-up">{signal.probability_tp}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-raised">
+              <div className="h-full rounded-full bg-up" style={{ width: `${signal.probability_tp}%` }} />
+            </div>
+          </div>
+        )}
+        {signal.probability_sl !== null && (
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[11px]">
+              <span className="text-ink-faint">Prob. SL</span>
+              <span className="mono-num font-semibold text-down">{signal.probability_sl}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-raised">
+              <div className="h-full rounded-full bg-down" style={{ width: `${signal.probability_sl}%` }} />
+            </div>
+          </div>
+        )}
+      </div>
 
       {onExecute && signal.status === "new" && (
         <div className="mt-3 space-y-2">
