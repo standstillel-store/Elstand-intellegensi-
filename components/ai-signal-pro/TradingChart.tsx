@@ -138,12 +138,12 @@ export function TradingChart({
     ema50Ref.current = chart.addLineSeries({ color: "#FFB020", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     sma20Ref.current = chart.addLineSeries({ color: "#FFB020", lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, visible: false });
     sma50Ref.current = chart.addLineSeries({ color: "#FDBA74", lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, visible: false });
-    vwapRef.current = chart.addLineSeries({ color: "#22D3EE", lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, visible: false });
+    vwapRef.current = chart.addLineSeries({ color: "#22D3EE", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
     bbUpperRef.current = chart.addLineSeries({ color: "#EC4899", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, visible: false });
     bbLowerRef.current = chart.addLineSeries({ color: "#EC4899", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, visible: false });
     ichimokuARef.current = chart.addLineSeries({ color: "#F97316", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
     ichimokuBRef.current = chart.addLineSeries({ color: "#FB923C", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
-    supertrendRef.current = chart.addLineSeries({ color: "#10B981", lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, visible: false });
+    supertrendRef.current = chart.addLineSeries({ color: "#10B981", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
 
     const onResize = () => {
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
