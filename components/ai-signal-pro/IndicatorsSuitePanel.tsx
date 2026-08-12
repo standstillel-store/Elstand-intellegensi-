@@ -4,19 +4,7 @@ import clsx from "clsx";
 import { Activity } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { formatUsd } from "@/lib/format";
-import {
-  rsi,
-  ema,
-  sma,
-  calcMacd,
-  atr,
-  calcAdx,
-  calcBollinger,
-  calcVwap,
-  calcIchimoku,
-  calcSupertrend,
-  calcVolumeProfile,
-} from "@/lib/elvoid/indicators";
+import { rsi, ema, calcMacd, calcVolumeProfile } from "@/lib/elvoid/indicators";
 import type { Candle } from "@/lib/elvoid/types";
 
 function InsufficientData({ symbol, label = "" }: { symbol: string; label?: string }) {
@@ -40,66 +28,8 @@ function HeroCard({ code, title, hint, children }: { code: string; title: string
   );
 }
 
-/** Compact, bright/light tile for the remaining 8 indicators — a grid column instead of a tab selection, per request. */
-function LightTile({
-  label,
-  value,
-  valueTone,
-  sub,
-  accent,
-  children,
-}: {
-  label: string;
-  value: string;
-  valueTone?: "up" | "down" | "neutral";
-  sub?: string;
-  accent: "amber" | "signal" | "smartmoney" | "up" | "down";
-  children?: React.ReactNode;
-}) {
-  const ACCENT_BG: Record<string, string> = {
-    amber: "from-amber/25 via-amber/10 to-transparent",
-    signal: "from-signal/25 via-signal/10 to-transparent",
-    smartmoney: "from-smartmoney/25 via-smartmoney/10 to-transparent",
-    up: "from-up/25 via-up/10 to-transparent",
-    down: "from-down/25 via-down/10 to-transparent",
-  };
-  const VALUE_TONE: Record<string, string> = { up: "text-up", down: "text-down", neutral: "text-ink" };
-  return (
-    <div
-      className={clsx(
-        "relative flex min-h-[6.5rem] flex-col justify-between overflow-hidden rounded-lg border border-white/10 bg-gradient-to-br p-2.5 shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]",
-        ACCENT_BG[accent]
-      )}
-      style={{ backgroundColor: "rgba(255,255,255,0.045)" }}
-    >
-      <div className="text-[9.5px] font-semibold uppercase tracking-wide text-ink-muted">{label}</div>
-      {children ? (
-        <div className="my-1">{children}</div>
-      ) : (
-        <div className={clsx("mono-num mt-1 text-[15px] font-bold", VALUE_TONE[valueTone ?? "neutral"])}>{value}</div>
-      )}
-      {sub && <div className="text-[9px] leading-tight text-ink-faint">{sub}</div>}
-    </div>
-  );
-}
-
-/** Small inline sparkline — no charting lib, just an SVG polyline. */
-function Sparkline({ values, tone = "#A78BFA", height = "h-8" }: { values: number[]; tone?: string; height?: string }) {
-  const clean = values.filter((v) => !Number.isNaN(v));
-  if (clean.length < 2) return null;
-  const min = Math.min(...clean);
-  const max = Math.max(...clean);
-  const range = max - min || 1;
-  const points = clean.map((v, i) => `${(i / (clean.length - 1)) * 100},${100 - ((v - min) / range) * 100}`).join(" ");
-  return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className={clsx("w-full", height)}>
-      <polyline points={points} fill="none" stroke={tone} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
-
-/** RSI line chart with fixed overbought(70)/oversold(30) reference lines — shrunk to fit both mobile and desktop without a long scroll. */
-function RsiChart({ series, last }: { series: number[]; last: number }) {
+/** RSI line chart with fixed overbought(70)/oversold(30) reference lines — shrunk to fit both mobile and desktop without a long scroll. Now also shows current price, same as MACD/Volume Profile, so every hero card reads like a TradingView panel. */
+function RsiChart({ series, last, lastPrice }: { series: number[]; last: number; lastPrice?: number }) {
   const tail = series.filter((v) => !Number.isNaN(v)).slice(-50);
   if (tail.length < 2) return null;
   const yFor = (v: number) => 100 - v;
@@ -107,11 +37,14 @@ function RsiChart({ series, last }: { series: number[]; last: number }) {
   const tone = last >= 70 ? "#FF5252" : last <= 30 ? "#00E676" : "#A78BFA";
   return (
     <div>
-      <div className="mb-1 flex items-baseline gap-1.5">
-        <span className="text-[9px] uppercase tracking-wide text-ink-faint">RSI (14)</span>
-        <span className="mono-num text-[13px] font-bold" style={{ color: tone }}>
-          {last.toFixed(2)}
-        </span>
+      <div className="mb-1 flex items-baseline justify-between gap-1.5">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-[9px] uppercase tracking-wide text-ink-faint">RSI (14)</span>
+          <span className="mono-num text-[13px] font-bold" style={{ color: tone }}>
+            {last.toFixed(2)}
+          </span>
+        </div>
+        {lastPrice !== undefined && <span className="mono-num text-[10px] text-up">{formatUsd(lastPrice)}</span>}
       </div>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="block h-14 w-full sm:h-16">
         {[70, 30].map((level) => (
@@ -135,6 +68,7 @@ function MacdChart({
   macd,
   signal,
   hist,
+  lastPrice,
 }: {
   macdSeries: number[];
   signalSeries: number[];
@@ -142,6 +76,7 @@ function MacdChart({
   macd: number;
   signal: number;
   hist: number;
+  lastPrice?: number;
 }) {
   const tailLen = 50;
   const mTail = macdSeries.slice(-tailLen);
@@ -158,11 +93,14 @@ function MacdChart({
 
   return (
     <div>
-      <div className="mb-1 flex flex-wrap items-baseline gap-x-1.5 text-[9px]">
-        <span className="uppercase tracking-wide text-ink-faint">MACD</span>
-        <span className="mono-num font-bold text-signal-glow">{macd.toFixed(1)}</span>
-        <span className="mono-num font-bold text-amber">{signal.toFixed(1)}</span>
-        <span className={`mono-num font-bold ${hist >= 0 ? "text-up" : "text-down"}`}>{hist.toFixed(1)}</span>
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-1.5 text-[9px]">
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
+          <span className="uppercase tracking-wide text-ink-faint">MACD</span>
+          <span className="mono-num font-bold text-signal-glow">{macd.toFixed(1)}</span>
+          <span className="mono-num font-bold text-amber">{signal.toFixed(1)}</span>
+          <span className={`mono-num font-bold ${hist >= 0 ? "text-up" : "text-down"}`}>{hist.toFixed(1)}</span>
+        </div>
+        {lastPrice !== undefined && <span className="mono-num text-[10px] text-up">{formatUsd(lastPrice)}</span>}
       </div>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="block h-14 w-full sm:h-16">
         <line x1={0} x2={100} y1={yFor(0)} y2={yFor(0)} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
@@ -220,13 +158,14 @@ function VolumeProfileChart({
 }
 
 /**
- * Real Indicators Suite. RSI / MACD / Volume Profile stay as three
- * always-visible hero charts (per the reference layout). The remaining 8
- * indicators (EMA/SMA/VWAP/ATR/ADX/Bollinger/Ichimoku/Supertrend) are no
- * longer a tab selection — every one renders as its own grid tile at once
- * (3 columns on mobile, 4 on desktop), so there's nothing to "click and
- * nothing happens". Every value here comes from the same OHLCV `candles`
- * already loaded for the chart — no duplicate fetch, no fabricated numbers.
+ * Real Indicators Suite. RSI / MACD / Volume Profile are the three
+ * always-visible hero charts (per the reference layout) — each now also
+ * shows the current price, same as a TradingView panel. The other 8
+ * indicators (EMA/SMA/VWAP/ATR/ADX/Bollinger/Ichimoku/Supertrend) were
+ * removed from this panel: they're already plotted on the main chart above,
+ * so showing them again here was pure duplication. Every value here comes
+ * from the same OHLCV `candles` already loaded for the chart — no duplicate
+ * fetch, no fabricated numbers.
  */
 export function IndicatorsSuitePanel({ symbol, candles }: { symbol: string; candles: Candle[] }) {
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
@@ -246,24 +185,7 @@ export function IndicatorsSuitePanel({ symbol, candles }: { symbol: string; cand
     return { macdLine, signalLine, histLine };
   }, [candles, closes]);
 
-  const ema20Series = useMemo(() => ema(closes, 20), [closes]);
-  const ema50Series = useMemo(() => ema(closes, 50), [closes]);
-  const sma20Series = useMemo(() => sma(closes, 20), [closes]);
-  const sma50Series = useMemo(() => sma(closes, 50), [closes]);
-  const atrSeries = useMemo(() => atr(candles, 14), [candles]);
-  const lastAtr = atrSeries.at(-1);
-
-  const adx = useMemo(() => calcAdx(candles), [candles]);
-  const bollinger = useMemo(() => calcBollinger(candles), [candles]);
-  const vwap = useMemo(() => calcVwap(candles), [candles]);
-  const ichimoku = useMemo(() => calcIchimoku(candles), [candles]);
-  const supertrend = useMemo(() => calcSupertrend(candles), [candles]);
   const volumeProfile = useMemo(() => calcVolumeProfile(candles, 10), [candles]);
-
-  const ema20 = ema20Series.at(-1);
-  const ema50 = ema50Series.at(-1);
-  const sma20 = sma20Series.at(-1);
-  const sma50 = sma50Series.at(-1);
 
   return (
     <div className="glow-card relative overflow-hidden p-3 sm:p-4">
@@ -275,103 +197,28 @@ export function IndicatorsSuitePanel({ symbol, candles }: { symbol: string; cand
       </div>
 
       {/* RSI | MACD | Volume Profile — three always-visible hero charts, sized to fit mobile without a long scroll */}
-      <div className="relative mb-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+      <div className="relative grid grid-cols-1 gap-2.5 sm:grid-cols-3">
         <HeroCard code="RSI" title="RSI">
-          {Number.isNaN(lastRsi ?? NaN) ? <InsufficientData symbol={symbol} label="RSI" /> : <RsiChart series={rsiSeries} last={lastRsi!} />}
+          {Number.isNaN(lastRsi ?? NaN) ? <InsufficientData symbol={symbol} label="RSI" /> : <RsiChart series={rsiSeries} last={lastRsi!} lastPrice={lastPrice} />}
         </HeroCard>
         <HeroCard code="MACD" title="MACD" hint="12,26,9">
           {!macd || !macdSeriesBundle ? (
             <InsufficientData symbol={symbol} label="MACD" />
           ) : (
-            <MacdChart macdSeries={macdSeriesBundle.macdLine} signalSeries={macdSeriesBundle.signalLine} histSeries={macdSeriesBundle.histLine} macd={macd.macd} signal={macd.signal} hist={macd.histogram} />
+            <MacdChart
+              macdSeries={macdSeriesBundle.macdLine}
+              signalSeries={macdSeriesBundle.signalLine}
+              histSeries={macdSeriesBundle.histLine}
+              macd={macd.macd}
+              signal={macd.signal}
+              hist={macd.histogram}
+              lastPrice={lastPrice}
+            />
           )}
         </HeroCard>
         <HeroCard code="VP" title="Volume Profile">
           {!volumeProfile ? <InsufficientData symbol={symbol} label="Volume Profile" /> : <VolumeProfileChart buckets={volumeProfile.buckets} pocPrice={volumeProfile.pocPrice} maxVolume={volumeProfile.maxVolume} lastPrice={lastPrice} />}
         </HeroCard>
-      </div>
-
-      {/* Remaining 8 indicators — grid columns instead of tabs (3x3 mobile, 4x4 desktop), bright/light tiles */}
-      <div className="relative grid grid-cols-3 gap-2 lg:grid-cols-4">
-        {/* EMA */}
-        {candles.length < 20 || ema20 === undefined || Number.isNaN(ema20) ? (
-          <LightTile label="EMA" value="N/A" accent="signal" sub="Candle kurang" />
-        ) : (
-          <LightTile label="EMA 20/50" value="" accent="signal" sub={`20: ${formatUsd(ema20)}${ema50 !== undefined && !Number.isNaN(ema50) ? ` · 50: ${formatUsd(ema50)}` : ""}`}>
-            <Sparkline values={ema20Series.slice(-30)} tone="#8B7BFF" />
-          </LightTile>
-        )}
-
-        {/* SMA */}
-        {candles.length < 20 || sma20 === undefined || Number.isNaN(sma20) ? (
-          <LightTile label="SMA" value="N/A" accent="amber" sub="Candle kurang" />
-        ) : (
-          <LightTile label="SMA 20/50" value="" accent="amber" sub={`20: ${formatUsd(sma20)}${sma50 !== undefined && !Number.isNaN(sma50) ? ` · 50: ${formatUsd(sma50)}` : ""}`}>
-            <Sparkline values={sma20Series.slice(-30)} tone="#FFB020" />
-          </LightTile>
-        )}
-
-        {/* VWAP */}
-        {!vwap ? (
-          <LightTile label="VWAP" value="N/A" accent="smartmoney" sub="Volume kurang" />
-        ) : (
-          <LightTile
-            label="VWAP"
-            value={formatUsd(vwap.vwap)}
-            valueTone={vwap.deviationPct >= 0 ? "up" : "down"}
-            accent="smartmoney"
-            sub={`${vwap.deviationPct >= 0 ? "+" : ""}${vwap.deviationPct.toFixed(2)}% dari harga`}
-          />
-        )}
-
-        {/* ATR */}
-        {Number.isNaN(lastAtr ?? NaN) ? (
-          <LightTile label="ATR (14)" value="N/A" accent="amber" sub="Candle kurang" />
-        ) : (
-          <LightTile label="ATR (14)" value="" accent="amber" sub={`Volatilitas: ${formatUsd(lastAtr!)}`}>
-            <Sparkline values={atrSeries.slice(-30)} tone="#FFB020" />
-          </LightTile>
-        )}
-
-        {/* ADX */}
-        {!adx ? (
-          <LightTile label="ADX" value="N/A" accent="signal" sub="Candle kurang" />
-        ) : (
-          <LightTile
-            label="ADX"
-            value={adx.adx.toFixed(1)}
-            valueTone={adx.plusDI > adx.minusDI ? "up" : adx.minusDI > adx.plusDI ? "down" : "neutral"}
-            accent="signal"
-            sub={`+DI ${adx.plusDI.toFixed(1)} · -DI ${adx.minusDI.toFixed(1)} · ${adx.trendStrength}`}
-          />
-        )}
-
-        {/* Bollinger */}
-        {!bollinger ? (
-          <LightTile label="Bollinger" value="N/A" accent="up" sub="Candle kurang" />
-        ) : (
-          <LightTile label="Bollinger %B" value={`${(bollinger.percentB * 100).toFixed(0)}%`} valueTone={bollinger.percentB > 0.6 ? "up" : bollinger.percentB < 0.4 ? "down" : "neutral"} accent="up" sub={`U ${formatUsd(bollinger.upper)} · L ${formatUsd(bollinger.lower)}`} />
-        )}
-
-        {/* Ichimoku */}
-        {!ichimoku ? (
-          <LightTile label="Ichimoku" value="N/A" accent="down" sub="Butuh 52 candle" />
-        ) : (
-          <LightTile label="Ichimoku Cloud" value={ichimoku.cloud.toUpperCase()} valueTone={ichimoku.cloud === "bullish" ? "up" : ichimoku.cloud === "bearish" ? "down" : "neutral"} accent="down" sub={`Harga ${ichimoku.priceVsCloud} cloud`} />
-        )}
-
-        {/* Supertrend */}
-        {!supertrend ? (
-          <LightTile label="Supertrend" value="N/A" accent="up" sub="Candle kurang" />
-        ) : (
-          <LightTile
-            label="Supertrend"
-            value={supertrend.direction.toUpperCase()}
-            valueTone={supertrend.direction === "up" ? "up" : "down"}
-            accent="up"
-            sub={`${formatUsd(supertrend.value)}${supertrend.flippedThisBar ? " · baru flip" : ""}`}
-          />
-        )}
       </div>
     </div>
   );
