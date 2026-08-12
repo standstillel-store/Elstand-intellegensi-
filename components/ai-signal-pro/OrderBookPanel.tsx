@@ -172,8 +172,9 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
   const { bids, asks, maxCum, mid, spread, spreadPct, imbalancePct, pressure } = derived;
   const asksTopDown = [...asks].reverse();
   // Combined ladder: asks (red, descending toward spread) on top, spread row, bids (green, descending from spread) below — one continuous price column like a real exchange ladder.
-  const ladderAsks = asksTopDown.slice(-12);
-  const ladderBids = bids.slice(0, 12);
+  // 8 rows per side (not 12) so both ask AND bid rows fit inside the fixed xl:h-[520px] card at once — no scrolling needed to see the buy side.
+  const ladderAsks = asksTopDown.slice(-8);
+  const ladderBids = bids.slice(0, 8);
 
   return (
     <div className="glow-card relative flex flex-col overflow-hidden p-4 xl:h-[520px]">
@@ -250,7 +251,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
             <span className="text-right">Size</span>
             <span className="text-right">Total</span>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-hidden">
             {ladderAsks.map((a) => (
               <div key={`ask-${a.price}`} className="relative grid grid-cols-3 items-center overflow-hidden px-2 py-[3px] text-[10.5px]">
                 <div className="absolute inset-y-0 right-0 bg-down/12" style={{ width: `${Math.min(100, (a.cum / maxCum) * 100)}%` }} />
@@ -282,4 +283,4 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
       </div>
     </div>
   );
-}
+                }
