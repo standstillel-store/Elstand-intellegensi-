@@ -257,14 +257,11 @@ export interface BollingerReading {
 
 export function calcBollinger(candles: Candle[], period = 20, stdDevMult = 2): BollingerReading | undefined {
   if (candles.length < period) return undefined;
-  const closes = candles.map((c) => c.close);
-  const window = closes.slice(-period);
-  const middle = window.reduce((s, v) => s + v, 0) / period;
-  const variance = window.reduce((s, v) => s + (v - middle) ** 2, 0) / period;
-  const stdDev = Math.sqrt(variance);
-  const upper = middle + stdDevMult * stdDev;
-  const lower = middle - stdDevMult * stdDev;
-  const last = closes[closes.length - 1];
+  const series = calcBollingerSeries(candles, period, stdDevMult);
+  const upper = series.upper.at(-1)!;
+  const middle = series.middle.at(-1)!;
+  const lower = series.lower.at(-1)!;
+  const last = candles.at(-1)!.close;
   return {
     upper,
     middle,
@@ -374,18 +371,12 @@ export interface IchimokuReading {
 /** Standard 9/26/52 Ichimoku. Senkou A/B are reported at their current (unshifted) value — this panel shows current state, not a forward-projected cloud drawing. */
 export function calcIchimoku(candles: Candle[]): IchimokuReading | undefined {
   if (candles.length < 52) return undefined;
-  const donchianMid = (period: number, endIdx: number) => {
-    const window = candles.slice(Math.max(0, endIdx - period + 1), endIdx + 1);
-    const high = Math.max(...window.map((c) => c.high));
-    const low = Math.min(...window.map((c) => c.low));
-    return (high + low) / 2;
-  };
-  const lastIdx = candles.length - 1;
-  const tenkan = donchianMid(9, lastIdx);
-  const kijun = donchianMid(26, lastIdx);
-  const senkouA = (tenkan + kijun) / 2;
-  const senkouB = donchianMid(52, lastIdx);
-  const last = candles[lastIdx].close;
+  const series = calcIchimokuSeries(candles);
+  const tenkan = series.tenkan.at(-1)!;
+  const kijun = series.kijun.at(-1)!;
+  const senkouA = series.senkouA.at(-1)!;
+  const senkouB = series.senkouB.at(-1)!;
+  const last = candles.at(-1)!.close;
   const cloudTop = Math.max(senkouA, senkouB);
   const cloudBottom = Math.min(senkouA, senkouB);
   return {
@@ -407,24 +398,11 @@ export interface SupertrendReading {
 /** Standard ATR-based Supertrend (multiplier x ATR period), computed candle-by-candle so the direction flip is genuine, not just a snapshot. */
 export function calcSupertrend(candles: Candle[], period = 10, multiplier = 3): SupertrendReading | undefined {
   if (candles.length < period + 2) return undefined;
-  const atrSeries = atr(candles, period);
-  let direction: "up" | "down" = "up";
-  let st = candles[0].close;
-  let flipped = false;
-  for (let i = period; i < candles.length; i++) {
-    const c = candles[i];
-    const a = atrSeries[i];
-    if (Number.isNaN(a)) continue;
-    const mid = (c.high + c.low) / 2;
-    const upperBand = mid + multiplier * a;
-    const lowerBand = mid - multiplier * a;
-    const prevDirection = direction;
-    if (c.close > st) direction = "up";
-    else if (c.close < st) direction = "down";
-    st = direction === "up" ? Math.max(lowerBand, i > period && prevDirection === "up" ? st : lowerBand) : Math.min(upperBand, i > period && prevDirection === "down" ? st : upperBand);
-    flipped = i === candles.length - 1 && prevDirection !== direction;
-  }
-  return { value: st, direction, flippedThisBar: flipped };
+  const series = calcSupertrendSeries(candles, period, multiplier);
+  const value = series.value.at(-1)!;
+  const direction = series.direction.at(-1)!;
+  const prevDirection = series.direction.at(-2);
+  return { value, direction, flippedThisBar: prevDirection !== undefined && prevDirection !== direction };
 }
 
 export interface VolumeProfileBucket {
@@ -461,4 +439,104 @@ export function calcVolumeProfile(candles: Candle[], bins = 12): VolumeProfileRe
   const maxVolume = Math.max(...buckets.map((b) => b.volume), 1e-9);
   const poc = buckets.reduce((best, b) => (b.volume > best.volume ? b : best), buckets[0]);
   return { buckets, pocPrice: (poc.priceLow + poc.priceHigh) / 2, maxVolume };
+}
+
+// ---------------------------------------------------------------------------
+// "Series" variants — same math as calcBollinger/calcIchimoku/calcSupertrend
+// above, but returning one value PER CANDLE instead of just the latest
+// reading. These exist so the chart overlay can draw the indicator across
+// the whole visible range using the exact same computation the AI scanners
+// use — the line on the chart and the number the AI reads are provably the
+// same series, not two independently-approximated versions.
+// ---------------------------------------------------------------------------
+
+export interface BollingerSeries {
+  upper: number[];
+  middle: number[];
+  lower: number[];
+}
+
+export function calcBollingerSeries(candles: Candle[], period = 20, stdDevMult = 2): BollingerSeries {
+  const closes = candles.map((c) => c.close);
+  const upper: number[] = [];
+  const middle: number[] = [];
+  const lower: number[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (i < period - 1) {
+      upper.push(NaN);
+      middle.push(NaN);
+      lower.push(NaN);
+      continue;
+    }
+    const window = closes.slice(i - period + 1, i + 1);
+    const mean = window.reduce((s, v) => s + v, 0) / period;
+    const variance = window.reduce((s, v) => s + (v - mean) ** 2, 0) / period;
+    const sd = Math.sqrt(variance);
+    middle.push(mean);
+    upper.push(mean + stdDevMult * sd);
+    lower.push(mean - stdDevMult * sd);
+  }
+  return { upper, middle, lower };
+}
+
+export interface IchimokuSeries {
+  tenkan: number[];
+  kijun: number[];
+  senkouA: number[];
+  senkouB: number[];
+}
+
+export function calcIchimokuSeries(candles: Candle[]): IchimokuSeries {
+  const donchianMid = (period: number, endIdx: number): number => {
+    if (endIdx < period - 1) return NaN;
+    const window = candles.slice(endIdx - period + 1, endIdx + 1);
+    const high = Math.max(...window.map((c) => c.high));
+    const low = Math.min(...window.map((c) => c.low));
+    return (high + low) / 2;
+  };
+  const tenkan: number[] = [];
+  const kijun: number[] = [];
+  const senkouA: number[] = [];
+  const senkouB: number[] = [];
+  for (let i = 0; i < candles.length; i++) {
+    const t = donchianMid(9, i);
+    const k = donchianMid(26, i);
+    tenkan.push(t);
+    kijun.push(k);
+    senkouA.push(Number.isNaN(t) || Number.isNaN(k) ? NaN : (t + k) / 2);
+    senkouB.push(donchianMid(52, i));
+  }
+  return { tenkan, kijun, senkouA, senkouB };
+}
+
+export interface SupertrendSeries {
+  value: number[];
+  direction: ("up" | "down")[];
+}
+
+export function calcSupertrendSeries(candles: Candle[], period = 10, multiplier = 3): SupertrendSeries {
+  const atrSeries = atr(candles, period);
+  const value: number[] = [];
+  const direction: ("up" | "down")[] = [];
+  let dir: "up" | "down" = "up";
+  let st = candles[0]?.close ?? NaN;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const a = atrSeries[i];
+    if (Number.isNaN(a)) {
+      value.push(NaN);
+      direction.push(dir);
+      continue;
+    }
+    const mid = (c.high + c.low) / 2;
+    const upperBand = mid + multiplier * a;
+    const lowerBand = mid - multiplier * a;
+    const prevDirection = dir;
+    if (c.close > st) dir = "up";
+    else if (c.close < st) dir = "down";
+    st = dir === "up" ? Math.max(lowerBand, i > period && prevDirection === "up" ? st : lowerBand) : Math.min(upperBand, i > period && prevDirection === "down" ? st : upperBand);
+    value.push(st);
+    direction.push(dir);
+  }
+  return { value, direction };
 }

@@ -47,7 +47,7 @@ function buildStaircasePath(cumulative: number[], maxCumulative: number): string
 }
 
 export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: number | null }) {
-  const [book, setBook] = useState<OrderBookSnapshot | null>(null);
+  const [book, setBook] = useState<(OrderBookSnapshot & { source?: "futures" | "spot" }) | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [status, setStatus] = useState<ConnState>("reconnecting");
   const [failCount, setFailCount] = useState(0);
@@ -75,7 +75,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as OrderBookSnapshot & { error?: string };
+        const data = (await res.json()) as OrderBookSnapshot & { error?: string; source?: "futures" | "spot" };
         if (cancelled) return;
         if (data.error || !data.bids?.length || !data.asks?.length) {
           setFailCount((f) => f + 1);
@@ -181,7 +181,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
       <div className="pointer-events-none absolute -bottom-24 -left-16 h-56 w-56 rounded-full bg-up/5 blur-3xl" />
 
       <div className="relative mb-2 flex flex-wrap items-center justify-between gap-2">
-        <SectionHeader code="OB" title="Order Book (Live)" hint={`${symbol}USDT · Binance Futures`} icon={<Layers size={13} />} />
+        <SectionHeader code="OB" title="Order Book (Live)" hint={`${symbol}USDT · Binance ${book.source === "spot" ? "Spot (fallback)" : "Futures"}`} icon={<Layers size={13} />} />
         <div className="flex items-center gap-1.5">
           <LiveDot tone={STATUS_TONE[status]} />
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${status === "live" ? "text-up" : status === "reconnecting" ? "text-amber" : "text-down"}`}>

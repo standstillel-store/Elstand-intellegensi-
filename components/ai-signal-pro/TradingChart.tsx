@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createChart,
   ColorType,
@@ -10,7 +10,9 @@ import {
   type IPriceLine,
   type UTCTimestamp,
 } from "lightweight-charts";
+import clsx from "clsx";
 import type { Candle } from "@/lib/elvoid/types";
+import { sma, calcBollingerSeries, calcIchimokuSeries, calcSupertrendSeries } from "@/lib/elvoid/indicators";
 
 export interface ChartLevels {
   side: "LONG" | "SHORT";
@@ -29,12 +31,37 @@ const LEVEL_COLORS = {
   tp3: "#3B82F6", // 🔵
 } as const;
 
+// Overlay toggles — every extra indicator lives in the SAME chart instead of
+// its own separate widget, per request. Off by default except EMA (kept as
+// it was) so the chart doesn't turn into visual noise the moment it loads;
+// the user picks whichever extra overlays they actually want to see.
+const OVERLAY_DEFS = [
+  { key: "sma", label: "SMA 20/50", color: "#FFB020" },
+  { key: "vwap", label: "VWAP", color: "#22D3EE" },
+  { key: "bollinger", label: "Bollinger", color: "#EC4899" },
+  { key: "ichimoku", label: "Ichimoku", color: "#F97316" },
+  { key: "supertrend", label: "Supertrend", color: "#10B981" },
+] as const;
+type OverlayKey = (typeof OVERLAY_DEFS)[number]["key"];
+
 function calcEmaSeries(values: number[], period: number): number[] {
   if (!values.length) return [];
   const k = 2 / (period + 1);
   const out: number[] = [values[0]];
   for (let i = 1; i < values.length; i++) out.push(values[i] * k + out[i - 1] * (1 - k));
   return out;
+}
+
+/** Cumulative VWAP from the start of the loaded candle window (same "since loaded window, not per exchange session" semantics as lib/elvoid/scanners.ts scanVwap). */
+function calcVwapSeries(candles: Candle[]): number[] {
+  let cumPV = 0;
+  let cumVol = 0;
+  return candles.map((c) => {
+    const typical = (c.high + c.low + c.close) / 3;
+    cumPV += typical * c.volume;
+    cumVol += c.volume;
+    return cumVol > 0 ? cumPV / cumVol : NaN;
+  });
 }
 
 function toChartTime(msEpoch: number): UTCTimestamp {
@@ -63,8 +90,19 @@ export function TradingChart({
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const ema20Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const ema50Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const sma20Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const sma50Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const bbUpperRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const bbLowerRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ichimokuARef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ichimokuBRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const supertrendRef = useRef<ISeriesApi<"Line"> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
+  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ sma: false, vwap: false, bollinger: false, ichimoku: false, supertrend: false });
+
+  const toggleOverlay = (key: OverlayKey) => setOverlays((o) => ({ ...o, [key]: !o[key] }));
 
   // Create the chart once per mount.
   useEffect(() => {
@@ -98,6 +136,14 @@ export function TradingChart({
 
     ema20Ref.current = chart.addLineSeries({ color: "#8B7BFF", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     ema50Ref.current = chart.addLineSeries({ color: "#FFB020", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    sma20Ref.current = chart.addLineSeries({ color: "#FFB020", lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, visible: false });
+    sma50Ref.current = chart.addLineSeries({ color: "#FDBA74", lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, visible: false });
+    vwapRef.current = chart.addLineSeries({ color: "#22D3EE", lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, visible: false });
+    bbUpperRef.current = chart.addLineSeries({ color: "#EC4899", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, visible: false });
+    bbLowerRef.current = chart.addLineSeries({ color: "#EC4899", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, visible: false });
+    ichimokuARef.current = chart.addLineSeries({ color: "#F97316", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
+    ichimokuBRef.current = chart.addLineSeries({ color: "#FB923C", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
+    supertrendRef.current = chart.addLineSeries({ color: "#10B981", lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, visible: false });
 
     const onResize = () => {
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
@@ -112,10 +158,18 @@ export function TradingChart({
       volumeSeriesRef.current = null;
       ema20Ref.current = null;
       ema50Ref.current = null;
+      sma20Ref.current = null;
+      sma50Ref.current = null;
+      vwapRef.current = null;
+      bbUpperRef.current = null;
+      bbLowerRef.current = null;
+      ichimokuARef.current = null;
+      ichimokuBRef.current = null;
+      supertrendRef.current = null;
     };
   }, [height]);
 
-  // Seed historical data whenever candles change (symbol/interval/timeframe switch).
+  // Seed historical data + all overlay series whenever candles change (symbol/interval/timeframe switch).
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !candles.length) return;
 
@@ -131,6 +185,8 @@ export function TradingChart({
     );
 
     const closes = candles.map((c) => c.close);
+    const times = candles.map((c) => toChartTime(c.time));
+
     if (ema20Ref.current && closes.length >= 20) {
       const ema20 = calcEmaSeries(closes, 20);
       ema20Ref.current.setData(candles.map((c, i) => ({ time: toChartTime(c.time), value: ema20[i] })));
@@ -140,8 +196,48 @@ export function TradingChart({
       ema50Ref.current.setData(candles.map((c, i) => ({ time: toChartTime(c.time), value: ema50[i] })));
     }
 
+    // SMA — same overlay everywhere else uses moving averages, here as dotted lines so EMA/SMA stay visually distinct.
+    if (sma20Ref.current && closes.length >= 20) {
+      const s20 = sma(closes, 20);
+      sma20Ref.current.setData(times.map((t, i) => ({ time: t, value: s20[i] })).filter((p) => !Number.isNaN(p.value)));
+    }
+    if (sma50Ref.current && closes.length >= 50) {
+      const s50 = sma(closes, 50);
+      sma50Ref.current.setData(times.map((t, i) => ({ time: t, value: s50[i] })).filter((p) => !Number.isNaN(p.value)));
+    }
+    if (vwapRef.current) {
+      const vwapSeries = calcVwapSeries(candles);
+      vwapRef.current.setData(times.map((t, i) => ({ time: t, value: vwapSeries[i] })).filter((p) => !Number.isNaN(p.value)));
+    }
+    if (bbUpperRef.current && bbLowerRef.current && closes.length >= 20) {
+      const bb = calcBollingerSeries(candles, 20, 2);
+      bbUpperRef.current.setData(times.map((t, i) => ({ time: t, value: bb.upper[i] })).filter((p) => !Number.isNaN(p.value)));
+      bbLowerRef.current.setData(times.map((t, i) => ({ time: t, value: bb.lower[i] })).filter((p) => !Number.isNaN(p.value)));
+    }
+    if (ichimokuARef.current && ichimokuBRef.current && candles.length >= 52) {
+      const ich = calcIchimokuSeries(candles);
+      ichimokuARef.current.setData(times.map((t, i) => ({ time: t, value: ich.senkouA[i] })).filter((p) => !Number.isNaN(p.value)));
+      ichimokuBRef.current.setData(times.map((t, i) => ({ time: t, value: ich.senkouB[i] })).filter((p) => !Number.isNaN(p.value)));
+    }
+    if (supertrendRef.current && candles.length >= 12) {
+      const st = calcSupertrendSeries(candles, 10, 3);
+      supertrendRef.current.setData(times.map((t, i) => ({ time: t, value: st.value[i] })).filter((p) => !Number.isNaN(p.value)));
+    }
+
     chartRef.current?.timeScale().fitContent();
   }, [candles]);
+
+  // Apply overlay visibility toggles without recomputing/reseeding data.
+  useEffect(() => {
+    sma20Ref.current?.applyOptions({ visible: overlays.sma });
+    sma50Ref.current?.applyOptions({ visible: overlays.sma });
+    vwapRef.current?.applyOptions({ visible: overlays.vwap });
+    bbUpperRef.current?.applyOptions({ visible: overlays.bollinger });
+    bbLowerRef.current?.applyOptions({ visible: overlays.bollinger });
+    ichimokuARef.current?.applyOptions({ visible: overlays.ichimoku });
+    ichimokuBRef.current?.applyOptions({ visible: overlays.ichimoku });
+    supertrendRef.current?.applyOptions({ visible: overlays.supertrend });
+  }, [overlays]);
 
   // Draw / redraw AI entry-SL-TP price lines.
   useEffect(() => {
@@ -214,6 +310,25 @@ export function TradingChart({
         />
         <span className="text-ink-faint">{wsStatus === "live" ? "Live" : wsStatus === "connecting" ? "Connecting…" : "Offline"}</span>
       </div>
+
+      {/* Overlay toggles — merge EMA/SMA/VWAP/Bollinger/Ichimoku/Supertrend into the SAME chart instead of separate widgets. EMA stays always-on (unchanged prior behavior); the rest are opt-in so the chart doesn't get crowded by default. */}
+      <div className="absolute left-2 top-2 z-10 flex flex-wrap gap-1">
+        <span className="rounded-full border border-signal/40 bg-bg/80 px-2 py-0.5 text-[9px] font-medium text-signal-glow backdrop-blur">EMA</span>
+        {OVERLAY_DEFS.map((o) => (
+          <button
+            key={o.key}
+            onClick={() => toggleOverlay(o.key)}
+            className={clsx(
+              "rounded-full border px-2 py-0.5 text-[9px] font-medium backdrop-blur transition-colors",
+              overlays[o.key] ? "border-white/30 bg-bg/90 text-ink" : "border-line/60 bg-bg/60 text-ink-faint hover:text-ink-muted"
+            )}
+            style={overlays[o.key] ? { color: o.color, borderColor: `${o.color}66` } : undefined}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
       <div ref={containerRef} style={{ height }} className="w-full" />
     </div>
   );

@@ -74,19 +74,48 @@ export async function getFundingSnapshot(): Promise<FundingInfo[]> {
  * holding a socket open for anonymous visitors — the true tick-by-tick
  * stream is what the actual terminal is for.
  */
-export async function getOrderBookDepth(symbol: string, limit = 20): Promise<OrderBookSnapshot> {
+/**
+ * Real order-book depth with an automatic fallback: Binance Futures first
+ * (fapi.binance.com — matches the rest of this file's funding/OI data), and
+ * if that fails — most commonly a regional block on the hosting provider's
+ * egress IP, not an app bug — falls back to Binance SPOT depth
+ * (api.binance.com/api/v3/depth), a different domain/product with its own
+ * access rules. Both are real exchange order books; this never falls back
+ * to anything synthesized from candles — OHLCV candles simply don't contain
+ * bid/ask depth, so a "depth from candles" fallback would have to be
+ * invented data, which this app doesn't do. The response is tagged with
+ * which source actually answered so the UI can be honest about it.
+ */
+export async function getOrderBookDepth(symbol: string, limit = 20): Promise<OrderBookSnapshot & { source: "futures" | "spot" }> {
   const pair = `${symbol.toUpperCase()}USDT`;
   return cached(`bn:depth:${pair}:${limit}`, 10_000, async () => {
-    const res = await fetch(`${BASE}/fapi/v1/depth?symbol=${pair}&limit=${limit}`, {
-      next: { revalidate: 10 },
-    });
-    if (!res.ok) throw new Error(`Binance depth failed for ${pair}: ${res.status}`);
-    const json = (await res.json()) as { bids: [string, string][]; asks: [string, string][] };
-    return {
-      symbol: pair,
-      bids: json.bids.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
-      asks: json.asks.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
-    };
+    try {
+      const res = await fetch(`${BASE}/fapi/v1/depth?symbol=${pair}&limit=${limit}`, { next: { revalidate: 10 } });
+      if (!res.ok) throw new Error(`Binance Futures depth failed for ${pair}: ${res.status}`);
+      const json = (await res.json()) as { bids: [string, string][]; asks: [string, string][] };
+      return {
+        symbol: pair,
+        source: "futures" as const,
+        bids: json.bids.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+        asks: json.asks.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+      };
+    } catch (futuresErr) {
+      try {
+        const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${pair}&limit=${Math.min(limit, 100)}`, { next: { revalidate: 10 } });
+        if (!res.ok) throw new Error(`Binance Spot depth failed for ${pair}: ${res.status}`);
+        const json = (await res.json()) as { bids: [string, string][]; asks: [string, string][] };
+        return {
+          symbol: pair,
+          source: "spot" as const,
+          bids: json.bids.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+          asks: json.asks.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+        };
+      } catch (spotErr) {
+        throw futuresErr instanceof Error && spotErr instanceof Error
+          ? new Error(`Both Futures and Spot depth failed for ${pair}: ${futuresErr.message} / ${spotErr.message}`)
+          : futuresErr;
+      }
+    }
   });
 }
 
