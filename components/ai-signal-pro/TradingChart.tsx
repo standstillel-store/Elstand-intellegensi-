@@ -12,7 +12,7 @@ import {
 } from "lightweight-charts";
 import clsx from "clsx";
 import type { Candle } from "@/lib/elvoid/types";
-import { sma, calcBollingerSeries, calcIchimokuSeries, calcSupertrendSeries } from "@/lib/elvoid/indicators";
+import { sma, calcBollingerSeries, calcIchimokuSeries, calcSupertrendSeries, atr, calcAdx } from "@/lib/elvoid/indicators";
 
 export interface ChartLevels {
   side: "LONG" | "SHORT";
@@ -100,7 +100,16 @@ export function TradingChart({
   const supertrendRef = useRef<ISeriesApi<"Line"> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
-  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ sma: false, vwap: false, bollinger: false, ichimoku: false, supertrend: false });
+  // All 6 price-scale overlays default ON — they render inside this same chart, not as separate widgets.
+  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ sma: true, vwap: true, bollinger: true, ichimoku: true, supertrend: true });
+  // ATR/ADX are oscillators (different scale from price) so they can't be drawn as chart lines without
+  // wrecking the candle scale — shown instead as a compact readout inside the chart, same as TradingView does.
+  const [atrAdx, setAtrAdx] = useState<{ atr: number | null; adx: number | null; plusDI: number | null; minusDI: number | null }>({
+    atr: null,
+    adx: null,
+    plusDI: null,
+    minusDI: null,
+  });
 
   const toggleOverlay = (key: OverlayKey) => setOverlays((o) => ({ ...o, [key]: !o[key] }));
 
@@ -224,6 +233,17 @@ export function TradingChart({
       supertrendRef.current.setData(times.map((t, i) => ({ time: t, value: st.value[i] })).filter((p) => !Number.isNaN(p.value)));
     }
 
+    // ATR / ADX — computed here so their latest reading can be shown as a readout inside the chart.
+    const atrSeries = atr(candles, 14);
+    const latestAtr = atrSeries.length ? atrSeries[atrSeries.length - 1] : NaN;
+    const adxReading = calcAdx(candles, 14);
+    setAtrAdx({
+      atr: Number.isFinite(latestAtr) ? latestAtr : null,
+      adx: adxReading ? adxReading.adx : null,
+      plusDI: adxReading ? adxReading.plusDI : null,
+      minusDI: adxReading ? adxReading.minusDI : null,
+    });
+
     chartRef.current?.timeScale().fitContent();
   }, [candles]);
 
@@ -330,6 +350,23 @@ export function TradingChart({
       </div>
 
       <div ref={containerRef} style={{ height }} className="w-full" />
+
+      {/* ATR/ADX readout — oscillators can't be overlaid as price lines, so shown as compact text inside the chart per the required layout (all 8 indicators live inside this same chart card). */}
+      <div className="absolute bottom-2 left-2 z-10 flex items-center gap-2 rounded-md border border-line bg-bg/80 px-2 py-1 text-[9px] backdrop-blur">
+        <span className="text-ink-faint">
+          ATR(14) <span className="mono-num font-semibold text-amber">{atrAdx.atr !== null ? atrAdx.atr.toFixed(2) : "—"}</span>
+        </span>
+        <span className="h-2.5 w-px bg-line" />
+        <span className="text-ink-faint">
+          ADX(14) <span className="mono-num font-semibold text-ink">{atrAdx.adx !== null ? atrAdx.adx.toFixed(1) : "—"}</span>
+          {atrAdx.plusDI !== null && atrAdx.minusDI !== null && (
+            <>
+              {" "}
+              <span className="text-up">+DI {atrAdx.plusDI.toFixed(1)}</span> <span className="text-down">-DI {atrAdx.minusDI.toFixed(1)}</span>
+            </>
+          )}
+        </span>
+      </div>
     </div>
   );
 }
