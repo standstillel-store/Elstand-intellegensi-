@@ -122,6 +122,7 @@ export interface IntelligenceRow {
   change24h: number;
   volume24hUsd: number;
   marketCapUsd: number;
+  sparkline7d?: number[]; // real price points from CoinGecko, for mini sparklines
   derivatives: DerivativesRow;
   whaleNetFlowUsd: number;
   aiOpportunity: number;
@@ -185,6 +186,7 @@ export function buildIntelligenceRows(
         change24h: m.price_change_percentage_24h_in_currency ?? 0,
         volume24hUsd: m.total_volume,
         marketCapUsd: m.market_cap,
+        sparkline7d: m.sparkline_in_7d?.price,
         derivatives,
         whaleNetFlowUsd,
         aiOpportunity: ai.opportunity,
