@@ -12,14 +12,29 @@ import { SidebarProfile } from "./layout/SidebarProfile";
 // live, just not in nav). Token Scanner stays in nav (explicitly kept per
 // spec). See lib/elvoid/performance.ts and app/ai-performance/page.tsx for
 // where the consolidated sections now live.
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/macro-intelligence", label: "Macro Intelligence", icon: Radar },
-  { href: "/ai-signal", label: "AI Signal", icon: Radar },
-  { href: "/ai-performance", label: "AI Performance", icon: LineChart },
-  { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
-  { href: "/earn", label: "Earn", icon: Gift },
-  { href: "/settings", label: "Settings", icon: Settings },
+//
+// Grouped to match the ELSTAND INTEL visual reference (INTELLIGENCE /
+// ECOSYSTEM / SYSTEM section labels). Wallet and Elvoid Pro are NOT listed
+// here — both are still unreleased, no active page/UI for either.
+const NAV_GROUPS = [
+  {
+    label: "Intelligence",
+    items: [
+      { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+      { href: "/macro-intelligence", label: "Macro Intelligence", icon: Radar },
+      { href: "/ai-signal", label: "AI Signal", icon: Radar },
+      { href: "/ai-performance", label: "AI Performance", icon: LineChart },
+      { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
+    ],
+  },
+  {
+    label: "Ecosystem",
+    items: [{ href: "/earn", label: "Earn", icon: Gift }],
+  },
+  {
+    label: "System",
+    items: [{ href: "/settings", label: "Settings", icon: Settings }],
+  },
 ];
 
 export function Sidebar() {
@@ -38,25 +53,32 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
-        {NAV_ITEMS.map((item) => {
-          const active = item.href === "/" ? pathname === "/" : pathname?.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={clsx(
-                "flex items-center gap-2.5 rounded-md border-l-2 px-3 py-2 text-sm transition-colors",
-                active
-                  ? "border-signal bg-signal/10 font-medium text-ink shadow-glow-signal"
-                  : "border-transparent text-ink-muted hover:bg-bg-raised hover:text-ink"
-              )}
-            >
-              <item.icon size={16} className={active ? "text-signal-glow" : ""} />
-              {item.label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 space-y-4 overflow-y-auto p-3">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label} className="space-y-0.5">
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-signal-glow/80">
+              {group.label}
+            </p>
+            {group.items.map((item) => {
+              const active = item.href === "/" ? pathname === "/" : pathname?.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={clsx(
+                    "flex items-center gap-2.5 rounded-md border-l-2 px-3 py-2 text-sm transition-colors",
+                    active
+                      ? "border-signal bg-signal/10 font-medium text-ink shadow-glow-signal"
+                      : "border-transparent text-ink-muted hover:bg-bg-raised hover:text-ink"
+                  )}
+                >
+                  <item.icon size={16} className={active ? "text-signal-glow" : ""} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="space-y-3 border-t border-line p-3">
