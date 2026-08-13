@@ -12,8 +12,10 @@ import {
   Settings,
   BookOpen,
   LineChart,
+  Gift,
 } from "lucide-react";
 import clsx from "clsx";
+import { SidebarProfile } from "../layout/SidebarProfile";
 
 // AI PERFORMANCE CONSOLIDATION (see PHASE7-8 notes in CHANGES.md): Portfolio,
 // AI Journal, and Paper Trader are no longer top-level nav items — their
@@ -28,6 +30,7 @@ const NAV_ITEMS = [
   { href: "/ai-signal", label: "AI Signal", icon: Radar },
   { href: "/ai-performance", label: "AI Performance", icon: LineChart },
   { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
+  { href: "/earn", label: "Earn", icon: Gift },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -118,7 +121,7 @@ export function NavDrawer() {
           })}
         </nav>
 
-        <div className="shrink-0 border-t border-line p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        <div className="shrink-0 space-y-3 border-t border-line p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           <Link
             href="/methodology"
             onClick={() => setOpen(false)}
@@ -127,6 +130,7 @@ export function NavDrawer() {
             <BookOpen size={14} />
             Methodology
           </Link>
+          <SidebarProfile />
         </div>
       </div>
     </>

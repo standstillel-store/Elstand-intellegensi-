@@ -4,7 +4,6 @@ import type { PaperWallet } from "@/lib/elvoid/types";
 import { GeneralSection } from "./sections/GeneralSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { AiEngineSection } from "./sections/AiEngineSection";
-import { AiEnergySection } from "./sections/AiEnergySection";
 import { PaperTradingSection } from "./sections/PaperTradingSection";
 import { ApiIntegrationSection } from "./sections/ApiIntegrationSection";
 import { SecuritySection } from "./sections/SecuritySection";
@@ -92,7 +91,6 @@ export function SettingsView({ initialWallet }: { initialWallet: PaperWallet }) 
       <GeneralSection />
       <AppearanceSection />
       <AiEngineSection />
-      <AiEnergySection />
       <PaperTradingSection
         wallet={wallet}
         riskInput={riskInput}

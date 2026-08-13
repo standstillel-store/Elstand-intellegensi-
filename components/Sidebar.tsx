@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart } from "lucide-react";
+import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart, Gift } from "lucide-react";
+import { SidebarProfile } from "./layout/SidebarProfile";
 
 // AI PERFORMANCE CONSOLIDATION: Portfolio / AI Journal / Paper Trader are no
 // longer top-level nav items — routes, components, API, and data model are
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { href: "/ai-signal", label: "AI Signal", icon: Radar },
   { href: "/ai-performance", label: "AI Performance", icon: LineChart },
   { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
+  { href: "/earn", label: "Earn", icon: Gift },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -57,7 +59,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-line p-3">
+      <div className="space-y-3 border-t border-line p-3">
         <Link
           href="/methodology"
           className="flex items-center gap-2.5 rounded-md px-3 py-2 text-xs text-ink-faint hover:text-ink-muted"
@@ -65,7 +67,8 @@ export function Sidebar() {
           <BookOpen size={14} />
           Methodology
         </Link>
-        <p className="px-3 pb-1 pt-2 text-[10px] leading-relaxed text-ink-faint">
+        <SidebarProfile />
+        <p className="px-3 pb-1 text-[10px] leading-relaxed text-ink-faint">
           Paper trading only — bukan nasihat keuangan.
         </p>
       </div>
