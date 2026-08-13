@@ -4,8 +4,9 @@ import clsx from "clsx";
 import { useTokenAnalyzer } from "@/components/token-analyzer/TokenAnalyzerContext";
 import { formatUsd, formatPct } from "@/lib/format";
 import { Badge } from "@/components/ui/Badge";
-import type { IntelligenceRow } from "@/lib/derivatives";
-import type { DerivativesOverview } from "@/lib/derivatives";
+import type { IntelligenceRow, DerivativesOverview } from "@/lib/derivatives";
+import { DERIVATIVES_WATCHLIST } from "@/lib/binance";
+import { LiveLiquidations } from "@/components/scanner/LiveLiquidations";
 
 const CATEGORIES = [
   { key: "all", label: "All" },
@@ -67,7 +68,7 @@ function OverviewStrip({ overview }: { overview: DerivativesOverview }) {
         <span className="text-[11px] font-semibold tracking-wide text-signal-glow">DERIVATIVES OVERVIEW</span>
         <span className="text-[10px] text-ink-faint">{overview.coveredSymbols} pairs tracked (Binance Futures watchlist)</span>
       </div>
-      <div className="mono-num grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+      <div className="mono-num grid grid-cols-2 gap-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
         <div>
           <p className="text-ink-faint">TOTAL OI</p>
           <p className="text-sm font-semibold">{formatUsd(overview.totalOpenInterestUsd)}</p>
@@ -86,6 +87,10 @@ function OverviewStrip({ overview }: { overview: DerivativesOverview }) {
           <p className="text-ink-faint">LONG/SHORT RATIO</p>
           <p className="text-sm font-semibold">{overview.longShortRatio !== undefined ? overview.longShortRatio.toFixed(2) : "N/A"}</p>
         </div>
+        <div>
+          <p className="text-ink-faint">LIQUIDATIONS</p>
+          <p className="text-sm font-semibold text-ink-muted">See live feed →</p>
+        </div>
       </div>
     </div>
   );
@@ -99,7 +104,10 @@ export function IntelligenceTerminal({ rows, overview }: { rows: IntelligenceRow
 
   return (
     <div className="space-y-3">
-      <OverviewStrip overview={overview} />
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
+        <OverviewStrip overview={overview} />
+        <LiveLiquidations watchlistSymbols={DERIVATIVES_WATCHLIST.map((p) => p.replace("USDT", ""))} />
+      </div>
 
       <div className="scrollbar-none flex gap-2 overflow-x-auto pb-1">
         {CATEGORIES.map((c) => (
