@@ -1,26 +1,25 @@
 import { AppShell } from "@/components/AppShell";
 import { getSnapshot } from "@/lib/snapshot";
-import { buildDumpCandidates, buildHighMomentum, buildSmartMoneyAccumulation, buildWhaleBuying, buildWhaleSelling } from "@/lib/scanner-categories";
-import { TokenScannerView } from "@/components/scanner/TokenScannerView";
+import { buildHighMomentum } from "@/lib/scanner-categories";
+import { getDerivativesRows, buildDerivativesOverview, buildIntelligenceRows } from "@/lib/derivatives";
+import { IntelligenceTerminal } from "@/components/scanner/IntelligenceTerminal";
 
 export const revalidate = 60;
 
 export default async function ScannerPage() {
   const snap = await getSnapshot();
 
-  const data = {
-    pump: snap.pumpCandidates,
-    dump: buildDumpCandidates(snap.markets, snap.funding, snap.whales),
-    rugpull: snap.rugpullRisks,
-    smartMoney: buildSmartMoneyAccumulation(snap.whales, snap.markets),
-    momentum: buildHighMomentum(snap.markets),
-    whaleBuying: buildWhaleBuying(snap.whales),
-    whaleSelling: buildWhaleSelling(snap.whales),
-  };
+  const derivativesRows = await getDerivativesRows(snap.funding);
+  const overview = buildDerivativesOverview(derivativesRows);
+
+  const pumpScoreBySymbol = new Map(snap.pumpCandidates.map((c) => [c.symbol, c.score]));
+  const momentumScoreBySymbol = new Map(buildHighMomentum(snap.markets).map((c) => [c.symbol, c.score]));
+
+  const rows = buildIntelligenceRows(snap.markets, derivativesRows, snap.whales, pumpScoreBySymbol, momentumScoreBySymbol);
 
   return (
-    <AppShell title="Token Scanner" subtitle="7 kategori live screener — klik koin untuk membuka Token Analyzer.">
-      <TokenScannerView data={data} />
+    <AppShell title="Altcoin Intelligence" subtitle="Find Opportunity. Avoid Risk. Follow Smart Money.">
+      <IntelligenceTerminal rows={rows} overview={overview} />
     </AppShell>
   );
 }

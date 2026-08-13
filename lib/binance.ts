@@ -156,6 +156,33 @@ export async function getOpenInterestHistory(
 }
 
 /**
+ * Global long/short account ratio — Binance Futures' public
+ * /futures/data/globalLongShortAccountRatio endpoint. Returns the most
+ * recent ratio (longAccount / shortAccount) for a symbol, real exchange
+ * data, no key required.
+ */
+export async function getLongShortRatio(symbol: string, period: "5m" | "15m" | "1h" | "4h" = "1h"): Promise<number | undefined> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  return cached(`bn:ls-ratio:${pair}:${period}`, 60_000, async () => {
+    try {
+      const res = await fetch(`${BASE}/futures/data/globalLongShortAccountRatio?symbol=${pair}&period=${period}&limit=1`, {
+        next: { revalidate: 60 },
+      });
+      if (!res.ok) return undefined;
+      const raw = (await res.json()) as Array<{ longShortRatio: string }>;
+      return raw[0] ? parseFloat(raw[0].longShortRatio) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+/** The same curated Binance Futures watchlist used by getFundingSnapshot — derivatives
+ * metrics (funding/OI/L-S) are only ever real for these symbols; anything outside this
+ * list must show N/A rather than a fabricated number. */
+export const DERIVATIVES_WATCHLIST = WATCHLIST;
+
+/**
  * OHLCV candles for ElVoid AI's scanning engine (support/resistance,
  * liquidity sweeps, market structure, etc. — see lib/elvoid/scanners.ts).
  * Uses the same public Binance Futures klines endpoint as the funding feed
