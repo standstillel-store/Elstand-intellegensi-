@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart, Gift } from "lucide-react";
+import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart, Gift, WalletMinimal } from "lucide-react";
 import { SidebarProfile } from "./layout/SidebarProfile";
 
 // AI PERFORMANCE CONSOLIDATION: Portfolio / AI Journal / Paper Trader are no
@@ -14,8 +14,9 @@ import { SidebarProfile } from "./layout/SidebarProfile";
 // where the consolidated sections now live.
 //
 // Grouped to match the ELSTAND INTEL visual reference (INTELLIGENCE /
-// ECOSYSTEM / SYSTEM section labels). Wallet and Elvoid Pro are NOT listed
-// here — both are still unreleased, no active page/UI for either.
+// ECOSYSTEM / SYSTEM section labels). Wallet is now live (BSC Testnet + ELS
+// Testnet) — Elvoid Pro is still unreleased (its pricing cards live inside
+// /wallet itself, disabled/"Coming Soon").
 const NAV_GROUPS = [
   {
     label: "Intelligence",
@@ -29,7 +30,10 @@ const NAV_GROUPS = [
   },
   {
     label: "Ecosystem",
-    items: [{ href: "/earn", label: "Earn", icon: Gift }],
+    items: [
+      { href: "/earn", label: "Earn", icon: Gift },
+      { href: "/wallet", label: "Wallet", icon: WalletMinimal },
+    ],
   },
   {
     label: "System",

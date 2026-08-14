@@ -13,6 +13,7 @@ import {
   BookOpen,
   LineChart,
   Gift,
+  WalletMinimal,
 } from "lucide-react";
 import clsx from "clsx";
 import { SidebarProfile } from "../layout/SidebarProfile";
@@ -27,7 +28,8 @@ import { SidebarProfile } from "../layout/SidebarProfile";
 //
 // Grouped to match the ELSTAND INTEL visual reference (INTELLIGENCE /
 // ECOSYSTEM / SYSTEM section labels), same grouping as Sidebar.tsx. Wallet
-// and Elvoid Pro are NOT listed — both still unreleased.
+// is now live (BSC Testnet + ELS Testnet) — Elvoid Pro is still unreleased
+// (its pricing cards live inside /wallet itself, disabled/"Coming Soon").
 const NAV_GROUPS = [
   {
     label: "Intelligence",
@@ -41,7 +43,10 @@ const NAV_GROUPS = [
   },
   {
     label: "Ecosystem",
-    items: [{ href: "/earn", label: "Earn", icon: Gift }],
+    items: [
+      { href: "/earn", label: "Earn", icon: Gift },
+      { href: "/wallet", label: "Wallet", icon: WalletMinimal },
+    ],
   },
   {
     label: "System",
