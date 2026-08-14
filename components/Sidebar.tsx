@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart, Gift, WalletMinimal } from "lucide-react";
+import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart, Gift, WalletMinimal, Gauge } from "lucide-react";
 import { SidebarProfile } from "./layout/SidebarProfile";
 
 // AI PERFORMANCE CONSOLIDATION: Portfolio / AI Journal / Paper Trader are no
@@ -15,8 +15,11 @@ import { SidebarProfile } from "./layout/SidebarProfile";
 //
 // Grouped to match the ELSTAND INTEL visual reference (INTELLIGENCE /
 // ECOSYSTEM / SYSTEM section labels). Wallet is now live (BSC Testnet + ELS
-// Testnet) — Elvoid Pro is still unreleased (its pricing cards live inside
-// /wallet itself, disabled/"Coming Soon").
+// Testnet). Elvoid Pro terminal (Phase 1 build-out) is now linked here —
+// the on-chain purchase flow itself (WalletProCards inside /wallet) is
+// still disabled/"Coming Soon" until PREMIUM_PURCHASE_CONTRACT is deployed,
+// but the terminal page at /elvoid-pro is real and open (no fake paywall
+// per project rules — gate it for real once entitlement infra exists).
 const NAV_GROUPS = [
   {
     label: "Intelligence",
@@ -31,6 +34,7 @@ const NAV_GROUPS = [
   {
     label: "Ecosystem",
     items: [
+      { href: "/elvoid-pro", label: "ELVOID PRO", icon: Gauge, badge: "PRO" },
       { href: "/earn", label: "Earn", icon: Gift },
       { href: "/wallet", label: "Wallet", icon: WalletMinimal },
     ],
@@ -78,6 +82,11 @@ export function Sidebar() {
                 >
                   <item.icon size={16} className={active ? "text-signal-glow" : ""} />
                   {item.label}
+                  {"badge" in item && item.badge && (
+                    <span className="ml-auto rounded bg-gold/15 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-gold">
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               );
             })}

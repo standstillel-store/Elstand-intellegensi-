@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import clsx from "clsx";
 import { Sidebar } from "./Sidebar";
 import { TopNav } from "./layout/TopNav";
 import { ProfileMenu } from "./layout/ProfileMenu";
@@ -13,11 +14,17 @@ export function AppShell({
   subtitle,
   right,
   children,
+  fullBleed = false,
 }: {
   title: string;
   subtitle?: string;
   right?: ReactNode;
   children: ReactNode;
+  /** ELVOID PRO terminal needs the whole content column (chart + right rail),
+   * not the max-w-6xl centered reading width every other page uses. Only
+   * affects the <main> wrapper below — Sidebar/TopNav/mobile header are
+   * untouched so global nav stays identical everywhere. */
+  fullBleed?: boolean;
 }) {
   return (
     <div className="min-h-screen lg:flex lg:pt-14">
@@ -45,7 +52,7 @@ export function AppShell({
 
         {/* Desktop header */}
         <div className="sticky top-14 z-20 hidden border-b border-line bg-bg/90 px-6 py-4 backdrop-blur lg:block">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+          <div className={clsx("flex items-center justify-between gap-4", !fullBleed && "mx-auto max-w-6xl")}>
             <div>
               <h1 className="text-xl font-bold tracking-tight">{title}</h1>
               {subtitle && <p className="mt-1 text-sm text-ink-muted">{subtitle}</p>}
@@ -54,8 +61,8 @@ export function AppShell({
           </div>
         </div>
 
-        <main className="mx-auto max-w-6xl px-4 py-5 lg:px-6 lg:py-6">
-          <div className="space-y-5">{children}</div>
+        <main className={clsx(fullBleed ? "px-3 py-4 lg:px-4 lg:py-4" : "mx-auto max-w-6xl px-4 py-5 lg:px-6 lg:py-6")}>
+          <div className={fullBleed ? "space-y-3" : "space-y-5"}>{children}</div>
         </main>
 
         <Footer />

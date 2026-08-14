@@ -25,6 +25,53 @@ const WATCHLIST = [
   "TONUSDT",
 ];
 
+export interface Ticker24h {
+  symbol: string;
+  lastPrice: number;
+  priceChangePercent: number;
+  highPrice: number;
+  lowPrice: number;
+  quoteVolume: number;
+}
+
+/** 24hr rolling stats for the ELVOID PRO Market Header (price/high/low/volume). Real Binance Futures data, Spot fallback — same pattern as getOrderBookDepth. */
+export async function get24hTicker(symbol: string): Promise<Ticker24h & { source: "futures" | "spot" }> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  return cached(`bn:24h:${pair}`, 15_000, async () => {
+    async function parse(json: {
+      lastPrice: string;
+      priceChangePercent: string;
+      highPrice: string;
+      lowPrice: string;
+      quoteVolume: string;
+    }) {
+      return {
+        symbol: pair,
+        lastPrice: parseFloat(json.lastPrice),
+        priceChangePercent: parseFloat(json.priceChangePercent),
+        highPrice: parseFloat(json.highPrice),
+        lowPrice: parseFloat(json.lowPrice),
+        quoteVolume: parseFloat(json.quoteVolume),
+      };
+    }
+    try {
+      const res = await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=${pair}`, { next: { revalidate: 15 } });
+      if (!res.ok) throw new Error(`Binance Futures 24hr ticker failed for ${pair}: ${res.status}`);
+      return { ...(await parse(await res.json())), source: "futures" as const };
+    } catch (futuresErr) {
+      try {
+        const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`, { next: { revalidate: 15 } });
+        if (!res.ok) throw new Error(`Binance Spot 24hr ticker failed for ${pair}: ${res.status}`);
+        return { ...(await parse(await res.json())), source: "spot" as const };
+      } catch (spotErr) {
+        throw futuresErr instanceof Error && spotErr instanceof Error
+          ? new Error(`${futuresErr.message}; ${spotErr.message}`)
+          : futuresErr;
+      }
+    }
+  });
+}
+
 export async function getFundingSnapshot(): Promise<FundingInfo[]> {
   return cached("bn:funding", 45_000, async () => {
     const res = await fetch(`${BASE}/fapi/v1/premiumIndex`, { next: { revalidate: 45 } });
