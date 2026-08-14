@@ -1,44 +1,47 @@
 "use client";
+import { useRef } from "react";
 import { useAccount } from "wagmi";
-import { isWalletConnectConfigured, WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
+import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
+import { WalletConnectGate } from "./WalletConnectGate";
 import { WalletHeader } from "./WalletHeader";
 import { WalletAssets } from "./WalletAssets";
-import { WalletSwap } from "./WalletSwap";
 import { WalletProCards } from "./WalletProCards";
 import { WalletAiEnergy } from "./WalletAiEnergy";
 import { WalletRecentActivity } from "./WalletRecentActivity";
 
-export function WalletView() {
-  const { address } = useAccount();
+function scrollTo(ref: React.RefObject<HTMLDivElement>) {
+  ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
-  if (!isWalletConnectConfigured) {
-    return (
-      <div className="rounded-lg border border-line bg-bg-surface/60 p-6 text-center">
-        <p className="text-sm text-ink">Wallet Connect belum dikonfigurasi.</p>
-        <p className="mt-1 text-xs text-ink-faint">
-          Tambahkan <code className="rounded bg-bg-raised px-1 py-0.5">NEXT_PUBLIC_REOWN_PROJECT_ID</code> di .env.local
-          (project gratis di cloud.reown.com) untuk mengaktifkan koneksi wallet {WALLET_NETWORK_CONFIG.chainName}.
-        </p>
-      </div>
-    );
+export function WalletView() {
+  const { address, isConnected } = useAccount();
+  const proRef = useRef<HTMLDivElement>(null);
+  const energyRef = useRef<HTMLDivElement>(null);
+  const activityRef = useRef<HTMLDivElement>(null);
+
+  if (!isConnected || !address) {
+    return <WalletConnectGate />;
   }
 
   return (
-    <div className="space-y-4">
-      <WalletHeader address={address} />
+    <div className="mx-auto max-w-4xl space-y-4">
+      <WalletHeader
+        address={address}
+        onBuyPro={() => scrollTo(proRef)}
+        onBuyEnergy={() => scrollTo(energyRef)}
+        onViewActivity={() => scrollTo(activityRef)}
+      />
       <WalletAssets address={address} />
-      <WalletSwap />
 
-      {/* Desktop: Elvoid Pro + AI Energy side by side. Mobile: stacked, Pro before Energy. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr] lg:items-start">
-        <WalletProCards />
-        <WalletAiEnergy />
+        <WalletProCards ref={proRef} />
+        <WalletAiEnergy ref={energyRef} />
       </div>
 
-      <WalletRecentActivity address={address} />
+      <WalletRecentActivity ref={activityRef} address={address} />
 
       <p className="text-center text-[11px] text-ink-faint">
-        All transactions are recorded on {WALLET_NETWORK_CONFIG.chainName}.
+        All ELS transactions are recorded on {WALLET_NETWORK_CONFIG.chainName}.
       </p>
     </div>
   );

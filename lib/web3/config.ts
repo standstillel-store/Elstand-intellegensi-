@@ -54,26 +54,31 @@ export const CHAIN_NAMES: Record<number, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Wallet dashboard (/wallet) — Phase: Wallet, testnet-only per spec.
+// Wallet dashboard (/wallet) — Phase: Wallet, BSC Testnet only, ELS-only
+// payment interface (no swap/DEX — see components/wallet/WalletView.tsx).
 //
 // Single centralized config so no component ever hardcodes a chain ID, RPC
-// URL, explorer URL, or contract address. ELS_CONTRACT / SWAP_CONTRACT are
-// null until the token/swap contracts are actually deployed to BSC Testnet —
-// every /wallet component MUST branch on that null and show
-// "Contract not configured" / "Testnet contract not configured" instead of
-// fabricating a balance, price, or transaction. Fill in the two addresses
-// below (and nothing else) once the contracts exist.
+// URL, explorer URL, or contract address. ELS_CONTRACT is the real deployed
+// testnet token. SWAP_CONTRACT / purchase contracts stay null until they
+// exist — every /wallet component MUST branch on null and show
+// "Contract not configured" / "Coming Soon" instead of fabricating a
+// balance, price, or transaction.
 // ---------------------------------------------------------------------------
 export const WALLET_NETWORK_CONFIG = {
   chainId: 97,
   chainName: "BNB Smart Chain Testnet",
+  chainShortLabel: "BNB TESTNET",
   rpcUrl: "https://data-seed-prebsc-1-s1.binance.org:8545",
   explorerUrl: "https://testnet.bscscan.com",
   nativeSymbol: "BNB",
-  /** ELS testnet token (ERC-20/BEP-20). Set once deployed — null renders "Contract not configured". */
-  ELS_CONTRACT: null as `0x${string}` | null,
-  /** Swap router/contract on BSC Testnet. Set once deployed — null disables swap execution. */
-  SWAP_CONTRACT: null as `0x${string}` | null,
+  /** ELS testnet token (BEP-20). Real deployed contract. */
+  ELS_CONTRACT: "0x4AeA3938eb5c5A594410Bf67c2F2107970901a4D" as `0x${string}`,
+  ELS_NAME: "ELSTAND",
+  ELS_SYMBOL: "ELS",
+  /** Premium (Elvoid Pro) purchase contract. Null until deployed — purchase stays disabled/"Coming Soon". */
+  PREMIUM_PURCHASE_CONTRACT: null as `0x${string}` | null,
+  /** AI Energy purchase contract. Null until deployed — purchase stays disabled/"Coming Soon". */
+  AI_ENERGY_PURCHASE_CONTRACT: null as `0x${string}` | null,
 } as const;
 
 export const wagmiAdapter = new WagmiAdapter({

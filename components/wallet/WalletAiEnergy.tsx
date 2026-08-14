@@ -1,44 +1,36 @@
 "use client";
+import { forwardRef } from "react";
 import { Zap, Lock } from "lucide-react";
+import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
 
-const USES = ["AI Signal Analysis", "Deep Scan", "AI Performance", "Premium Features"];
+/** Same "no fake transaction" rule as WalletProCards — disabled until AI_ENERGY_PURCHASE_CONTRACT is deployed. */
+export const WalletAiEnergy = forwardRef<HTMLDivElement>(function WalletAiEnergy(_props, ref) {
+  const configured = Boolean(WALLET_NETWORK_CONFIG.AI_ENERGY_PURCHASE_CONTRACT);
 
-export function WalletAiEnergy() {
   return (
-    <div className="rounded-lg border border-dashed border-signal/30 bg-bg-surface/60 p-4">
+    <div ref={ref} className="rounded-lg border border-line bg-bg-surface/60 p-4">
       <div className="flex items-center gap-2">
         <Zap size={15} className="text-signal-glow" />
-        <p className="text-sm font-semibold text-ink">Buy AI Energy</p>
+        <p className="text-sm font-semibold text-ink">AI Energy</p>
       </div>
 
-      <div className="mt-3 flex items-center justify-center gap-3 rounded-md border border-line bg-bg-raised px-4 py-4">
-        <div className="text-center">
-          <p className="text-xl font-bold text-signal-glow">10</p>
-          <p className="text-[11px] text-ink-faint">AI Energy</p>
+      <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-line px-4 py-3.5">
+        <div>
+          <p className="text-xl font-bold text-signal-glow">10 AI Energy</p>
+          <p className="text-[11px] text-ink-faint">15 ELS</p>
         </div>
-        <span className="text-ink-faint">=</span>
-        <div className="text-center">
-          <p className="text-xl font-bold text-ink">15</p>
-          <p className="text-[11px] text-ink-faint">ELS</p>
-        </div>
+        <button
+          disabled
+          title={configured ? undefined : "Testnet purchase contract not configured"}
+          className="flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-md border border-line bg-bg-raised px-3.5 py-2 text-xs font-medium text-ink-faint"
+        >
+          <Lock size={12} />
+          {configured ? "Buy with ELS" : "Coming Soon"}
+        </button>
       </div>
-
-      <p className="mt-3 text-[11px] text-ink-faint">AI Energy digunakan untuk:</p>
-      <ul className="mt-1.5 space-y-1">
-        {USES.map((u) => (
-          <li key={u} className="text-xs text-ink-muted">
-            &#10003; {u}
-          </li>
-        ))}
-      </ul>
-
-      <button
-        disabled
-        className="mt-4 flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-md border border-line bg-bg-raised py-2.5 text-xs font-medium text-ink-faint"
-      >
-        <Lock size={12} />
-        Coming Soon
-      </button>
+      {!configured && (
+        <p className="mt-2 text-[11px] text-ink-faint">Testnet purchase contract not configured.</p>
+      )}
     </div>
   );
-}
+});

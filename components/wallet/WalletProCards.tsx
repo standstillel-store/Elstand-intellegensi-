@@ -1,5 +1,7 @@
 "use client";
+import { forwardRef } from "react";
 import { Crown, Lock, Check } from "lucide-react";
+import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
 
 const PLANS = [
   {
@@ -7,25 +9,35 @@ const PLANS = [
     label: "ELVOID PRO — 1 WEEK",
     price: "1,500",
     highlight: "POPULAR",
-    benefits: ["Unlock dashboard Elvoid Premium", "AI Energy 25 / hari", "AI Signal A+", "50 AI Energy pertama"],
+    benefits: ["Unlock Elvoid Premium Dashboard", "AI Energy: 25/day", "AI Signal Grade A+", "50 AI Energy First Bonus"],
   },
   {
     id: "1-month",
     label: "ELVOID PRO — 1 MONTH",
     price: "15,000",
     highlight: null,
-    benefits: ["Unlock dashboard Elvoid Premium", "AI Energy 25 / hari", "AI Signal A++", "100 AI Energy pertama"],
+    benefits: ["Unlock Elvoid Premium Dashboard", "AI Energy: 25/day", "AI Signal Grade A++", "100 AI Energy First Bonus"],
   },
 ];
 
-export function WalletProCards() {
+/**
+ * "Buy with ELS" execution is real-transaction-only per spec (section 9) —
+ * connect → check network → check balance → wallet confirmation → real
+ * testnet tx → receipt → refresh balance/entitlement. None of that is wired
+ * because WALLET_NETWORK_CONFIG.PREMIUM_PURCHASE_CONTRACT is still null, so
+ * the button stays disabled with the exact required copy instead of a fake
+ * success. Wire the real flow here once that contract is deployed.
+ */
+export const WalletProCards = forwardRef<HTMLDivElement>(function WalletProCards(_props, ref) {
+  const configured = Boolean(WALLET_NETWORK_CONFIG.PREMIUM_PURCHASE_CONTRACT);
+
   return (
-    <div className="rounded-lg border border-line bg-bg-surface/60 p-4">
+    <div ref={ref} className="rounded-lg border border-line bg-bg-surface/60 p-4">
       <div className="flex items-center gap-2">
         <Crown size={15} className="text-amber" />
         <p className="text-sm font-semibold text-ink">Elvoid Pro</p>
-        <span className="text-[10px] uppercase tracking-wide text-ink-faint">Premium dashboard access</span>
       </div>
+      <p className="mt-0.5 text-[11px] text-ink-faint">Unlock the ELSTAND premium intelligence ecosystem.</p>
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {PLANS.map((plan) => (
@@ -39,7 +51,6 @@ export function WalletProCards() {
             <p className="mt-1.5 text-2xl font-bold text-ink">
               {plan.price} <span className="text-sm font-medium text-ink-faint">ELS</span>
             </p>
-            <p className="text-[11px] text-ink-faint">One-time payment</p>
 
             <ul className="mt-3 space-y-1.5">
               {plan.benefits.map((b) => (
@@ -52,17 +63,18 @@ export function WalletProCards() {
 
             <button
               disabled
+              title={configured ? undefined : "Testnet purchase contract not configured"}
               className="mt-3.5 flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-md border border-line bg-bg-raised py-2 text-xs font-medium text-ink-faint"
             >
               <Lock size={12} />
-              Coming Soon
+              {configured ? "Buy with ELS" : "Coming Soon"}
             </button>
           </div>
         ))}
       </div>
-      <p className="mt-3 text-[11px] text-ink-faint">
-        Subscriptions activate once the ELS payment contract is deployed — no purchase is processed until then.
-      </p>
+      {!configured && (
+        <p className="mt-3 text-[11px] text-ink-faint">Testnet purchase contract not configured.</p>
+      )}
     </div>
   );
-}
+});
