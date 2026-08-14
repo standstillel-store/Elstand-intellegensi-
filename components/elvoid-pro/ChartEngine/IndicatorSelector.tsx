@@ -58,7 +58,11 @@ export function IndicatorSelector({
                       {active && <Check size={12} className="text-signal-glow" />}
                       {item.label}
                     </span>
-                    {!item.ready && <Lock size={11} className="shrink-0 text-ink-faint" title={item.phase} />}
+                    {!item.ready && (
+                      <span title={item.phase} className="shrink-0">
+                        <Lock size={11} className="text-ink-faint" />
+                      </span>
+                    )}
                   </button>
                 );
               })}
