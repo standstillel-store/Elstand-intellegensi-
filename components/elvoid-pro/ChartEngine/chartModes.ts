@@ -1,9 +1,11 @@
 // ELVOID PRO chart mode registry. `activeChartMode` (see AdvancedChart.tsx)
 // switches the ONE main chart area between these — never render more than
-// one at a time (per spec). Only "candlestick" is wired to real data in
-// Phase 1; everything else is a real menu entry with an honest "coming
-// soon" surface (per project rule: no fabricated live data / no fake
-// indicators) until its own phase lands.
+// one at a time (per spec). Each mode is either wired to real Binance data
+// (klines/aggTrades/depth) or shown with an honest "coming soon" surface
+// (per project rule: no fabricated live data) until its data source exists.
+// Liquidation Map is the one hold-out — Binance only offers forceOrder
+// liquidations as a live websocket stream, not a historical REST endpoint,
+// so it needs a persistent listener/store before it can show real data.
 export type ChartMode =
   | "candlestick"
   | "heikin-ashi"
@@ -44,18 +46,18 @@ export const CHART_MODE_GROUPS: ChartModeGroup[] = [
   {
     label: "Order Flow",
     items: [
-      { id: "footprint", label: "Footprint", ready: false, phase: "Phase 5" },
-      { id: "delta", label: "Delta", ready: false, phase: "Phase 5" },
+      { id: "footprint", label: "Footprint", ready: true },
+      { id: "delta", label: "Delta", ready: true },
       { id: "cvd", label: "CVD", ready: false, phase: "Phase 3 (live below the chart today)" },
-      { id: "imbalance", label: "Imbalance", ready: false, phase: "Phase 5" },
+      { id: "imbalance", label: "Imbalance", ready: true },
     ],
   },
   {
     label: "Liquidity",
     items: [
-      { id: "liquidity-heatmap", label: "Liquidity Heatmap", ready: false, phase: "Phase 6" },
-      { id: "order-book-chart", label: "Order Book", ready: false, phase: "Phase 6 (live in right rail today)" },
-      { id: "liquidity-walls", label: "Liquidity Walls", ready: false, phase: "Phase 6" },
+      { id: "liquidity-heatmap", label: "Liquidity Heatmap", ready: true },
+      { id: "order-book-chart", label: "Order Book", ready: true },
+      { id: "liquidity-walls", label: "Liquidity Walls", ready: true },
     ],
   },
   {
@@ -70,7 +72,7 @@ export const CHART_MODE_GROUPS: ChartModeGroup[] = [
     items: [
       { id: "open-interest", label: "Open Interest", ready: false, phase: "Phase 3 (live below the chart today)" },
       { id: "funding-rate", label: "Funding Rate", ready: false, phase: "Phase 3 (live below the chart today)" },
-      { id: "liquidation-map", label: "Liquidation Map", ready: false, phase: "Phase 6" },
+      { id: "liquidation-map", label: "Liquidation Map", ready: false, phase: "Phase 6 (needs a persistent forceOrder stream)" },
     ],
   },
 ];

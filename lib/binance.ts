@@ -133,6 +133,32 @@ export async function getFundingSnapshot(): Promise<FundingInfo[]> {
  * invented data, which this app doesn't do. The response is tagged with
  * which source actually answered so the UI can be honest about it.
  */
+export interface RecentTrade {
+  price: number;
+  qty: number;
+  /** true = taker sold into the bid (aggressive sell), false = taker bought the ask (aggressive buy). */
+  isSell: boolean;
+}
+
+/**
+ * Recent executed trades — real tick-level data from Binance Futures'
+ * public aggTrades endpoint (no key required). Powers Footprint/Delta/
+ * Imbalance modes: each trade already carries Binance's own taker-side
+ * classification (isBuyerMaker), so bid/ask attribution here is genuine,
+ * not inferred or simulated.
+ */
+export async function getRecentTrades(symbol: string, limit = 1000): Promise<RecentTrade[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  return cached(`bn:trades:${pair}:${limit}`, 5_000, async () => {
+    const res = await fetch(`${BASE}/fapi/v1/aggTrades?symbol=${pair}&limit=${Math.min(1000, limit)}`, {
+      next: { revalidate: 5 },
+    });
+    if (!res.ok) throw new Error(`Binance aggTrades failed for ${pair}: ${res.status}`);
+    const raw = (await res.json()) as Array<{ p: string; q: string; m: boolean }>;
+    return raw.map((t) => ({ price: parseFloat(t.p), qty: parseFloat(t.q), isSell: t.m }));
+  });
+}
+
 export async function getOrderBookDepth(symbol: string, limit = 20): Promise<OrderBookSnapshot & { source: "futures" | "spot" }> {
   const pair = `${symbol.toUpperCase()}USDT`;
   return cached(`bn:depth:${pair}:${limit}`, 10_000, async () => {

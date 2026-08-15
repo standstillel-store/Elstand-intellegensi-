@@ -4,6 +4,8 @@ import { TradingChart } from "@/components/ai-signal-pro/TradingChart";
 import { ComingSoonMode } from "./ComingSoonMode";
 import { VolumeProfileMode } from "./modes/VolumeProfileMode";
 import { TPOMode } from "./modes/TPOMode";
+import { FootprintMode } from "./modes/FootprintMode";
+import { LiquidityMode } from "./modes/LiquidityMode";
 import { CHART_MODE_GROUPS, type ChartMode } from "./chartModes";
 import type { Candle } from "@/lib/elvoid/types";
 
@@ -51,6 +53,14 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
 
   if (chartMode === "tpo") {
     return <TPOMode symbol={symbol} height={height} />;
+  }
+
+  if (chartMode === "footprint" || chartMode === "delta" || chartMode === "imbalance") {
+    return <FootprintMode symbol={symbol} height={height} variant={chartMode} />;
+  }
+
+  if (chartMode === "order-book-chart" || chartMode === "liquidity-walls" || chartMode === "liquidity-heatmap") {
+    return <LiquidityMode symbol={symbol} height={height} variant={chartMode} />;
   }
 
   if (chartMode !== "candlestick") {

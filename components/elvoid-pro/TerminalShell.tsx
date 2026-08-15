@@ -53,8 +53,7 @@ export function TerminalShell() {
       </div>
 
       {/* Bottom analytics — secondary panels, never larger than the chart above. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <ComingSoonPanel title="Liquidation Heatmap" phase="Phase 6" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <CVDPanel symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} />
         <FundingOIPanel symbol={symbol} />
       </div>
