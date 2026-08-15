@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { TradingChart } from "@/components/ai-signal-pro/TradingChart";
 import { ComingSoonMode } from "./ComingSoonMode";
+import { VolumeProfileMode } from "./modes/VolumeProfileMode";
+import { TPOMode } from "./modes/TPOMode";
 import { CHART_MODE_GROUPS, type ChartMode } from "./chartModes";
 import type { Candle } from "@/lib/elvoid/types";
 
@@ -42,6 +44,14 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
       cancelled = true;
     };
   }, [symbol, timeframe, chartMode]);
+
+  if (chartMode === "volume-profile") {
+    return <VolumeProfileMode symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} height={height} />;
+  }
+
+  if (chartMode === "tpo") {
+    return <TPOMode symbol={symbol} height={height} />;
+  }
 
   if (chartMode !== "candlestick") {
     const mode = ALL_MODES.find((m) => m.id === chartMode)!;

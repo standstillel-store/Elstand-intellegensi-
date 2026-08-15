@@ -61,8 +61,8 @@ export const CHART_MODE_GROUPS: ChartModeGroup[] = [
   {
     label: "Market Profile",
     items: [
-      { id: "tpo", label: "TPO / Market Profile", ready: false, phase: "Phase 4" },
-      { id: "volume-profile", label: "Volume Profile", ready: false, phase: "Phase 4" },
+      { id: "tpo", label: "TPO / Market Profile", ready: true },
+      { id: "volume-profile", label: "Volume Profile", ready: true },
     ],
   },
   {
