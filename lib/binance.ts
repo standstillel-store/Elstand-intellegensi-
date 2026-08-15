@@ -315,3 +315,56 @@ export async function getKlines(symbol: string, interval: string, limit = 200): 
     );
   });
 }
+
+const INTERVAL_MS: Record<string, number> = {
+  "1m": 60_000,
+  "5m": 300_000,
+  "15m": 900_000,
+  "1h": 3_600_000,
+  "4h": 14_400_000,
+  "1d": 86_400_000,
+};
+
+/**
+ * Extended history — paginates real Binance klines backwards (via
+ * `endTime`) since a single request caps at 1500 candles. Used when the
+ * chart needs ~1 month of history on lower timeframes (e.g. 5m needs
+ * ~8640 candles to cover 30 days, well past the single-request cap).
+ * Capped at 6 requests (9000 candles) to keep load times reasonable.
+ */
+export async function getKlinesRange(symbol: string, interval: string, days: number): Promise<Candle[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  const intervalMs = INTERVAL_MS[interval] ?? 300_000;
+  const wantedCount = Math.min(9000, Math.ceil((days * 86_400_000) / intervalMs));
+  return cached(`bn:klines-range:${pair}:${interval}:${days}`, 120_000, async () => {
+    let all: Candle[] = [];
+    let endTime: number | undefined;
+    for (let i = 0; i < 6 && all.length < wantedCount; i++) {
+      const url = new URL(`${BASE}/fapi/v1/klines`);
+      url.searchParams.set("symbol", pair);
+      url.searchParams.set("interval", interval);
+      url.searchParams.set("limit", "1500");
+      if (endTime) url.searchParams.set("endTime", String(endTime));
+      const res = await fetch(url.toString(), { next: { revalidate: 120 } });
+      if (!res.ok) throw new Error(`Binance klines failed for ${pair}: ${res.status}`);
+      const raw = (await res.json()) as Array<
+        [number, string, string, string, string, string, number, string, number, string, string, string]
+      >;
+      if (raw.length === 0) break;
+      const batch = raw.map(
+        (k): Candle => ({
+          time: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        })
+      );
+      all = [...batch, ...all];
+      endTime = batch[0].time - 1;
+      if (batch.length < 1500) break; // hit the start of available history
+    }
+    return all.slice(-wantedCount);
+  });
+}

@@ -31,7 +31,7 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
     let cancelled = false;
     setStatus("loading");
     const interval = TF_TO_INTERVAL[timeframe] ?? "5m";
-    fetch(`/api/klines?symbol=${symbol}&interval=${interval}&limit=300`)
+    fetch(`/api/klines?symbol=${symbol}&interval=${interval}&days=30`)
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;

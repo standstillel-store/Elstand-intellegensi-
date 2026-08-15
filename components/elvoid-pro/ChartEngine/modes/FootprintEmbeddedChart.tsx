@@ -14,7 +14,7 @@ interface CellLayout {
 // legible numbers per cell — Kiyotaka/TapeDelta both hide the footprint
 // grid at that zoom level too and just show plain candles instead of
 // squishing unreadable text (that squish is what was reading as "buggy").
-const MIN_BAR_SPACING_FOR_FOOTPRINT = 26;
+const MIN_BAR_SPACING_FOR_FOOTPRINT = 20;
 
 export function FootprintEmbeddedChart({
   symbol,
@@ -137,7 +137,12 @@ export function FootprintEmbeddedChart({
       }))
     );
     const total = candles.length;
-    const visibleCount = Math.min(24, total);
+    // Sized so a typical ~380px mobile chart width still clears
+    // MIN_BAR_SPACING_FOR_FOOTPRINT by default (380 / 14 ≈ 27px/candle) —
+    // previously defaulted to 24 candles, which on a phone-width chart
+    // landed *below* the threshold, so footprint never showed even after
+    // the user manually zoomed in further.
+    const visibleCount = Math.min(14, total);
     chartRef.current?.timeScale().setVisibleLogicalRange({ from: total - visibleCount - 1, to: total + 1 });
     recomputeLayoutRef.current?.();
   }, [candles]);
@@ -151,6 +156,7 @@ export function FootprintEmbeddedChart({
       const chart = chartRef.current;
       const series = seriesRef.current;
       if (!chart || !series) return;
+      const containerWidth = containerRef.current?.clientWidth ?? 0;
       const currentBarSpacing = chart.timeScale().options().barSpacing ?? 6;
       setBarSpacing(currentBarSpacing);
 
@@ -166,7 +172,7 @@ export function FootprintEmbeddedChart({
         const xCoord = chart.timeScale().timeToCoordinate((candle.time / 1000) as UTCTimestamp);
         if (xCoord === null) continue;
         const x = Number(xCoord);
-        if (x < -40 || x > chart.timeScale().width() + 40) continue; // skip off-screen candles
+        if (x < -60 || x > containerWidth + 60) continue; // skip off-screen candles
         const cells = fp.cells
           .map((cell) => {
             const yTop = series.priceToCoordinate(cell.priceHigh);
@@ -208,7 +214,7 @@ export function FootprintEmbeddedChart({
               {col.cells.map((c, i) => (
                 <div
                   key={i}
-                  className="absolute flex items-center justify-center gap-0.5 overflow-hidden rounded-[2px] text-[8px] font-mono leading-none"
+                  className="absolute flex items-center justify-center gap-0.5 overflow-hidden rounded-[2px] text-[8px] font-mono font-semibold leading-none text-white"
                   style={{ top: c.y, height: c.h, width: cellWidth }}
                 >
                   <span
@@ -231,16 +237,16 @@ export function FootprintEmbeddedChart({
       )}
 
       {zoomedOut && candles.length > 0 && (
-        <div className="pointer-events-none absolute bottom-1 right-2 rounded bg-bg-raised/90 px-2 py-0.5 text-[9px] text-ink-faint">
-          Zoom in untuk lihat footprint per-candle
+        <div className="pointer-events-none absolute inset-x-0 bottom-1 flex justify-center">
+          <span className="rounded bg-bg-raised/90 px-2 py-0.5 text-[9px] text-ink-faint">Zoom in untuk lihat footprint per-candle</span>
         </div>
       )}
 
-      <div className="pointer-events-none absolute bottom-1 left-2 text-[9px] text-ink-faint">
-        {oldestTradeTime
-          ? `Footprint real sejak ${new Date(oldestTradeTime).toLocaleTimeString("id-ID")} (cakupan sample trade terkini)`
-          : "Menunggu data trade…"}
-      </div>
+      {!zoomedOut && oldestTradeTime && (
+        <div className="pointer-events-none absolute bottom-1 left-2 rounded bg-bg-raised/80 px-1.5 py-0.5 text-[9px] text-ink-faint">
+          Footprint sejak {new Date(oldestTradeTime).toLocaleTimeString("id-ID")}
+        </div>
+      )}
     </div>
   );
 }

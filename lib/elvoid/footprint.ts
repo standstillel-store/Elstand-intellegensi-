@@ -73,13 +73,17 @@ export interface CandleFootprint {
 
 /**
  * Buckets real trades into the candle they actually happened in (by
- * timestamp), then builds a small bid/ask ladder within that candle's own
- * high↔low range — this is what gets drawn directly on top of each
- * candlestick. Only candles whose time window is covered by the trade
- * sample get a footprint; older candles are simply left blank rather than
- * showing fabricated numbers (see coverage note in the API route).
+ * timestamp), then builds a small bid/ask ladder using that candle's own
+ * OHLC high↔low range — this is what gets drawn directly on top of each
+ * candlestick. Using the candle's real range (not the trades' own min/max)
+ * matters: trades inside a quiet candle can cluster in a narrow sub-range,
+ * and building the ladder off their min/max instead of the candle's actual
+ * body caused cells to misalign with the candle's rendered coordinates
+ * (the "giant solid block" glitch). Only candles whose time window is
+ * covered by the trade sample get a footprint; older candles are simply
+ * left blank rather than showing fabricated numbers.
  */
-export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[], intervalMs: number, binsPerCandle = 5): Map<number, CandleFootprint> {
+export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[], intervalMs: number, binsPerCandle = 4): Map<number, CandleFootprint> {
   const byCandle = new Map<number, RecentTrade[]>();
   for (const t of trades) {
     const bucket = candles.find((c) => t.time >= c.time && t.time < c.time + intervalMs);
@@ -93,8 +97,38 @@ export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[],
   for (const candle of candles) {
     const candleTrades = byCandle.get(candle.time);
     if (!candleTrades || candleTrades.length === 0) continue;
-    const ladder = buildFootprintLadder(candleTrades, binsPerCandle);
-    result.set(candle.time, { candleTime: candle.time, cells: ladder.cells });
+
+    const high = candle.high;
+    const low = candle.low;
+    const span = high - low || high * 0.0005 || 1;
+    const binSize = span / binsPerCandle;
+
+    const buy = new Array(binsPerCandle).fill(0);
+    const sell = new Array(binsPerCandle).fill(0);
+    for (const t of candleTrades) {
+      const idx = Math.min(binsPerCandle - 1, Math.max(0, Math.floor((t.price - low) / binSize)));
+      if (t.isSell) sell[idx] += t.qty;
+      else buy[idx] += t.qty;
+    }
+
+    const cells: FootprintCell[] = [];
+    for (let i = binsPerCandle - 1; i >= 0; i--) {
+      const b = buy[i];
+      const s = sell[i];
+      if (b === 0 && s === 0) continue; // skip empty rows — real candles rarely fill every bin evenly
+      const dominant = Math.max(b, s);
+      const weak = Math.min(b, s);
+      cells.push({
+        priceLow: low + i * binSize,
+        priceHigh: low + (i + 1) * binSize,
+        buyVolume: b,
+        sellVolume: s,
+        delta: b - s,
+        imbalance: dominant > 0 && dominant >= weak * 3,
+      });
+    }
+    if (cells.length === 0) continue;
+    result.set(candle.time, { candleTime: candle.time, cells });
   }
   return result;
 }
