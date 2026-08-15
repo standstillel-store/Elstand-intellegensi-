@@ -132,14 +132,15 @@ export function FootprintEmbeddedChart({
       for (const candle of candles) {
         const fp = footprintByTime[candle.time];
         if (!fp) continue;
-        const x = chart.timeScale().timeToCoordinate((candle.time / 1000) as UTCTimestamp);
-        if (x === null) continue;
+        const xCoord = chart.timeScale().timeToCoordinate((candle.time / 1000) as UTCTimestamp);
+        if (xCoord === null) continue;
+        const x = Number(xCoord);
         const cells = fp.cells
           .map((cell) => {
             const yTop = series.priceToCoordinate(cell.priceHigh);
             const yBottom = series.priceToCoordinate(cell.priceLow);
             if (yTop === null || yBottom === null) return null;
-            return { y: yTop, h: Math.max(10, yBottom - yTop), cell };
+            return { y: Number(yTop), h: Math.max(10, Number(yBottom) - Number(yTop)), cell };
           })
           .filter((c): c is { y: number; h: number; cell: FootprintCell } => c !== null);
         next.push({ candleTime: candle.time, x, cells });

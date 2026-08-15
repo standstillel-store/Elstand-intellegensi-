@@ -119,11 +119,13 @@ export function ProfileEmbeddedChart({
           const yTop = series.priceToCoordinate(bin.priceHigh);
           const yBottom = series.priceToCoordinate(bin.priceLow);
           if (yTop === null || yBottom === null) return null;
+          const top = Number(yTop);
+          const bottom = Number(yBottom);
           const isPoc = profile.poc?.priceLow === bin.priceLow;
           const inValueArea = profile.vah !== null && profile.val !== null && bin.priceHigh > profile.val && bin.priceLow < profile.vah;
           return {
-            y: yTop,
-            h: Math.max(2, yBottom - yTop),
+            y: top,
+            h: Math.max(2, bottom - top),
             widthPct: maxValue > 0 ? (bin.value / maxValue) * 100 : 0,
             isPoc,
             inValueArea,
