@@ -9,6 +9,7 @@ import { FootprintMode } from "./modes/FootprintMode";
 import { LiquidityMode } from "./modes/LiquidityMode";
 import { CHART_MODE_GROUPS, type ChartMode } from "./chartModes";
 import type { Candle } from "@/lib/elvoid/types";
+import { getMaxHistoryDays } from "@/lib/market-data/timeframeHistory";
 
 const TF_TO_INTERVAL: Record<string, string> = {
   "1m": "1m",
@@ -30,8 +31,10 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
     if (chartMode !== "candlestick") return;
     let cancelled = false;
     setStatus("loading");
+    setCandles([]); // don't keep showing the previous timeframe's candles while the new range loads
     const interval = TF_TO_INTERVAL[timeframe] ?? "5m";
-    fetch(`/api/klines?symbol=${symbol}&interval=${interval}&days=30`)
+    const days = getMaxHistoryDays(interval);
+    fetch(`/api/klines?symbol=${symbol}&interval=${interval}&days=${days}`)
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;

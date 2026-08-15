@@ -13,6 +13,7 @@ import { IntelligenceRail } from "./IntelligenceRail";
 import { OrderBookPanel } from "./OrderBookPanel";
 import { IndicatorsSuitePanel } from "./IndicatorsSuitePanel";
 import { formatUsd } from "@/lib/format";
+import { getMaxHistoryDays } from "@/lib/market-data/timeframeHistory";
 import type { Candle, ScanResult, OrderType, TradeGrade } from "@/lib/elvoid/types";
 import type { ChartLevels } from "./TradingChart";
 
@@ -93,8 +94,10 @@ export function ChartAnalysisView() {
 
   const loadCandles = useCallback(async (sym: string, tf: string) => {
     setCandlesLoading(true);
+    setCandles([]); // clear old timeframe's candles immediately so we never flash stale data
     try {
-      const res = await fetch(`/api/klines?symbol=${sym}&interval=${tf}&limit=300`).then((r) => r.json());
+      const days = getMaxHistoryDays(tf);
+      const res = await fetch(`/api/klines?symbol=${sym}&interval=${tf}&days=${days}`).then((r) => r.json());
       setCandles(Array.isArray(res.candles) ? res.candles : []);
     } catch {
       setCandles([]);
