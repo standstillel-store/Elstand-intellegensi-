@@ -22,9 +22,9 @@ export async function GET(req: Request) {
   try {
     const [candles, trades] = await Promise.all([getKlines(symbol, interval, limit), getRecentTrades(symbol, 1000)]);
     const footprintMap = buildFootprintByCandle(candles, trades, intervalMs, 5);
-    const footprintByTime: Record<number, { cells: unknown; poc: unknown; delta: number }> = {};
+    const footprintByTime: Record<number, { cells: unknown; poc: unknown; delta: number; totalVolume: number }> = {};
     footprintMap.forEach((v, k) => {
-      footprintByTime[k] = { cells: v.cells, poc: v.poc, delta: v.delta };
+      footprintByTime[k] = { cells: v.cells, poc: v.poc, delta: v.delta, totalVolume: v.totalVolume };
     });
     const oldestTradeTime = trades.length > 0 ? Math.min(...trades.map((t) => t.time)) : null;
 

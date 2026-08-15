@@ -71,6 +71,7 @@ export interface CandleFootprint {
   cells: FootprintCell[]; // highest price first, small ladder (few levels) sized to fit inside one candle
   poc: FootprintCell | null; // this candle's highest-volume price level
   delta: number; // candle-level buy - sell
+  totalVolume: number; // candle-level buy + sell, reusing the same cells (no extra data source)
 }
 
 /**
@@ -133,13 +134,15 @@ export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[],
 
     let poc: FootprintCell | null = null;
     let delta = 0;
+    let totalVolume = 0;
     for (const c of cells) {
       delta += c.delta;
+      totalVolume += c.buyVolume + c.sellVolume;
       const total = c.buyVolume + c.sellVolume;
       if (!poc || total > poc.buyVolume + poc.sellVolume) poc = c;
     }
 
-    result.set(candle.time, { candleTime: candle.time, cells, poc, delta });
+    result.set(candle.time, { candleTime: candle.time, cells, poc, delta, totalVolume });
   }
   return result;
 }

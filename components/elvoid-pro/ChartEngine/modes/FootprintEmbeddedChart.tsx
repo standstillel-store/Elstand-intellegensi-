@@ -11,6 +11,7 @@ interface CellLayout {
   candleHalfWidth: number;
   cells: { y: number; h: number; cell: FootprintCell; isPoc: boolean }[];
   delta: number;
+  totalVolume: number;
 }
 
 // Three detail tiers instead of a single on/off cutoff — this is what was
@@ -52,7 +53,7 @@ export function FootprintEmbeddedChart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [footprintByTime, setFootprintByTime] = useState<Record<number, { cells: FootprintCell[]; poc: FootprintCell | null; delta: number }>>({});
+  const [footprintByTime, setFootprintByTime] = useState<Record<number, { cells: FootprintCell[]; poc: FootprintCell | null; delta: number; totalVolume: number }>>({});
   const [oldestTradeTime, setOldestTradeTime] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [layout, setLayout] = useState<CellLayout[]>([]);
@@ -206,7 +207,7 @@ export function FootprintEmbeddedChart({
             return { y: Number(yTop), h: Math.max(9, Number(yBottom) - Number(yTop)), cell, isPoc };
           })
           .filter((c): c is { y: number; h: number; cell: FootprintCell; isPoc: boolean } => c !== null);
-        next.push({ candleTime: candle.time, x, candleHalfWidth, cells, delta: fp.delta ?? 0 });
+        next.push({ candleTime: candle.time, x, candleHalfWidth, cells, delta: fp.delta ?? 0, totalVolume: fp.totalVolume ?? 0 });
       }
       setLayout(next);
     };
@@ -304,6 +305,16 @@ export function FootprintEmbeddedChart({
               >
                 Δ{col.delta >= 0 ? "+" : ""}
                 {formatCompact(col.delta)}
+              </div>
+            )}
+
+            {/* Total volume — reused from the same real cells (no extra request), placed under the ladder so it never covers a price row. Rule 8. */}
+            {tier === "full" && col.cells.length > 0 && (
+              <div
+                className="absolute -translate-x-1/2 whitespace-nowrap rounded-[2px] px-1 text-[7px] font-mono text-ink-faint"
+                style={{ left: ladderWidth / 2, top: Math.max(...col.cells.map((c) => c.y + c.h)) + 2 }}
+              >
+                VOL {formatCompact(col.totalVolume)}
               </div>
             )}
           </div>
