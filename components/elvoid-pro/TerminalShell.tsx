@@ -24,7 +24,9 @@ const TF_TO_INTERVAL: Record<string, string> = {
 export function TerminalShell() {
   const [symbol, setSymbol] = useState("BTC");
   const [timeframe, setTimeframe] = useState("5m");
-  const [chartMode, setChartMode] = useState<ChartMode>("candlestick");
+  // Elvoid Pro = Footprint / Order Flow terminal — footprint is the mode a
+  // person lands on, not a candlestick chart with footprint buried in a menu.
+  const [chartMode, setChartMode] = useState<ChartMode>("footprint");
 
   return (
     <div className="space-y-3">

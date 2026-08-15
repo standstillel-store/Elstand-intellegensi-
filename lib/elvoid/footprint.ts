@@ -69,6 +69,8 @@ export function buildFootprintLadder(trades: RecentTrade[], bins = 20): Footprin
 export interface CandleFootprint {
   candleTime: number;
   cells: FootprintCell[]; // highest price first, small ladder (few levels) sized to fit inside one candle
+  poc: FootprintCell | null; // this candle's highest-volume price level
+  delta: number; // candle-level buy - sell
 }
 
 /**
@@ -128,7 +130,16 @@ export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[],
       });
     }
     if (cells.length === 0) continue;
-    result.set(candle.time, { candleTime: candle.time, cells });
+
+    let poc: FootprintCell | null = null;
+    let delta = 0;
+    for (const c of cells) {
+      delta += c.delta;
+      const total = c.buyVolume + c.sellVolume;
+      if (!poc || total > poc.buyVolume + poc.sellVolume) poc = c;
+    }
+
+    result.set(candle.time, { candleTime: candle.time, cells, poc, delta });
   }
   return result;
 }

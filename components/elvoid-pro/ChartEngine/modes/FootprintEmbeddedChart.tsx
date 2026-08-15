@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import clsx from "clsx";
 import { createChart, ColorType, CrosshairMode, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 import type { Candle } from "@/lib/elvoid/types";
 import type { FootprintCell } from "@/lib/elvoid/footprint";
@@ -7,7 +8,8 @@ import type { FootprintCell } from "@/lib/elvoid/footprint";
 interface CellLayout {
   candleTime: number;
   x: number;
-  cells: { y: number; h: number; cell: FootprintCell }[];
+  cells: { y: number; h: number; cell: FootprintCell; isPoc: boolean }[];
+  delta: number;
 }
 
 // Below this many pixels between candles there isn't room to render two
@@ -29,7 +31,7 @@ export function FootprintEmbeddedChart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [footprintByTime, setFootprintByTime] = useState<Record<number, { cells: FootprintCell[] }>>({});
+  const [footprintByTime, setFootprintByTime] = useState<Record<number, { cells: FootprintCell[]; poc: FootprintCell | null; delta: number }>>({});
   const [oldestTradeTime, setOldestTradeTime] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [layout, setLayout] = useState<CellLayout[]>([]);
@@ -178,10 +180,11 @@ export function FootprintEmbeddedChart({
             const yTop = series.priceToCoordinate(cell.priceHigh);
             const yBottom = series.priceToCoordinate(cell.priceLow);
             if (yTop === null || yBottom === null) return null;
-            return { y: Number(yTop), h: Math.max(10, Number(yBottom) - Number(yTop)), cell };
+            const isPoc = fp.poc !== null && fp.poc.priceLow === cell.priceLow && fp.poc.priceHigh === cell.priceHigh;
+            return { y: Number(yTop), h: Math.max(10, Number(yBottom) - Number(yTop)), cell, isPoc };
           })
-          .filter((c): c is { y: number; h: number; cell: FootprintCell } => c !== null);
-        next.push({ candleTime: candle.time, x, cells });
+          .filter((c): c is { y: number; h: number; cell: FootprintCell; isPoc: boolean } => c !== null);
+        next.push({ candleTime: candle.time, x, cells, delta: fp.delta ?? 0 });
       }
       setLayout(next);
     };
@@ -214,8 +217,18 @@ export function FootprintEmbeddedChart({
               {col.cells.map((c, i) => (
                 <div
                   key={i}
-                  className="absolute flex items-center justify-center gap-0.5 overflow-hidden rounded-[2px] text-[8px] font-mono font-semibold leading-none text-white"
+                  className={clsx(
+                    "absolute flex items-center justify-center gap-0.5 overflow-hidden rounded-[2px] text-[8px] font-mono font-semibold leading-none text-white",
+                    // POC: this candle's highest-volume price level — subtle purple
+                    // outline so it reads as "the level that mattered" without a
+                    // large label per rule 10 ("only show labels when useful").
+                    c.isPoc && "ring-1 ring-inset ring-[#A78BFA]",
+                    // Bid/Ask imbalance (3x+ stacked dominance, computed in
+                    // lib/elvoid/footprint.ts) — a brighter glow, never a signal claim.
+                    c.cell.imbalance && "shadow-[0_0_0_1px_rgba(250,204,21,0.55)_inset]"
+                  )}
                   style={{ top: c.y, height: c.h, width: cellWidth }}
+                  title={c.cell.imbalance ? "Bid/Ask Imbalance" : undefined}
                 >
                   <span
                     className="flex h-full flex-1 items-center justify-center"
@@ -231,6 +244,20 @@ export function FootprintEmbeddedChart({
                   </span>
                 </div>
               ))}
+
+              {/* Candle-level delta badge, pinned just above the ladder top. */}
+              {col.cells.length > 0 && (
+                <div
+                  className={clsx(
+                    "absolute -translate-x-1/2 whitespace-nowrap rounded-[2px] px-1 text-[8px] font-mono font-bold leading-tight",
+                    col.delta >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"
+                  )}
+                  style={{ left: cellWidth / 2, top: Math.min(...col.cells.map((c) => c.y)) - 12 }}
+                >
+                  {col.delta >= 0 ? "+" : ""}
+                  {col.delta.toFixed(2)}
+                </div>
+              )}
             </div>
           ))}
         </div>

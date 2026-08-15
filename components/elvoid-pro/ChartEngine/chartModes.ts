@@ -33,11 +33,21 @@ export interface ChartModeDef {
 export interface ChartModeGroup {
   label: string;
   items: ChartModeDef[];
+  /**
+   * Primary groups render open in the selector by default — this is the
+   * "Elvoid Pro = Footprint / Order Flow terminal" surface. Non-primary
+   * groups (other/experimental order-flow visualizations, TPO, Market
+   * Profile, Market Data) are still fully wired and real-data-backed, but
+   * are tucked behind a "More tools" disclosure so they don't compete with
+   * Footprint as the thing a new user sees first.
+   */
+  primary?: boolean;
 }
 
 export const CHART_MODE_GROUPS: ChartModeGroup[] = [
   {
     label: "Primary Chart",
+    primary: true,
     items: [
       { id: "candlestick", label: "Candlestick", ready: true },
       { id: "heikin-ashi", label: "Heikin Ashi", ready: false, phase: "Phase 2" },
@@ -45,6 +55,7 @@ export const CHART_MODE_GROUPS: ChartModeGroup[] = [
   },
   {
     label: "Order Flow",
+    primary: true,
     items: [
       { id: "footprint", label: "Footprint", ready: true },
       { id: "delta", label: "Delta", ready: true },
