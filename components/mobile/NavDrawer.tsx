@@ -14,6 +14,7 @@ import {
   LineChart,
   Gift,
   WalletMinimal,
+  Gauge,
 } from "lucide-react";
 import clsx from "clsx";
 import { SidebarProfile } from "../layout/SidebarProfile";
@@ -28,8 +29,9 @@ import { SidebarProfile } from "../layout/SidebarProfile";
 //
 // Grouped to match the ELSTAND INTEL visual reference (INTELLIGENCE /
 // ECOSYSTEM / SYSTEM section labels), same grouping as Sidebar.tsx. Wallet
-// is now live (BSC Testnet + ELS Testnet) — Elvoid Pro is still unreleased
-// (its pricing cards live inside /wallet itself, disabled/"Coming Soon").
+// is now live (BSC Testnet + ELS Testnet). Elvoid Pro terminal (Phase 1) is
+// now linked here too — keep in sync with Sidebar.tsx's NAV_GROUPS since
+// this drawer is a separate mobile-only duplicate, not a shared import.
 const NAV_GROUPS = [
   {
     label: "Intelligence",
@@ -44,6 +46,7 @@ const NAV_GROUPS = [
   {
     label: "Ecosystem",
     items: [
+      { href: "/elvoid-pro", label: "ELVOID PRO", icon: Gauge, badge: "PRO" },
       { href: "/earn", label: "Earn", icon: Gift },
       { href: "/wallet", label: "Wallet", icon: WalletMinimal },
     ],
@@ -141,6 +144,11 @@ export function NavDrawer() {
                   >
                     <item.icon size={16} className={active ? "text-signal-glow" : ""} />
                     {item.label}
+                    {"badge" in item && item.badge && (
+                      <span className="ml-auto rounded bg-gold/15 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-gold">
+                        {item.badge}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
