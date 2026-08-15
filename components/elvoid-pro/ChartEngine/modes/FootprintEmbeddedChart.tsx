@@ -10,6 +10,12 @@ interface CellLayout {
   cells: { y: number; h: number; cell: FootprintCell }[];
 }
 
+// Below this many pixels between candles there isn't room to render two
+// legible numbers per cell — Kiyotaka/TapeDelta both hide the footprint
+// grid at that zoom level too and just show plain candles instead of
+// squishing unreadable text (that squish is what was reading as "buggy").
+const MIN_BAR_SPACING_FOR_FOOTPRINT = 26;
+
 export function FootprintEmbeddedChart({
   symbol,
   interval,
@@ -27,6 +33,7 @@ export function FootprintEmbeddedChart({
   const [oldestTradeTime, setOldestTradeTime] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [layout, setLayout] = useState<CellLayout[]>([]);
+  const [barSpacing, setBarSpacing] = useState(6);
 
   // Fetch real candles + real per-candle footprint together.
   useEffect(() => {
@@ -85,17 +92,28 @@ export function FootprintEmbeddedChart({
     });
     seriesRef.current = series;
 
-    const recompute = () => recomputeLayoutRef.current?.();
-    chart.timeScale().subscribeVisibleTimeRangeChange(recompute);
+    // rAF-throttled — subscribeVisibleLogicalRangeChange fires on every
+    // frame of a pinch/drag, so recomputing synchronously each time is what
+    // made panning feel stiff. One pending frame at a time keeps it smooth.
+    let rafId: number | null = null;
+    const scheduleRecompute = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        recomputeLayoutRef.current?.();
+      });
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleRecompute);
     const onResize = () => {
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
-      recompute();
+      scheduleRecompute();
     };
     window.addEventListener("resize", onResize);
 
     return () => {
       window.removeEventListener("resize", onResize);
-      chart.timeScale().unsubscribeVisibleTimeRangeChange(recompute);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleRecompute);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -103,7 +121,10 @@ export function FootprintEmbeddedChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height]);
 
-  // Push real candle data into the chart.
+  // Push real candle data into the chart. Default view is zoomed to the
+  // most recent ~24 candles (not fitContent's full 80) so the footprint
+  // grid is already visible on load instead of requiring the user to zoom
+  // in first — matching how Kiyotaka/TapeDelta default their footprint view.
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return;
     seriesRef.current.setData(
@@ -115,7 +136,10 @@ export function FootprintEmbeddedChart({
         close: c.close,
       }))
     );
-    chartRef.current?.timeScale().fitContent();
+    const total = candles.length;
+    const visibleCount = Math.min(24, total);
+    chartRef.current?.timeScale().setVisibleLogicalRange({ from: total - visibleCount - 1, to: total + 1 });
+    recomputeLayoutRef.current?.();
   }, [candles]);
 
   // Recompute overlay pixel positions from the chart's own coordinate
@@ -127,7 +151,14 @@ export function FootprintEmbeddedChart({
       const chart = chartRef.current;
       const series = seriesRef.current;
       if (!chart || !series) return;
-      const barSpacing = chart.timeScale().options().barSpacing ?? 6;
+      const currentBarSpacing = chart.timeScale().options().barSpacing ?? 6;
+      setBarSpacing(currentBarSpacing);
+
+      if (currentBarSpacing < MIN_BAR_SPACING_FOR_FOOTPRINT) {
+        setLayout([]);
+        return;
+      }
+
       const next: CellLayout[] = [];
       for (const candle of candles) {
         const fp = footprintByTime[candle.time];
@@ -135,6 +166,7 @@ export function FootprintEmbeddedChart({
         const xCoord = chart.timeScale().timeToCoordinate((candle.time / 1000) as UTCTimestamp);
         if (xCoord === null) continue;
         const x = Number(xCoord);
+        if (x < -40 || x > chart.timeScale().width() + 40) continue; // skip off-screen candles
         const cells = fp.cells
           .map((cell) => {
             const yTop = series.priceToCoordinate(cell.priceHigh);
@@ -146,13 +178,12 @@ export function FootprintEmbeddedChart({
         next.push({ candleTime: candle.time, x, cells });
       }
       setLayout(next);
-      lastBarSpacingRef.current = barSpacing;
     };
     recomputeLayoutRef.current();
   }, [candles, footprintByTime]);
 
-  const lastBarSpacingRef = useRef(6);
-  const cellWidth = Math.max(34, lastBarSpacingRef.current * 5);
+  const cellWidth = Math.min(64, Math.max(30, barSpacing * 0.92));
+  const zoomedOut = barSpacing < MIN_BAR_SPACING_FOR_FOOTPRINT;
 
   return (
     <div style={{ height }} className="relative overflow-hidden rounded-md border border-line bg-bg-surface/40">
@@ -170,32 +201,40 @@ export function FootprintEmbeddedChart({
       )}
 
       {/* Overlay layer — pure positioning, no chart logic; real coordinates come from lightweight-charts itself. */}
-      <div className="pointer-events-none absolute inset-0">
-        {layout.map((col) => (
-          <div key={col.candleTime} className="absolute top-0" style={{ left: col.x - cellWidth / 2, width: cellWidth }}>
-            {col.cells.map((c, i) => (
-              <div
-                key={i}
-                className="absolute flex items-center justify-center gap-0.5 overflow-hidden rounded-[2px] text-[8px] font-mono leading-none"
-                style={{ top: c.y, height: c.h, width: cellWidth }}
-              >
-                <span
-                  className="flex h-full flex-1 items-center justify-center"
-                  style={{ backgroundColor: `rgba(239,68,68,${Math.min(0.75, 0.15 + (c.cell.sellVolume / (c.cell.sellVolume + c.cell.buyVolume + 0.0001)) * 0.5)})` }}
+      {!zoomedOut && (
+        <div className="pointer-events-none absolute inset-0">
+          {layout.map((col) => (
+            <div key={col.candleTime} className="absolute top-0" style={{ left: col.x - cellWidth / 2, width: cellWidth }}>
+              {col.cells.map((c, i) => (
+                <div
+                  key={i}
+                  className="absolute flex items-center justify-center gap-0.5 overflow-hidden rounded-[2px] text-[8px] font-mono leading-none"
+                  style={{ top: c.y, height: c.h, width: cellWidth }}
                 >
-                  {c.cell.sellVolume > 0.001 ? c.cell.sellVolume.toFixed(2) : ""}
-                </span>
-                <span
-                  className="flex h-full flex-1 items-center justify-center"
-                  style={{ backgroundColor: `rgba(34,197,94,${Math.min(0.75, 0.15 + (c.cell.buyVolume / (c.cell.sellVolume + c.cell.buyVolume + 0.0001)) * 0.5)})` }}
-                >
-                  {c.cell.buyVolume > 0.001 ? c.cell.buyVolume.toFixed(2) : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
+                  <span
+                    className="flex h-full flex-1 items-center justify-center"
+                    style={{ backgroundColor: `rgba(239,68,68,${Math.min(0.75, 0.15 + (c.cell.sellVolume / (c.cell.sellVolume + c.cell.buyVolume + 0.0001)) * 0.5)})` }}
+                  >
+                    {c.cell.sellVolume > 0.001 ? c.cell.sellVolume.toFixed(2) : ""}
+                  </span>
+                  <span
+                    className="flex h-full flex-1 items-center justify-center"
+                    style={{ backgroundColor: `rgba(34,197,94,${Math.min(0.75, 0.15 + (c.cell.buyVolume / (c.cell.sellVolume + c.cell.buyVolume + 0.0001)) * 0.5)})` }}
+                  >
+                    {c.cell.buyVolume > 0.001 ? c.cell.buyVolume.toFixed(2) : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {zoomedOut && candles.length > 0 && (
+        <div className="pointer-events-none absolute bottom-1 right-2 rounded bg-bg-raised/90 px-2 py-0.5 text-[9px] text-ink-faint">
+          Zoom in untuk lihat footprint per-candle
+        </div>
+      )}
 
       <div className="pointer-events-none absolute bottom-1 left-2 text-[9px] text-ink-faint">
         {oldestTradeTime

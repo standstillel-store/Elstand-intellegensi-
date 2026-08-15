@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { TradingChart } from "@/components/ai-signal-pro/TradingChart";
 import { ComingSoonMode } from "./ComingSoonMode";
 import { ProfileEmbeddedChart } from "./modes/ProfileEmbeddedChart";
+import { TPOLetterChart } from "./modes/TPOLetterChart";
 import { FootprintEmbeddedChart } from "./modes/FootprintEmbeddedChart";
 import { FootprintMode } from "./modes/FootprintMode";
 import { LiquidityMode } from "./modes/LiquidityMode";
@@ -47,8 +48,12 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
     };
   }, [symbol, timeframe, chartMode]);
 
-  if (chartMode === "volume-profile" || chartMode === "tpo") {
-    return <ProfileEmbeddedChart symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} height={height} mode={chartMode} />;
+  if (chartMode === "volume-profile") {
+    return <ProfileEmbeddedChart symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} height={height} mode="volume-profile" />;
+  }
+
+  if (chartMode === "tpo") {
+    return <TPOLetterChart symbol={symbol} height={height} />;
   }
 
   if (chartMode === "footprint") {
