@@ -138,6 +138,7 @@ export interface RecentTrade {
   qty: number;
   /** true = taker sold into the bid (aggressive sell), false = taker bought the ask (aggressive buy). */
   isSell: boolean;
+  time: number; // ms epoch, real trade timestamp from Binance
 }
 
 /**
@@ -154,8 +155,8 @@ export async function getRecentTrades(symbol: string, limit = 1000): Promise<Rec
       next: { revalidate: 5 },
     });
     if (!res.ok) throw new Error(`Binance aggTrades failed for ${pair}: ${res.status}`);
-    const raw = (await res.json()) as Array<{ p: string; q: string; m: boolean }>;
-    return raw.map((t) => ({ price: parseFloat(t.p), qty: parseFloat(t.q), isSell: t.m }));
+    const raw = (await res.json()) as Array<{ p: string; q: string; m: boolean; T: number }>;
+    return raw.map((t) => ({ price: parseFloat(t.p), qty: parseFloat(t.q), isSell: t.m, time: t.T }));
   });
 }
 

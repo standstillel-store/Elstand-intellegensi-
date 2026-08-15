@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import { TradingChart } from "@/components/ai-signal-pro/TradingChart";
 import { ComingSoonMode } from "./ComingSoonMode";
-import { VolumeProfileMode } from "./modes/VolumeProfileMode";
-import { TPOMode } from "./modes/TPOMode";
+import { ProfileEmbeddedChart } from "./modes/ProfileEmbeddedChart";
+import { FootprintEmbeddedChart } from "./modes/FootprintEmbeddedChart";
 import { FootprintMode } from "./modes/FootprintMode";
 import { LiquidityMode } from "./modes/LiquidityMode";
 import { CHART_MODE_GROUPS, type ChartMode } from "./chartModes";
@@ -47,15 +47,15 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
     };
   }, [symbol, timeframe, chartMode]);
 
-  if (chartMode === "volume-profile") {
-    return <VolumeProfileMode symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} height={height} />;
+  if (chartMode === "volume-profile" || chartMode === "tpo") {
+    return <ProfileEmbeddedChart symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} height={height} mode={chartMode} />;
   }
 
-  if (chartMode === "tpo") {
-    return <TPOMode symbol={symbol} height={height} />;
+  if (chartMode === "footprint") {
+    return <FootprintEmbeddedChart symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} height={height} />;
   }
 
-  if (chartMode === "footprint" || chartMode === "delta" || chartMode === "imbalance") {
+  if (chartMode === "delta" || chartMode === "imbalance") {
     return <FootprintMode symbol={symbol} height={height} variant={chartMode} />;
   }
 

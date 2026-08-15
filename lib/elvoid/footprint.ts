@@ -1,4 +1,5 @@
 import type { RecentTrade } from "../binance";
+import type { Candle } from "./types";
 
 export interface FootprintCell {
   priceLow: number;
@@ -63,4 +64,37 @@ export function buildFootprintLadder(trades: RecentTrade[], bins = 20): Footprin
   }
 
   return { cells, poc, totalBuy, totalSell };
+}
+
+export interface CandleFootprint {
+  candleTime: number;
+  cells: FootprintCell[]; // highest price first, small ladder (few levels) sized to fit inside one candle
+}
+
+/**
+ * Buckets real trades into the candle they actually happened in (by
+ * timestamp), then builds a small bid/ask ladder within that candle's own
+ * high↔low range — this is what gets drawn directly on top of each
+ * candlestick. Only candles whose time window is covered by the trade
+ * sample get a footprint; older candles are simply left blank rather than
+ * showing fabricated numbers (see coverage note in the API route).
+ */
+export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[], intervalMs: number, binsPerCandle = 5): Map<number, CandleFootprint> {
+  const byCandle = new Map<number, RecentTrade[]>();
+  for (const t of trades) {
+    const bucket = candles.find((c) => t.time >= c.time && t.time < c.time + intervalMs);
+    if (!bucket) continue;
+    const arr = byCandle.get(bucket.time) ?? [];
+    arr.push(t);
+    byCandle.set(bucket.time, arr);
+  }
+
+  const result = new Map<number, CandleFootprint>();
+  for (const candle of candles) {
+    const candleTrades = byCandle.get(candle.time);
+    if (!candleTrades || candleTrades.length === 0) continue;
+    const ladder = buildFootprintLadder(candleTrades, binsPerCandle);
+    result.set(candle.time, { candleTime: candle.time, cells: ladder.cells });
+  }
+  return result;
 }
