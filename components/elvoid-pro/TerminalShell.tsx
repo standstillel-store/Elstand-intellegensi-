@@ -6,10 +6,20 @@ import { AdvancedChart } from "./ChartEngine/AdvancedChart";
 import { OrderBookPanel } from "./OrderBook/OrderBookPanel";
 import { AISignalPanel } from "./AISignal/AISignalPanel";
 import { FundingOIPanel } from "./Analytics/FundingOIPanel";
+import { CVDPanel } from "./Analytics/CVDPanel";
 import { ComingSoonPanel } from "./Analytics/ComingSoonPanel";
 import { TradingOverviewPanel } from "./Intelligence/TradingOverviewPanel";
 import { NewsFeedPanel } from "./News/NewsFeedPanel";
 import type { ChartMode } from "./ChartEngine/chartModes";
+
+const TF_TO_INTERVAL: Record<string, string> = {
+  "1m": "1m",
+  "5m": "5m",
+  "15m": "15m",
+  "1H": "1h",
+  "4H": "4h",
+  "1D": "1d",
+};
 
 export function TerminalShell() {
   const [symbol, setSymbol] = useState("BTC");
@@ -44,9 +54,9 @@ export function TerminalShell() {
 
       {/* Bottom analytics — secondary panels, never larger than the chart above. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <ComingSoonPanel title="CVD (Cumulative Volume Delta)" phase="Phase 3" />
         <ComingSoonPanel title="Volume Profile" phase="Phase 4" />
         <ComingSoonPanel title="Liquidation Heatmap" phase="Phase 6" />
+        <CVDPanel symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} />
         <FundingOIPanel symbol={symbol} />
       </div>
 

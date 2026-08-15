@@ -46,7 +46,7 @@ export const CHART_MODE_GROUPS: ChartModeGroup[] = [
     items: [
       { id: "footprint", label: "Footprint", ready: false, phase: "Phase 5" },
       { id: "delta", label: "Delta", ready: false, phase: "Phase 5" },
-      { id: "cvd", label: "CVD", ready: false, phase: "Phase 3" },
+      { id: "cvd", label: "CVD", ready: false, phase: "Phase 3 (live below the chart today)" },
       { id: "imbalance", label: "Imbalance", ready: false, phase: "Phase 5" },
     ],
   },

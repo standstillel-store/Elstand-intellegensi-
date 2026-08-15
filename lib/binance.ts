@@ -237,6 +237,35 @@ export const DERIVATIVES_WATCHLIST = WATCHLIST;
  * from the same market. `symbol` is the bare ticker (e.g. "BTC") — the
  * "USDT" pair suffix is added here.
  */
+/**
+ * Cumulative Volume Delta — real, derived from each kline's taker buy/sell
+ * split (Binance returns takerBuyBaseVolume per candle; sell volume is the
+ * remainder). delta = takerBuy - takerSell, cvd = running sum of delta.
+ * This is genuine exchange data, not a simulation — the standard way CVD
+ * is computed without a raw trade-tick feed.
+ */
+export async function getCvdSeries(symbol: string, interval: string, limit = 100): Promise<{ time: number; delta: number; cvd: number }[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  return cached(`bn:cvd:${pair}:${interval}:${limit}`, 60_000, async () => {
+    const res = await fetch(`${BASE}/fapi/v1/klines?symbol=${pair}&interval=${interval}&limit=${limit}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) throw new Error(`Binance klines failed for ${pair}: ${res.status}`);
+    const raw = (await res.json()) as Array<
+      [number, string, string, string, string, string, number, string, number, string, string, string]
+    >;
+    let running = 0;
+    return raw.map((k) => {
+      const volume = parseFloat(k[5]);
+      const takerBuy = parseFloat(k[9]);
+      const takerSell = volume - takerBuy;
+      const delta = takerBuy - takerSell;
+      running += delta;
+      return { time: k[0], delta, cvd: running };
+    });
+  });
+}
+
 export async function getKlines(symbol: string, interval: string, limit = 200): Promise<Candle[]> {
   const pair = `${symbol.toUpperCase()}USDT`;
   return cached(`bn:klines:${pair}:${interval}:${limit}`, 60_000, async () => {
