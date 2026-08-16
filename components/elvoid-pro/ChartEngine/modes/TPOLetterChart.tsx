@@ -1,16 +1,17 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Settings2 } from "lucide-react";
-import { formatUsd } from "@/lib/format";
-import { LETTERS, type TpoSession } from "@/lib/elvoid/tpo";
+import { createChart, ColorType, CrosshairMode, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
+import { LETTERS, TPO_PROFILE_PERIODS_MS, type TpoSession } from "@/lib/elvoid/tpo";
+import type { Candle } from "@/lib/elvoid/types";
+import { getMaxHistoryDays } from "@/lib/market-data/timeframeHistory";
 
 const BLOCK_SIZES = ["5m", "10m", "15m", "30m", "1H", "2H", "4H"];
 const PERIODS = ["1D", "5D", "1W", "1M"];
 
-// Bracket color bands — cycling every BAND_SIZE consecutive letters, so
-// each block-group reads as its own color the way the TradingView
-// reference screenshots do (a run of purple, then teal, then green, as the
-// session moves forward through time), instead of one flat color per row.
+// Bracket color bands — cycling every BAND_SIZE consecutive letters, so each
+// block-group reads as its own color the way the TradingView reference
+// screenshots do, instead of one flat color per row.
 const BAND_SIZE = 4;
 const PALETTE_UPPER = ["#F43F5E", "#FB923C", "#FACC15", "#4ADE80", "#22D3EE", "#60A5FA", "#A78BFA", "#F472B6"];
 const PALETTE_LOWER = ["#FDA4AF", "#FDBA74", "#FDE047", "#86EFAC", "#67E8F9", "#93C5FD", "#C4B5FD", "#F9A8D4"];
@@ -24,6 +25,15 @@ function colorForLetter(letter: string): string {
   return isLower ? PALETTE_LOWER[bandIdx] : PALETTE_UPPER[bandIdx];
 }
 
+interface SessionLayout {
+  session: TpoSession;
+  x: number; // real chart pixel x — start of this session's time slot
+  cellWidth: number; // adapted so the whole profile fits inside the session's real time width
+  cellHeightByRow: { y: number; h: number }[];
+  tvahY: number | null;
+  tvalY: number | null;
+}
+
 export function TPOLetterChart({
   symbol,
   height,
@@ -31,16 +41,21 @@ export function TPOLetterChart({
 }: {
   symbol: string;
   height: number;
-  /** The main chart's own candlestick timeframe (e.g. "5m", "1h") — a
-   * separate concept from the TPO bracket size below, but it's what
-   * decides the real candle interval the TPO engine pulls traversal data
-   * from, so it must be threaded all the way to the API request. */
+  /** The main chart's own candlestick timeframe — drives which real candles
+   * render in the background AND which source data the TPO engine builds
+   * blocks from. Threading this through is what makes the profile actually
+   * move/zoom/pan together with real candles instead of floating on its
+   * own detached coordinate grid. */
   chartInterval: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+
+  const [candles, setCandles] = useState<Candle[]>([]);
   const [sessions, setSessions] = useState<TpoSession[]>([]);
-  const [lastPrice, setLastPrice] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [layout, setLayout] = useState<SessionLayout[]>([]);
   const [compact, setCompact] = useState(false);
 
   // Settings — kept local to this mode (no shared indicator-settings system
@@ -54,31 +69,35 @@ export function TPOLetterChart({
   const [showPoorHL, setShowPoorHL] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Real candles for the background chart — a SEPARATE fetch from TPO
+  // session data, same endpoint the plain candlestick mode uses, so the
+  // price/time context the user sees matches the actual chart.
   useEffect(() => {
-    const measure = () => setCompact((containerRef.current?.clientWidth ?? 500) < 480);
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, []);
+    let cancelled = false;
+    const days = Math.min(10, getMaxHistoryDays(chartInterval));
+    fetch(`/api/klines?symbol=${symbol}&interval=${chartInterval}&days=${days}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || data.error || !Array.isArray(data.candles)) return;
+        setCandles(data.candles);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, chartInterval]);
 
-  // Re-fetches (and shows the loading state, clearing stale rows) whenever
-  // ANY of symbol / chart timeframe / TPO bracket / profile period /
-  // value-area% changes — this is what was missing before: chartInterval
-  // wasn't even a prop, so switching the chart's own timeframe couldn't
-  // possibly invalidate anything here.
+  // TPO session data — re-fetches (and clears stale rows) whenever symbol /
+  // chart timeframe / TPO bracket / profile period / value-area% changes.
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
-    setSessions([]); // don't keep showing the previous setting's stale profile while the new one loads
-    Promise.all([
-      fetch(
-        `/api/tpo-sessions?symbol=${symbol}&days=5&blockSize=${blockSize}&period=${period}&va=${valueAreaPct}&chartInterval=${chartInterval}`
-      ).then((r) => r.json()),
-      fetch(`/api/market-24h?symbol=${symbol}`).then((r) => r.json()),
-    ])
-      .then(([tpoData, tickerData]) => {
+    setSessions([]);
+    fetch(`/api/tpo-sessions?symbol=${symbol}&days=6&blockSize=${blockSize}&period=${period}&va=${valueAreaPct}&chartInterval=${chartInterval}`)
+      .then((r) => r.json())
+      .then((data) => {
         if (cancelled) return;
-        if (tpoData.error || !Array.isArray(tpoData.sessions)) {
+        if (data.error || !Array.isArray(data.sessions)) {
           setStatus("error");
           return;
         }
@@ -87,13 +106,12 @@ export function TPOLetterChart({
           chartTimeframe: chartInterval,
           profilePeriod: period,
           bracketInterval: blockSize,
-          candleCount: tpoData.debug?.sourceCandlesFetched ?? null,
-          sourceInterval: tpoData.debug?.sourceInterval ?? null,
-          bracketCount: tpoData.sessions.reduce((s: number, sess: TpoSession) => s + sess.blockCount, 0),
-          profileCount: tpoData.sessions.length,
+          candleCount: data.debug?.sourceCandlesFetched ?? null,
+          sourceInterval: data.debug?.sourceInterval ?? null,
+          bracketCount: data.sessions.reduce((s: number, sess: TpoSession) => s + sess.blockCount, 0),
+          profileCount: data.sessions.length,
         });
-        setSessions(tpoData.sessions);
-        setLastPrice(tickerData?.ticker?.lastPrice ?? null);
+        setSessions(data.sessions);
         setStatus("ready");
       })
       .catch(() => !cancelled && setStatus("error"));
@@ -102,41 +120,135 @@ export function TPOLetterChart({
     };
   }, [symbol, chartInterval, blockSize, period, valueAreaPct]);
 
-  if (status === "loading" || sessions.length === 0) {
-    return (
-      <div ref={containerRef} style={{ height }} className="flex animate-pulse items-center justify-center rounded-md border border-line bg-bg-surface/40 text-xs text-ink-faint">
-        {status === "error" ? "TPO tidak tersedia saat ini." : `Membangun TPO sessions ${symbol}/USDT…`}
-      </div>
+  // Mount the real candlestick chart once.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = createChart(containerRef.current, {
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#8A8F98", fontFamily: "var(--font-sans)" },
+      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      width: containerRef.current.clientWidth,
+      height,
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#1E2129" },
+      rightPriceScale: { borderColor: "#1E2129" },
+      crosshair: { mode: CrosshairMode.Normal },
+    });
+    chartRef.current = chart;
+    seriesRef.current = chart.addCandlestickSeries({
+      upColor: "#22C55E",
+      downColor: "#EF4444",
+      borderVisible: false,
+      wickUpColor: "#22C55E",
+      wickDownColor: "#EF4444",
+    });
+
+    let rafId: number | null = null;
+    const scheduleRecompute = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        recomputeRef.current?.();
+      });
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleRecompute);
+    const onResize = () => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth });
+        setCompact(containerRef.current.clientWidth < 480);
+      }
+      scheduleRecompute();
+    };
+    onResize();
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleRecompute);
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [height]);
+
+  // Push real candle data + fit the view to the TPO session range so the
+  // profiles are visible on load.
+  useEffect(() => {
+    if (!seriesRef.current || candles.length === 0) return;
+    seriesRef.current.setData(
+      candles.map((c) => ({ time: (c.time / 1000) as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close }))
     );
-  }
+    chartRef.current?.timeScale().fitContent();
+    recomputeRef.current?.();
+  }, [candles]);
 
-  const globalHigh = Math.max(...sessions.map((s) => s.high));
-  const globalLow = Math.min(...sessions.map((s) => s.low));
-  const globalSpan = globalHigh - globalLow || 1;
-  const canvasHeight = height - 64; // reserve space: ~36px top padding for the settings bar, ~28px bottom for date labels
-  const toY = (price: number) => ((globalHigh - price) / globalSpan) * canvasHeight;
+  // Recompute session pixel positions from the chart's OWN coordinate
+  // functions — this is the actual fix: TPO x comes from
+  // timeScale.timeToCoordinate(sessionStart), TPO y comes from
+  // series.priceToCoordinate(row price), the exact same transforms the
+  // candlesticks use. Panning/zooming the chart moves both together
+  // because they're derived from the same live chart state every frame.
+  const recomputeRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    recomputeRef.current = () => {
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      if (!chart || !series || sessions.length === 0) return;
+      const containerWidth = containerRef.current?.clientWidth ?? 0;
+      const sessionMs = TPO_PROFILE_PERIODS_MS[period] ?? TPO_PROFILE_PERIODS_MS["1D"];
+      const desiredCellWidth = compact ? 9 : 14;
 
-  const cellWidth = compact ? 11 : 16;
-  const sessionGap = compact ? 14 : 26;
+      const next: SessionLayout[] = [];
+      for (const session of sessions) {
+        const xStart = chart.timeScale().timeToCoordinate((session.sessionStart / 1000) as UTCTimestamp);
+        const xEnd = chart.timeScale().timeToCoordinate(((session.sessionStart + sessionMs) / 1000) as UTCTimestamp);
+        if (xStart === null) continue;
+        const x = Number(xStart);
+        if (x < -400 || x > containerWidth + 400) continue; // skip far off-screen sessions
 
-  // Pixel-based session layout: each session's width is driven by its own
-  // widest row (max letters-in-a-row), not an equal percentage slice of
-  // the container. This is what actually fixes "1-2 narrow columns with a
-  // huge empty area" — a quiet session gets a narrow column, a busy one
-  // gets a wide one, and the container scrolls to fit all of them.
-  let cursorX = 8;
-  const sessionLayout = sessions.map((session) => {
-    const maxLetters = Math.max(1, ...session.rows.map((r) => r.letters.length));
-    const width = maxLetters * cellWidth;
-    const xStart = cursorX;
-    cursorX += width + sessionGap;
-    return { session, xStart, width };
-  });
-  const totalWidth = cursorX + 40;
+        // Fit the whole profile inside this session's real time width so it
+        // stays visually attached to that session's candles at any zoom
+        // level — the ask was "TPO bergerak searah candle".
+        const sessionPixelWidth = xEnd !== null ? Math.max(20, Number(xEnd) - x) : 120;
+        const maxLetters = Math.max(1, ...session.rows.map((r) => r.letters.length));
+        const cellWidth = Math.max(2, Math.min(desiredCellWidth, sessionPixelWidth / maxLetters));
+
+        const cellHeightByRow = session.rows.map((row) => {
+          const yTop = series.priceToCoordinate(row.priceHigh);
+          const yBottom = series.priceToCoordinate(row.priceLow);
+          return { y: yTop !== null ? Number(yTop) : 0, h: yTop !== null && yBottom !== null ? Math.max(3, Number(yBottom) - Number(yTop)) : 3 };
+        });
+
+        next.push({
+          session,
+          x,
+          cellWidth,
+          cellHeightByRow,
+          tvahY: session.tvah !== null ? (series.priceToCoordinate(session.tvah) as number | null) : null,
+          tvalY: session.tval !== null ? (series.priceToCoordinate(session.tval) as number | null) : null,
+        });
+      }
+      setLayout(next);
+    };
+    recomputeRef.current();
+  }, [sessions, period, compact]);
 
   return (
     <div style={{ height }} className="relative overflow-hidden rounded-md border border-line bg-bg-surface/40">
-      {/* Compact settings disclosure — rule 20's control set, kept out of the way until opened. */}
+      <div ref={containerRef} className="h-full w-full" />
+
+      {(status === "loading" && sessions.length === 0) && (
+        <div className="absolute inset-0 flex animate-pulse items-center justify-center bg-bg-surface/60 text-xs text-ink-faint">
+          Membangun TPO sessions {symbol}/USDT…
+        </div>
+      )}
+      {status === "error" && (
+        <div className="absolute inset-0 flex items-center justify-center bg-bg-surface/60 text-xs text-ink-faint">
+          TPO tidak tersedia saat ini.
+        </div>
+      )}
+
+      {/* Compact settings disclosure — rule 20's control set. */}
       <div className="absolute left-2 top-2 z-30 flex items-center gap-1.5">
         <button
           onClick={() => setSettingsOpen((v) => !v)}
@@ -187,98 +299,83 @@ export function TPOLetterChart({
         </div>
       )}
 
-      <div ref={containerRef} className="h-full w-full overflow-x-auto overflow-y-hidden pt-9">
-        <div className="relative" style={{ height: canvasHeight, minWidth: totalWidth }}>
-          {/* Current price line, spans the whole visible width. */}
-          {lastPrice !== null && lastPrice <= globalHigh && lastPrice >= globalLow && (
-            <div className="absolute left-0 right-0 border-t border-dashed border-signal-glow/70" style={{ top: toY(lastPrice) }}>
-              <span className="absolute right-0 -translate-y-1/2 rounded bg-signal-glow px-1 text-[9px] font-semibold text-bg">
-                {formatUsd(lastPrice)}
-              </span>
-            </div>
-          )}
-
-          {sessionLayout.map(({ session, xStart, width }) => {
-            const pocRow = session.rows.find((r) => r.isPoc);
-            return (
-              <div key={session.sessionStart} className="absolute top-0" style={{ left: xStart, width }}>
-                {/* POC / VAH / VAL — horizontal levels spanning this session's profile width, labeled at the left edge. */}
-                {pocRow && (
-                  <div className="absolute -left-7 flex items-center gap-0.5 text-[7px] font-semibold text-[#22D3EE]" style={{ top: toY((pocRow.priceHigh + pocRow.priceLow) / 2) - 4 }}>
-                    POC
-                  </div>
-                )}
-                {session.tvah !== null && (
-                  <div className="absolute left-0 border-t border-dashed border-ink-faint/60" style={{ top: toY(session.tvah), width }}>
-                    <span className="absolute -left-7 -top-2 text-[7px] text-ink-faint">VAH</span>
-                  </div>
-                )}
-                {session.tval !== null && (
-                  <div className="absolute left-0 border-t border-dashed border-ink-faint/60" style={{ top: toY(session.tval), width }}>
-                    <span className="absolute -left-6 top-0.5 text-[7px] text-ink-faint">VAL</span>
-                  </div>
-                )}
-
-                {/* Initial Balance Range — vertical marker just left of the profile, per rule 12. */}
-                {showIbr && session.ibrHigh !== null && session.ibrLow !== null && (
-                  <div
-                    className="absolute -left-1.5 border-l border-dashed border-[#A78BFA]/60"
-                    style={{ top: toY(session.ibrHigh), height: Math.max(2, toY(session.ibrLow) - toY(session.ibrHigh)) }}
-                    title="Initial Balance Range"
-                  />
-                )}
-
-                {/* Each row renders as individual fixed-size cells — one per TPO
-                    letter, left-aligned — instead of one long text string. This
-                    is what makes the profile actually widen/narrow by price
-                    level and read as a real horizontal Market Profile shape. */}
-                {session.rows.map((row, rIdx) => {
-                  const y = toY(row.priceHigh);
-                  const h = Math.max(4, toY(row.priceLow) - y);
-                  const fontSize = Math.min(h - 1, compact ? 7 : 9);
-                  return (
-                    <div key={rIdx} className="absolute left-0 flex" style={{ top: y, height: h, width }}>
-                      {[...row.letters].map((letter, cIdx) => (
-                        <div
-                          key={cIdx}
-                          className="flex items-center justify-center overflow-hidden font-mono font-semibold leading-none text-white"
-                          style={{
-                            width: cellWidth,
-                            height: h,
-                            fontSize: fontSize > 3 ? fontSize : 0,
-                            backgroundColor: colorForLetter(letter),
-                            opacity: row.inValueArea ? 1 : 0.4, // TradingView's documented "opacity outside VA"
-                            outline: row.isPoc ? "1px solid #fff" : row.isSinglePrint && showSinglePrint ? "1px solid rgba(250,204,21,0.85)" : "1px solid rgba(0,0,0,0.35)",
-                            outlineOffset: -1,
-                          }}
-                          title={row.isSinglePrint ? "Single Print" : row.isPoc ? "POC" : undefined}
-                        >
-                          {showLetters ? letter : ""}
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-
-                {/* Poor High / Poor Low — labeled, not signaled, per rule 14. */}
-                {showPoorHL && session.poorHigh && (
-                  <div className="absolute left-0 -translate-y-full text-[7px] font-semibold text-[#F59E0B]" style={{ top: toY(session.high) }}>
-                    Poor High
-                  </div>
-                )}
-                {showPoorHL && session.poorLow && (
-                  <div className="absolute left-0 text-[7px] font-semibold text-[#F59E0B]" style={{ top: toY(session.low) + 1 }}>
-                    Poor Low
-                  </div>
-                )}
-
-                <div className="absolute left-0 truncate text-[9px] text-ink-faint" style={{ width, top: canvasHeight + 4 }}>
-                  {new Date(session.sessionStart).toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "2-digit" })}
+      {/* Overlay layer — pure positioning, no chart logic; every coordinate comes from the real lightweight-charts transform above. */}
+      <div className="pointer-events-none absolute inset-0">
+        {layout.map(({ session, x, cellWidth, cellHeightByRow, tvahY, tvalY }) => {
+          const pocRow = session.rows.find((r) => r.isPoc);
+          const pocLayoutIdx = session.rows.findIndex((r) => r.isPoc);
+          const profileWidth = cellWidth * Math.max(1, ...session.rows.map((r) => r.letters.length));
+          return (
+            <div key={session.sessionStart} className="absolute top-0" style={{ left: x }}>
+              {pocRow && pocLayoutIdx >= 0 && (
+                <div
+                  className="absolute -left-7 text-[7px] font-semibold text-[#22D3EE]"
+                  style={{ top: cellHeightByRow[pocLayoutIdx].y + cellHeightByRow[pocLayoutIdx].h / 2 - 4 }}
+                >
+                  POC
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              )}
+              {tvahY !== null && (
+                <div className="absolute left-0 border-t border-dashed border-ink-faint/60" style={{ top: tvahY, width: profileWidth }}>
+                  <span className="absolute -left-7 -top-2 text-[7px] text-ink-faint">VAH</span>
+                </div>
+              )}
+              {tvalY !== null && (
+                <div className="absolute left-0 border-t border-dashed border-ink-faint/60" style={{ top: tvalY, width: profileWidth }}>
+                  <span className="absolute -left-6 top-0.5 text-[7px] text-ink-faint">VAL</span>
+                </div>
+              )}
+
+              {/* Initial Balance Range — vertical marker just left of the profile, per rule 12. */}
+              {showIbr && session.ibrHigh !== null && session.ibrLow !== null && (
+                <div className="absolute -left-1 border-l border-dashed border-[#A78BFA]/60" style={{ top: 0, height: height - 30 }} title="Initial Balance Range" />
+              )}
+
+              {/* Each row renders as individual fixed-size cells — one per TPO
+                  letter, left-aligned — so the profile actually widens/narrows
+                  by price level and reads as a real horizontal Market Profile. */}
+              {session.rows.map((row, rIdx) => {
+                const { y, h } = cellHeightByRow[rIdx] ?? { y: 0, h: 3 };
+                const fontSize = Math.min(h - 1, cellWidth - 3);
+                const lettersVisible = showLetters && cellWidth >= 7 && fontSize > 3;
+                return (
+                  <div key={rIdx} className="absolute left-0 flex" style={{ top: y, height: h }}>
+                    {[...row.letters].map((letter, cIdx) => (
+                      <div
+                        key={cIdx}
+                        className="flex items-center justify-center overflow-hidden font-mono font-semibold leading-none text-white"
+                        style={{
+                          width: cellWidth,
+                          height: h,
+                          fontSize: lettersVisible ? fontSize : 0,
+                          backgroundColor: colorForLetter(letter),
+                          opacity: row.inValueArea ? 1 : 0.4, // TradingView's documented "opacity outside VA"
+                          outline: row.isPoc ? "1px solid #fff" : row.isSinglePrint && showSinglePrint ? "1px solid rgba(250,204,21,0.85)" : "1px solid rgba(0,0,0,0.35)",
+                          outlineOffset: -1,
+                        }}
+                        title={row.isSinglePrint ? "Single Print" : row.isPoc ? "POC" : undefined}
+                      >
+                        {lettersVisible ? letter : ""}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+
+              {/* Poor High / Poor Low — labeled, not signaled, per rule 14. */}
+              {showPoorHL && session.poorHigh && cellHeightByRow[0] && (
+                <div className="absolute left-0 -translate-y-full text-[7px] font-semibold text-[#F59E0B]" style={{ top: cellHeightByRow[0].y }}>
+                  Poor High
+                </div>
+              )}
+              {showPoorHL && session.poorLow && cellHeightByRow.length > 0 && (
+                <div className="absolute left-0 text-[7px] font-semibold text-[#F59E0B]" style={{ top: cellHeightByRow[cellHeightByRow.length - 1].y + cellHeightByRow[cellHeightByRow.length - 1].h + 1 }}>
+                  Poor Low
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
