@@ -545,3 +545,48 @@ drop policy if exists wallets_update_own on wallets;
 create policy wallets_update_own on wallets for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists wallets_delete_own on wallets;
 create policy wallets_delete_own on wallets for delete using (auth.uid() = user_id);
+
+-- ============================================================================
+-- Shared historical market-data layer (Footprint / TPO / Liquidity Heatmap)
+-- ============================================================================
+-- Backs real historical coverage beyond what a single live Binance request
+-- can return. aggTrades in particular caps at the most recent 1000 trades —
+-- for an active pair that can be under an hour of real history — and there's
+-- no practical way to paginate deep trade history live the way klines
+-- pagination (getKlinesRange) already does. Rolling 7-day retention via the
+-- daily cron below, NOT a weekly truncation: `week_start` tags which
+-- Mon-00:00-WIB cycle a row was collected in for organizational querying
+-- only — it is never used as a deletion boundary. See lib/marketHistory/ for
+-- the read/write/cleanup functions and app/api/market-history/cleanup for
+-- the daily job (vercel.json).
+--
+-- ONE shared table for all three indicators (not one table each) per the
+-- "favor one shared market-data layer" architecture note — `kind`
+-- discriminates which indicator a row belongs to. Only 'footprint' is
+-- actually written yet (2026-08): TPO and Liquidity Heatmap already get
+-- genuine multi-day history straight from Binance klines (getKlinesRange,
+-- exposed via /api/klines?days=N) without this table, so wiring them in is
+-- an explicit next phase, not done here — the schema is ready for it so
+-- that phase doesn't need a migration.
+-- ----------------------------------------------------------------------------
+create table if not exists market_history (
+  id uuid primary key default gen_random_uuid(),
+  symbol text not null,
+  interval text not null,
+  kind text not null default 'footprint' check (kind in ('footprint', 'volume_profile', 'liquidity')),
+  candle_time timestamptz not null,             -- real candle open time (Binance kline)
+  price_buckets jsonb not null,                 -- compact per-price-level array — same shape the relevant indicator already computes (e.g. FootprintCell[]), stored verbatim, no re-derivation on read
+  delta numeric,
+  total_volume numeric not null default 0,
+  source text not null default 'binance_futures',
+  week_start timestamptz not null,              -- Monday 00:00 WIB cycle tag — organizational only, NOT a retention boundary
+  created_at timestamptz not null default now(),
+  unique (symbol, interval, kind, candle_time)
+);
+
+create index if not exists market_history_lookup_idx on market_history (symbol, interval, kind, candle_time desc);
+create index if not exists market_history_created_at_idx on market_history (created_at);
+
+alter table market_history enable row level security;
+-- Zero public policies (same posture as ai_signals/bn_* above): only the
+-- server-side service-role client (lib/supabase.ts) ever touches this table.

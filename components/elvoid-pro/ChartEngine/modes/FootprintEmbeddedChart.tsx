@@ -329,7 +329,7 @@ export function FootprintEmbeddedChart({
 
       {oldestTradeTime && (
         <div className="pointer-events-none absolute bottom-1 left-2 rounded bg-bg-raised/80 px-1.5 py-0.5 text-[9px] text-ink-faint">
-          Footprint real-trade sejak {new Date(oldestTradeTime).toLocaleTimeString("id-ID")} — candle sebelumnya tanpa footprint (di luar jendela 1000 trade Binance)
+          Footprint real-trade sejak {new Date(oldestTradeTime).toLocaleTimeString("id-ID")} — candle sebelumnya belum ada data tersimpan
         </div>
       )}
     </div>
