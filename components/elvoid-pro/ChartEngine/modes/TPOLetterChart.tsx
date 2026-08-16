@@ -2,11 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Settings2 } from "lucide-react";
 import { createChart, ColorType, CrosshairMode, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
-import { LETTERS, TPO_PROFILE_PERIODS_MS, type TpoSession } from "@/lib/elvoid/tpo";
+import { LETTERS, TPO_PROFILE_PERIODS_MS, defaultBlockSizeForChartInterval, type TpoSession } from "@/lib/elvoid/tpo";
 import type { Candle } from "@/lib/elvoid/types";
 import { getMaxHistoryDays } from "@/lib/market-data/timeframeHistory";
 
-const BLOCK_SIZES = ["5m", "10m", "15m", "30m", "1H", "2H", "4H"];
+const BLOCK_SIZES = ["1m", "5m", "10m", "15m", "30m", "1H", "2H", "4H", "1D"];
 const PERIODS = ["1D", "5D", "1W", "1M"];
 
 // Bracket color bands — cycling every BAND_SIZE consecutive letters, so each
@@ -60,7 +60,7 @@ export function TPOLetterChart({
 
   // Settings — kept local to this mode (no shared indicator-settings system
   // exists yet in Elvoid Pro), matches rule 20's minimum control set.
-  const [blockSize, setBlockSize] = useState("30m");
+  const [blockSize, setBlockSize] = useState(() => defaultBlockSizeForChartInterval(chartInterval));
   const [period, setPeriod] = useState("1D");
   const [valueAreaPct, setValueAreaPct] = useState(70);
   const [showLetters, setShowLetters] = useState(true);
@@ -68,6 +68,16 @@ export function TPOLetterChart({
   const [showSinglePrint, setShowSinglePrint] = useState(true);
   const [showPoorHL, setShowPoorHL] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Root cause of "TPO count stays the same when timeframe changes": blockSize
+  // used to be a hardcoded "30m" default that nothing ever revisited. This
+  // re-derives it every time the chart's own timeframe changes, so switching
+  // 1m -> 1H -> 1D actually changes the TPO bracket/period count, not just
+  // the background candles. A manual override via the settings dropdown
+  // below is respected until the user changes chartInterval again.
+  useEffect(() => {
+    setBlockSize(defaultBlockSizeForChartInterval(chartInterval));
+  }, [chartInterval]);
 
   // Real candles for the background chart — a SEPARATE fetch from TPO
   // session data, same endpoint the plain candlestick mode uses, so the
@@ -89,34 +99,41 @@ export function TPOLetterChart({
 
   // TPO session data — re-fetches (and clears stale rows) whenever symbol /
   // chart timeframe / TPO bracket / profile period / value-area% changes.
+  // Debounced: valueAreaPct in particular is a live number input, so typing
+  // would otherwise fire a request per keystroke.
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
     setSessions([]);
-    fetch(`/api/tpo-sessions?symbol=${symbol}&days=6&blockSize=${blockSize}&period=${period}&va=${valueAreaPct}&chartInterval=${chartInterval}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data.error || !Array.isArray(data.sessions)) {
-          setStatus("error");
-          return;
-        }
-        // eslint-disable-next-line no-console
-        console.log("TPO DEBUG", {
-          chartTimeframe: chartInterval,
-          profilePeriod: period,
-          bracketInterval: blockSize,
-          candleCount: data.debug?.sourceCandlesFetched ?? null,
-          sourceInterval: data.debug?.sourceInterval ?? null,
-          bracketCount: data.sessions.reduce((s: number, sess: TpoSession) => s + sess.blockCount, 0),
-          profileCount: data.sessions.length,
-        });
-        setSessions(data.sessions);
-        setStatus("ready");
-      })
-      .catch(() => !cancelled && setStatus("error"));
+    const debounceId = setTimeout(() => {
+      fetch(`/api/tpo-sessions?symbol=${symbol}&days=6&blockSize=${blockSize}&period=${period}&va=${valueAreaPct}&chartInterval=${chartInterval}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          if (data.error || !Array.isArray(data.sessions)) {
+            setStatus("error");
+            return;
+          }
+          // eslint-disable-next-line no-console
+          console.log("TPO DEBUG", {
+            chartTimeframe: chartInterval,
+            profilePeriod: period,
+            bracketInterval: blockSize,
+            candleCount: data.debug?.sourceCandlesFetched ?? null,
+            sourceInterval: data.debug?.sourceInterval ?? null,
+            bracketCount: data.sessions.reduce((s: number, sess: TpoSession) => s + sess.blockCount, 0),
+            profileCount: data.sessions.length,
+            historyBacked: data.debug?.historyBacked ?? false,
+            storedSessionsUsed: data.debug?.storedSessionsUsed ?? 0,
+          });
+          setSessions(data.sessions);
+          setStatus("ready");
+        })
+        .catch(() => !cancelled && setStatus("error"));
+    }, 400);
     return () => {
       cancelled = true;
+      clearTimeout(debounceId);
     };
   }, [symbol, chartInterval, blockSize, period, valueAreaPct]);
 

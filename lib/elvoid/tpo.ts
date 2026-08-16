@@ -1,6 +1,7 @@
 import type { Candle } from "./types";
 
 export const TPO_BLOCK_SIZES_MS: Record<string, number> = {
+  "1m": 1 * 60_000,
   "5m": 5 * 60_000,
   "10m": 10 * 60_000,
   "15m": 15 * 60_000,
@@ -8,6 +9,7 @@ export const TPO_BLOCK_SIZES_MS: Record<string, number> = {
   "1H": 60 * 60_000,
   "2H": 2 * 60 * 60_000,
   "4H": 4 * 60 * 60_000,
+  "1D": 24 * 60 * 60_000,
 };
 
 export const TPO_PROFILE_PERIODS_MS: Record<string, number> = {
@@ -16,6 +18,31 @@ export const TPO_PROFILE_PERIODS_MS: Record<string, number> = {
   "1W": 7 * 86_400_000,
   "1M": 30 * 86_400_000, // approximation — real calendar months vary; documented in report
 };
+
+/**
+ * Root-cause fix (Phase 2, 2026-08): the chart's own candlestick timeframe
+ * and the TPO bracket size (`blockSize` in TPOLetterChart) used to be fully
+ * decoupled — the UI defaulted blockSize to a hardcoded "30m" regardless of
+ * what timeframe the user picked on the main chart, so switching timeframes
+ * changed the background candles but never the actual TPO letter/period
+ * count. This maps each chart timeframe to its natural 1:1 bracket size:
+ * 1m->1m, 5m->5m, 15m->15m, 1h->1H, 4h->4H, 1d->1D. TPOLetterChart re-applies
+ * this default whenever `chartInterval` changes; a user's manual bracket-size
+ * override (via the existing settings dropdown) is respected until they
+ * change the chart timeframe again, at which point it re-syncs.
+ */
+export const TPO_DEFAULT_BLOCK_SIZE_BY_CHART_INTERVAL: Record<string, string> = {
+  "1m": "1m",
+  "5m": "5m",
+  "15m": "15m",
+  "1h": "1H",
+  "4h": "4H",
+  "1d": "1D",
+};
+
+export function defaultBlockSizeForChartInterval(chartInterval: string): string {
+  return TPO_DEFAULT_BLOCK_SIZE_BY_CHART_INTERVAL[chartInterval.toLowerCase()] ?? "30m";
+}
 
 export const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
