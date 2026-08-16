@@ -35,22 +35,42 @@ interface BubbleLayout {
   qty: number;
 }
 
-const PRICE_ROWS = 28; // shared row count for both modes — matches the codebase's Volume Profile convention
+const PRICE_ROWS = 28; // live order-book bucket count — unchanged, live mode wasn't asked to change
+const HIST_PRICE_ROWS = 36; // finer row count for historical mode only, for a smoother vertical gradient
 const REFRESH_MS = 5000; // live-book poll interval, matches the depth endpoint's own 10s server-side cache
 const ROLLING_WINDOW = 15; // candles of lookback per historical column — smooths the flow without blending unrelated eras together
 const MIN_HISTORY_CANDLES = 10; // floor so a very sparse time-window still renders *something* real, never fabricated
 
-// Five-level intensity ramp shared by both modes, driven purely by each
-// cell's value relative to the snapshot/window's own max — never random
-// (rule 3 in the spec). Reused for live order-book bands AND historical
-// volume bands so the color language means the same thing in both modes.
+// Continuous 5-stop colormap — blue -> cyan -> green -> purple -> red,
+// interpolated (not stepped), so intensity reads as a smooth density field
+// instead of discrete colored blocks. Shared by both modes so the color
+// language means the same thing everywhere. Driven purely by each cell's
+// value relative to its own dataset's max — never random (rule 3 in the
+// spec) — and color encodes intensity only, never a buy/sell signal.
+const HEAT_STOPS: [number, number, number][] = [
+  [37, 99, 235], // 0.00 blue
+  [34, 211, 238], // 0.25 cyan
+  [34, 197, 94], // 0.50 green
+  [168, 85, 247], // 0.75 purple
+  [239, 68, 68], // 1.00 red / magenta
+];
+
+function heatRgb(ratio: number): [number, number, number] {
+  const r = Math.max(0, Math.min(1, ratio));
+  const segments = HEAT_STOPS.length - 1;
+  const scaled = r * segments;
+  const idx = Math.min(segments - 1, Math.floor(scaled));
+  const t = scaled - idx;
+  const [r1, g1, b1] = HEAT_STOPS[idx];
+  const [r2, g2, b2] = HEAT_STOPS[idx + 1];
+  return [Math.round(r1 + (r2 - r1) * t), Math.round(g1 + (g2 - g1) * t), Math.round(b1 + (b2 - b1) * t)];
+}
+
 function intensityColor(ratio: number): { fill: string; dot: string } {
-  if (ratio < 0.12) return { fill: `rgba(120,120,140,${0.03 + ratio * 0.25})`, dot: "#6b7280" };
-  if (ratio < 0.32) return { fill: `rgba(168,85,247,${0.08 + ratio * 0.35})`, dot: "#a855f7" }; // purple — medium
-  if (ratio < 0.52) return { fill: `rgba(59,130,246,${0.1 + ratio * 0.4})`, dot: "#3b82f6" }; // blue — medium/high
-  if (ratio < 0.72) return { fill: `rgba(34,197,94,${0.12 + ratio * 0.42})`, dot: "#22c55e" }; // green — high
-  if (ratio < 0.88) return { fill: `rgba(234,179,8,${0.14 + ratio * 0.45})`, dot: "#eab308" }; // yellow — very high
-  return { fill: `rgba(239,68,68,${0.16 + ratio * 0.48})`, dot: "#ef4444" }; // red — extreme
+  const r = Math.max(0, Math.min(1, ratio));
+  const [red, green, blue] = heatRgb(r);
+  const alpha = Math.min(0.92, 0.04 + r * 0.72);
+  return { fill: `rgba(${red},${green},${blue},${alpha.toFixed(3)})`, dot: `rgb(${red},${green},${blue})` };
 }
 
 function formatHistoryLabel(ms: number): string {
@@ -81,6 +101,7 @@ export function LiquidityHeatmapEmbeddedChart({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null); // reused across redraws — raw cells drawn here first, then blur-composited onto canvasRef
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
@@ -151,7 +172,7 @@ export function LiquidityHeatmapEmbeddedChart({
   const windowedCandles = useMemo(() => sliceToHistoryWindow(candles, interval), [candles, interval]);
   const liquidityMap: LiquidityVolumeMap | null = useMemo(() => {
     if (source !== "historical" || windowedCandles.length === 0) return null;
-    return buildLiquidityVolumeMap(windowedCandles, PRICE_ROWS, ROLLING_WINDOW);
+    return buildLiquidityVolumeMap(windowedCandles, HIST_PRICE_ROWS, ROLLING_WINDOW);
   }, [source, windowedCandles]);
 
   // Mount the real candlestick chart once — identical setup to
@@ -252,8 +273,22 @@ export function LiquidityHeatmapEmbeddedChart({
           canvas.width = targetW;
           canvas.height = targetH;
         }
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, containerWidth, containerHeight);
+
+        // Raw cells are drawn crisp onto a reused offscreen buffer first,
+        // then composited onto the visible canvas through a single blurred
+        // drawImage — a soft continuous field instead of hard rectangle
+        // edges, without paying for thousands of individually-blurred
+        // shapes (rule 5/10: fade boundaries, but stay mobile-cheap).
+        if (!offscreenCanvasRef.current) offscreenCanvasRef.current = document.createElement("canvas");
+        const off = offscreenCanvasRef.current;
+        if (off.width !== targetW || off.height !== targetH) {
+          off.width = targetW;
+          off.height = targetH;
+        }
+        const offCtx = off.getContext("2d");
+        if (!offCtx) return;
+        offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        offCtx.clearRect(0, 0, containerWidth, containerHeight);
 
         // Bin y-spans are shared by every column (fixed price boundaries),
         // so compute them once per redraw instead of per column.
@@ -265,35 +300,73 @@ export function LiquidityHeatmapEmbeddedChart({
         });
 
         const barSpacing = chart.timeScale().options().barSpacing ?? 6;
-        const colWidth = Math.max(2, barSpacing);
+        // LOD: zoomed out enough that individual candle-columns would be
+        // sub-pixel-thin anyway, so group several real columns into one
+        // drawn block (summed, still real data) rather than overdrawing —
+        // rule 10. Zoomed in, every column renders individually.
+        const groupSize = barSpacing < 2.5 ? 4 : barSpacing < 4 ? 2 : 1;
+        const colWidth = Math.max(2, barSpacing * groupSize);
 
-        for (const col of liquidityMap.columns) {
-          const xCoord = chart.timeScale().timeToCoordinate((col.time / 1000) as UTCTimestamp);
+        const peaks: { x: number; y: number; ratio: number; confidence: number }[] = [];
+
+        for (let g = 0; g < liquidityMap.columns.length; g += groupSize) {
+          const group = liquidityMap.columns.slice(g, g + groupSize);
+          const anchor = group[group.length - 1];
+          const xCoord = chart.timeScale().timeToCoordinate((anchor.time / 1000) as UTCTimestamp);
           if (xCoord === null) continue;
           const x = Number(xCoord);
-          if (x < -colWidth || x > containerWidth + colWidth) continue; // skip off-screen columns
-          for (let i = 0; i < col.values.length; i++) {
-            const v = col.values[i];
+          if (x < -colWidth || x > containerWidth + colWidth) continue; // skip off-screen groups
+
+          let peakRatio = 0;
+          let peakBin = -1;
+          let peakTouch = 0;
+          for (let i = 0; i < liquidityMap.bins.length; i++) {
+            let v = 0;
+            for (const col of group) v += col.values[i];
             if (v <= 0) continue;
             const yInfo = binYs[i];
             if (!yInfo) continue;
-            const ratio = v / liquidityMap.maxValue;
-            const { fill, dot } = intensityColor(ratio);
-            ctx.fillStyle = fill;
-            ctx.fillRect(x - colWidth / 2, yInfo.top, colWidth + 0.5, yInfo.h);
-            // Bubble marker on genuinely high-volume nodes only (same
-            // "very high/extreme" tier as the color ramp) — real threshold,
-            // not placed randomly. Satisfies the "liquidity bubbles" rule
-            // for historical mode too, using this mode's own real data.
-            if (ratio >= 0.72) {
-              ctx.beginPath();
-              ctx.arc(x, yInfo.top + yInfo.h / 2, 1.5 + (ratio - 0.72) * 10, 0, Math.PI * 2);
-              ctx.fillStyle = dot;
-              ctx.globalAlpha = 0.85;
-              ctx.fill();
-              ctx.globalAlpha = 1;
+            const ratio = v / (liquidityMap.maxValue * group.length);
+            offCtx.fillStyle = intensityColor(ratio).fill;
+            offCtx.fillRect(x - colWidth / 2, yInfo.top, colWidth + 0.5, yInfo.h);
+            if (ratio > peakRatio) {
+              peakRatio = ratio;
+              peakBin = i;
+              peakTouch = group.reduce((s, c) => s + c.touch[i], 0) / group.length;
             }
           }
+          // One bubble candidate per column-group, kept only if it clears
+          // the "very high/extreme" tier — same real threshold the color
+          // ramp uses, not placed randomly (rule 6).
+          if (peakBin >= 0 && peakRatio >= 0.72 && binYs[peakBin]) {
+            peaks.push({
+              x,
+              y: binYs[peakBin]!.top + binYs[peakBin]!.h / 2,
+              ratio: peakRatio,
+              confidence: Math.min(1, peakTouch / ROLLING_WINDOW), // real evidence count -> bubble opacity, per rule 6
+            });
+          }
+        }
+
+        // Composite the raw field through a soft blur — one filtered draw
+        // call, not one blur per rectangle.
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.filter = `blur(${(2 * dpr).toFixed(1)}px)`;
+        ctx.drawImage(off, 0, 0);
+        ctx.filter = "none";
+
+        // Bubbles drawn crisp on top, back in CSS-pixel coordinate space —
+        // secondary to the field, never obscuring the candles above them.
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        for (const peak of peaks) {
+          const { dot } = intensityColor(peak.ratio);
+          ctx.beginPath();
+          ctx.arc(peak.x, peak.y, 1.5 + (peak.ratio - 0.72) * 9, 0, Math.PI * 2);
+          ctx.fillStyle = dot;
+          ctx.globalAlpha = 0.5 + peak.confidence * 0.4;
+          ctx.fill();
+          ctx.globalAlpha = 1;
         }
         return;
       }
