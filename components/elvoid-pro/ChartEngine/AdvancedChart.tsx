@@ -7,6 +7,7 @@ import { TPOLetterChart } from "./modes/TPOLetterChart";
 import { FootprintEmbeddedChart } from "./modes/FootprintEmbeddedChart";
 import { FootprintMode } from "./modes/FootprintMode";
 import { LiquidityMode } from "./modes/LiquidityMode";
+import { LiquidityHeatmapEmbeddedChart } from "./modes/LiquidityHeatmapEmbeddedChart";
 import { CHART_MODE_GROUPS, type ChartMode } from "./chartModes";
 import type { Candle } from "@/lib/elvoid/types";
 import { getMaxHistoryDays } from "@/lib/market-data/timeframeHistory";
@@ -67,7 +68,11 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
     return <FootprintMode symbol={symbol} height={height} variant={chartMode} />;
   }
 
-  if (chartMode === "order-book-chart" || chartMode === "liquidity-walls" || chartMode === "liquidity-heatmap") {
+  if (chartMode === "liquidity-heatmap") {
+    return <LiquidityHeatmapEmbeddedChart symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} height={height} />;
+  }
+
+  if (chartMode === "order-book-chart" || chartMode === "liquidity-walls") {
     return <LiquidityMode symbol={symbol} height={height} variant={chartMode} />;
   }
 
