@@ -1,7 +1,5 @@
 import type { Candle } from "./types";
 
-const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
 export const TPO_BLOCK_SIZES_MS: Record<string, number> = {
   "5m": 5 * 60_000,
   "10m": 10 * 60_000,
@@ -18,6 +16,8 @@ export const TPO_PROFILE_PERIODS_MS: Record<string, number> = {
   "1W": 7 * 86_400_000,
   "1M": 30 * 86_400_000, // approximation — real calendar months vary; documented in report
 };
+
+export const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 export interface TpoRow {
   priceLow: number;

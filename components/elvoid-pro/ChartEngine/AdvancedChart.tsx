@@ -56,7 +56,7 @@ export function AdvancedChart({ symbol, timeframe, chartMode }: { symbol: string
   }
 
   if (chartMode === "tpo") {
-    return <TPOLetterChart symbol={symbol} height={height} />;
+    return <TPOLetterChart symbol={symbol} height={height} chartInterval={TF_TO_INTERVAL[timeframe] ?? "5m"} />;
   }
 
   if (chartMode === "footprint") {

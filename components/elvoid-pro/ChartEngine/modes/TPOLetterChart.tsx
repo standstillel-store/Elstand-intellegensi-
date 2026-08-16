@@ -1,16 +1,47 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Settings2 } from "lucide-react";
 import { formatUsd } from "@/lib/format";
-import type { TpoSession } from "@/lib/elvoid/tpo";
+import { LETTERS, type TpoSession } from "@/lib/elvoid/tpo";
 
 const BLOCK_SIZES = ["5m", "10m", "15m", "30m", "1H", "2H", "4H"];
 const PERIODS = ["1D", "5D", "1W", "1M"];
 
-export function TPOLetterChart({ symbol, height }: { symbol: string; height: number }) {
+// Bracket color bands — cycling every BAND_SIZE consecutive letters, so
+// each block-group reads as its own color the way the TradingView
+// reference screenshots do (a run of purple, then teal, then green, as the
+// session moves forward through time), instead of one flat color per row.
+const BAND_SIZE = 4;
+const PALETTE_UPPER = ["#F43F5E", "#FB923C", "#FACC15", "#4ADE80", "#22D3EE", "#60A5FA", "#A78BFA", "#F472B6"];
+const PALETTE_LOWER = ["#FDA4AF", "#FDBA74", "#FDE047", "#86EFAC", "#67E8F9", "#93C5FD", "#C4B5FD", "#F9A8D4"];
+
+function colorForLetter(letter: string): string {
+  const idx = LETTERS.indexOf(letter);
+  if (idx < 0) return "#8A8F98";
+  const isLower = idx >= 26;
+  const within = isLower ? idx - 26 : idx;
+  const bandIdx = Math.floor(within / BAND_SIZE) % PALETTE_UPPER.length;
+  return isLower ? PALETTE_LOWER[bandIdx] : PALETTE_UPPER[bandIdx];
+}
+
+export function TPOLetterChart({
+  symbol,
+  height,
+  chartInterval,
+}: {
+  symbol: string;
+  height: number;
+  /** The main chart's own candlestick timeframe (e.g. "5m", "1h") — a
+   * separate concept from the TPO bracket size below, but it's what
+   * decides the real candle interval the TPO engine pulls traversal data
+   * from, so it must be threaded all the way to the API request. */
+  chartInterval: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [sessions, setSessions] = useState<TpoSession[]>([]);
   const [lastPrice, setLastPrice] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [compact, setCompact] = useState(false);
 
   // Settings — kept local to this mode (no shared indicator-settings system
   // exists yet in Elvoid Pro), matches rule 20's minimum control set.
@@ -24,10 +55,25 @@ export function TPOLetterChart({ symbol, height }: { symbol: string; height: num
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
+    const measure = () => setCompact((containerRef.current?.clientWidth ?? 500) < 480);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  // Re-fetches (and shows the loading state, clearing stale rows) whenever
+  // ANY of symbol / chart timeframe / TPO bracket / profile period /
+  // value-area% changes — this is what was missing before: chartInterval
+  // wasn't even a prop, so switching the chart's own timeframe couldn't
+  // possibly invalidate anything here.
+  useEffect(() => {
     let cancelled = false;
     setStatus("loading");
+    setSessions([]); // don't keep showing the previous setting's stale profile while the new one loads
     Promise.all([
-      fetch(`/api/tpo-sessions?symbol=${symbol}&days=5&blockSize=${blockSize}&period=${period}&va=${valueAreaPct}`).then((r) => r.json()),
+      fetch(
+        `/api/tpo-sessions?symbol=${symbol}&days=5&blockSize=${blockSize}&period=${period}&va=${valueAreaPct}&chartInterval=${chartInterval}`
+      ).then((r) => r.json()),
       fetch(`/api/market-24h?symbol=${symbol}`).then((r) => r.json()),
     ])
       .then(([tpoData, tickerData]) => {
@@ -36,6 +82,16 @@ export function TPOLetterChart({ symbol, height }: { symbol: string; height: num
           setStatus("error");
           return;
         }
+        // eslint-disable-next-line no-console
+        console.log("TPO DEBUG", {
+          chartTimeframe: chartInterval,
+          profilePeriod: period,
+          bracketInterval: blockSize,
+          candleCount: tpoData.debug?.sourceCandlesFetched ?? null,
+          sourceInterval: tpoData.debug?.sourceInterval ?? null,
+          bracketCount: tpoData.sessions.reduce((s: number, sess: TpoSession) => s + sess.blockCount, 0),
+          profileCount: tpoData.sessions.length,
+        });
         setSessions(tpoData.sessions);
         setLastPrice(tickerData?.ticker?.lastPrice ?? null);
         setStatus("ready");
@@ -44,20 +100,12 @@ export function TPOLetterChart({ symbol, height }: { symbol: string; height: num
     return () => {
       cancelled = true;
     };
-  }, [symbol, blockSize, period, valueAreaPct]);
+  }, [symbol, chartInterval, blockSize, period, valueAreaPct]);
 
-  if (status === "loading") {
+  if (status === "loading" || sessions.length === 0) {
     return (
-      <div style={{ height }} className="flex animate-pulse items-center justify-center rounded-md border border-line bg-bg-surface/40 text-xs text-ink-faint">
-        Membangun TPO sessions {symbol}/USDT…
-      </div>
-    );
-  }
-
-  if (status === "error" || sessions.length === 0) {
-    return (
-      <div style={{ height }} className="flex items-center justify-center rounded-md border border-line bg-bg-surface/40 text-xs text-ink-faint">
-        TPO tidak tersedia saat ini.
+      <div ref={containerRef} style={{ height }} className="flex animate-pulse items-center justify-center rounded-md border border-line bg-bg-surface/40 text-xs text-ink-faint">
+        {status === "error" ? "TPO tidak tersedia saat ini." : `Membangun TPO sessions ${symbol}/USDT…`}
       </div>
     );
   }
@@ -65,16 +113,31 @@ export function TPOLetterChart({ symbol, height }: { symbol: string; height: num
   const globalHigh = Math.max(...sessions.map((s) => s.high));
   const globalLow = Math.min(...sessions.map((s) => s.low));
   const globalSpan = globalHigh - globalLow || 1;
-  const canvasHeight = height - 28; // leave room for the day-label axis
+  const canvasHeight = height - 64; // reserve space: ~36px top padding for the settings bar, ~28px bottom for date labels
   const toY = (price: number) => ((globalHigh - price) / globalSpan) * canvasHeight;
 
-  const columnWidth = 100 / sessions.length;
-  const letterCell = 6.5; // px per letter, matches the reference's dense block look
+  const cellWidth = compact ? 11 : 16;
+  const sessionGap = compact ? 14 : 26;
+
+  // Pixel-based session layout: each session's width is driven by its own
+  // widest row (max letters-in-a-row), not an equal percentage slice of
+  // the container. This is what actually fixes "1-2 narrow columns with a
+  // huge empty area" — a quiet session gets a narrow column, a busy one
+  // gets a wide one, and the container scrolls to fit all of them.
+  let cursorX = 8;
+  const sessionLayout = sessions.map((session) => {
+    const maxLetters = Math.max(1, ...session.rows.map((r) => r.letters.length));
+    const width = maxLetters * cellWidth;
+    const xStart = cursorX;
+    cursorX += width + sessionGap;
+    return { session, xStart, width };
+  });
+  const totalWidth = cursorX + 40;
 
   return (
-    <div style={{ height }} className="relative overflow-x-auto overflow-y-hidden rounded-md border border-line bg-bg-surface/40 px-2 pt-2">
+    <div style={{ height }} className="relative overflow-hidden rounded-md border border-line bg-bg-surface/40">
       {/* Compact settings disclosure — rule 20's control set, kept out of the way until opened. */}
-      <div className="sticky left-0 top-0 z-20 mb-1 flex items-center gap-1.5">
+      <div className="absolute left-2 top-2 z-30 flex items-center gap-1.5">
         <button
           onClick={() => setSettingsOpen((v) => !v)}
           className="flex items-center gap-1 rounded border border-line bg-bg-raised/90 px-1.5 py-0.5 text-[9px] text-ink-faint hover:text-ink"
@@ -84,7 +147,7 @@ export function TPOLetterChart({ symbol, height }: { symbol: string; height: num
       </div>
 
       {settingsOpen && (
-        <div className="sticky left-0 top-6 z-20 mb-2 flex w-fit flex-wrap gap-3 rounded-md border border-line bg-bg-raised/95 p-2 text-[10px] text-ink-muted shadow-xl">
+        <div className="absolute left-2 top-8 z-30 flex w-fit flex-wrap gap-3 rounded-md border border-line bg-bg-raised/95 p-2 text-[10px] text-ink-muted shadow-xl">
           <label className="flex flex-col gap-0.5">
             Period
             <select value={period} onChange={(e) => setPeriod(e.target.value)} className="rounded border border-line bg-bg-surface px-1 py-0.5 text-ink">
@@ -124,93 +187,98 @@ export function TPOLetterChart({ symbol, height }: { symbol: string; height: num
         </div>
       )}
 
-      <div className="relative" style={{ height: canvasHeight, minWidth: sessions.length * 170 }}>
-        {/* Current price line, spans the whole session range. */}
-        {lastPrice !== null && lastPrice <= globalHigh && lastPrice >= globalLow && (
-          <div
-            className="absolute left-0 right-0 border-t border-dashed border-signal-glow/70"
-            style={{ top: toY(lastPrice) }}
-          >
-            <span className="absolute right-0 -translate-y-1/2 rounded bg-signal-glow px-1 text-[9px] font-semibold text-bg">
-              {formatUsd(lastPrice)}
-            </span>
-          </div>
-        )}
+      <div ref={containerRef} className="h-full w-full overflow-x-auto overflow-y-hidden pt-9">
+        <div className="relative" style={{ height: canvasHeight, minWidth: totalWidth }}>
+          {/* Current price line, spans the whole visible width. */}
+          {lastPrice !== null && lastPrice <= globalHigh && lastPrice >= globalLow && (
+            <div className="absolute left-0 right-0 border-t border-dashed border-signal-glow/70" style={{ top: toY(lastPrice) }}>
+              <span className="absolute right-0 -translate-y-1/2 rounded bg-signal-glow px-1 text-[9px] font-semibold text-bg">
+                {formatUsd(lastPrice)}
+              </span>
+            </div>
+          )}
 
-        {sessions.map((session, sIdx) => (
-          <div key={session.sessionStart} className="absolute top-0" style={{ left: `${sIdx * columnWidth}%`, width: `${columnWidth}%` }}>
-            {session.tvah !== null && (
-              <div className="absolute left-0 border-t border-dashed border-ink-faint/50" style={{ top: toY(session.tvah), width: "90%" }}>
-                <span className="absolute -top-3 left-0 text-[7px] text-ink-faint">VAH</span>
-              </div>
-            )}
-            {session.tval !== null && (
-              <div className="absolute left-0 border-t border-dashed border-ink-faint/50" style={{ top: toY(session.tval), width: "90%" }}>
-                <span className="absolute top-0.5 left-0 text-[7px] text-ink-faint">VAL</span>
-              </div>
-            )}
+          {sessionLayout.map(({ session, xStart, width }) => {
+            const pocRow = session.rows.find((r) => r.isPoc);
+            return (
+              <div key={session.sessionStart} className="absolute top-0" style={{ left: xStart, width }}>
+                {/* POC / VAH / VAL — horizontal levels spanning this session's profile width, labeled at the left edge. */}
+                {pocRow && (
+                  <div className="absolute -left-7 flex items-center gap-0.5 text-[7px] font-semibold text-[#22D3EE]" style={{ top: toY((pocRow.priceHigh + pocRow.priceLow) / 2) - 4 }}>
+                    POC
+                  </div>
+                )}
+                {session.tvah !== null && (
+                  <div className="absolute left-0 border-t border-dashed border-ink-faint/60" style={{ top: toY(session.tvah), width }}>
+                    <span className="absolute -left-7 -top-2 text-[7px] text-ink-faint">VAH</span>
+                  </div>
+                )}
+                {session.tval !== null && (
+                  <div className="absolute left-0 border-t border-dashed border-ink-faint/60" style={{ top: toY(session.tval), width }}>
+                    <span className="absolute -left-6 top-0.5 text-[7px] text-ink-faint">VAL</span>
+                  </div>
+                )}
 
-            {/* Initial Balance Range — vertical line just left of the profile, per rule 12. */}
-            {showIbr && session.ibrHigh !== null && session.ibrLow !== null && (
-              <div
-                className="absolute -left-1 border-l border-dashed border-[#A78BFA]/60"
-                style={{ top: toY(session.ibrHigh), height: Math.max(2, toY(session.ibrLow) - toY(session.ibrHigh)) }}
-                title="Initial Balance Range"
-              />
-            )}
+                {/* Initial Balance Range — vertical marker just left of the profile, per rule 12. */}
+                {showIbr && session.ibrHigh !== null && session.ibrLow !== null && (
+                  <div
+                    className="absolute -left-1.5 border-l border-dashed border-[#A78BFA]/60"
+                    style={{ top: toY(session.ibrHigh), height: Math.max(2, toY(session.ibrLow) - toY(session.ibrHigh)) }}
+                    title="Initial Balance Range"
+                  />
+                )}
 
-            {session.rows.map((row, rIdx) => {
-              const y = toY(row.priceHigh);
-              const h = Math.max(3, toY(row.priceLow) - y);
-              const w = Math.min(letterCell * row.letters.length, 90);
-              return (
-                <div
-                  key={rIdx}
-                  className="absolute left-0 overflow-hidden whitespace-nowrap font-mono leading-none tracking-tighter"
-                  style={{
-                    top: y,
-                    height: h,
-                    width: w,
-                    fontSize: Math.min(h, 8),
-                    color: row.isPoc ? "#0a0a0f" : row.inValueArea ? "#0f2e2a" : "#c7cad1",
-                    backgroundColor: row.isPoc ? "#22D3EE" : row.inValueArea ? "#2DD4BF99" : "transparent",
-                    backgroundImage: !row.inValueArea && !row.isPoc
-                      ? "repeating-linear-gradient(45deg, rgba(255,255,255,0.06) 0, rgba(255,255,255,0.06) 1px, transparent 1px, transparent 4px)"
-                      : undefined,
-                    border: row.isSinglePrint && showSinglePrint
-                      ? "1px solid rgba(250,204,21,0.75)" // single print: subtle yellow outline, purely structural per rule 13
-                      : !row.inValueArea && !row.isPoc
-                        ? "1px solid rgba(255,255,255,0.08)"
-                        : undefined,
-                  }}
-                  title={row.isSinglePrint ? "Single Print" : undefined}
-                >
-                  {showLetters ? row.letters : ""}
+                {/* Each row renders as individual fixed-size cells — one per TPO
+                    letter, left-aligned — instead of one long text string. This
+                    is what makes the profile actually widen/narrow by price
+                    level and read as a real horizontal Market Profile shape. */}
+                {session.rows.map((row, rIdx) => {
+                  const y = toY(row.priceHigh);
+                  const h = Math.max(4, toY(row.priceLow) - y);
+                  const fontSize = Math.min(h - 1, compact ? 7 : 9);
+                  return (
+                    <div key={rIdx} className="absolute left-0 flex" style={{ top: y, height: h, width }}>
+                      {[...row.letters].map((letter, cIdx) => (
+                        <div
+                          key={cIdx}
+                          className="flex items-center justify-center overflow-hidden font-mono font-semibold leading-none text-white"
+                          style={{
+                            width: cellWidth,
+                            height: h,
+                            fontSize: fontSize > 3 ? fontSize : 0,
+                            backgroundColor: colorForLetter(letter),
+                            opacity: row.inValueArea ? 1 : 0.4, // TradingView's documented "opacity outside VA"
+                            outline: row.isPoc ? "1px solid #fff" : row.isSinglePrint && showSinglePrint ? "1px solid rgba(250,204,21,0.85)" : "1px solid rgba(0,0,0,0.35)",
+                            outlineOffset: -1,
+                          }}
+                          title={row.isSinglePrint ? "Single Print" : row.isPoc ? "POC" : undefined}
+                        >
+                          {showLetters ? letter : ""}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+
+                {/* Poor High / Poor Low — labeled, not signaled, per rule 14. */}
+                {showPoorHL && session.poorHigh && (
+                  <div className="absolute left-0 -translate-y-full text-[7px] font-semibold text-[#F59E0B]" style={{ top: toY(session.high) }}>
+                    Poor High
+                  </div>
+                )}
+                {showPoorHL && session.poorLow && (
+                  <div className="absolute left-0 text-[7px] font-semibold text-[#F59E0B]" style={{ top: toY(session.low) + 1 }}>
+                    Poor Low
+                  </div>
+                )}
+
+                <div className="absolute left-0 truncate text-[9px] text-ink-faint" style={{ width, top: canvasHeight + 4 }}>
+                  {new Date(session.sessionStart).toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "2-digit" })}
                 </div>
-              );
-            })}
-
-            {/* Poor High / Poor Low — labeled, not signaled, per rule 14. */}
-            {showPoorHL && session.poorHigh && (
-              <div className="absolute left-0 -translate-y-full text-[7px] font-semibold text-[#F59E0B]" style={{ top: toY(session.high) }}>
-                Poor High
               </div>
-            )}
-            {showPoorHL && session.poorLow && (
-              <div className="absolute left-0 text-[7px] font-semibold text-[#F59E0B]" style={{ top: toY(session.low) + 1 }}>
-                Poor Low
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-1 flex text-[9px] text-ink-faint" style={{ minWidth: sessions.length * 170 }}>
-        {sessions.map((s) => (
-          <div key={s.sessionStart} style={{ width: `${columnWidth}%` }} className="truncate">
-            {new Date(s.sessionStart).toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "2-digit" })}
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
