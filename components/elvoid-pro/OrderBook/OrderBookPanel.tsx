@@ -1,57 +1,32 @@
 "use client";
-import { useEffect, useState } from "react";
 import { formatUsd } from "@/lib/format";
+import { useDepthStream } from "@/lib/elvoid/useDepthStream";
+import { useLiveLiquiditySnapshots } from "@/lib/elvoid/useLiveLiquiditySnapshots";
 
-interface Level {
-  price: number;
-  qty: number;
-}
-
+// Now backed by the SHARED depth WebSocket (lib/elvoid/depthStream.ts) —
+// this is the same live connection the Liquidity Heatmap's Live mode reads
+// from, so Order Book and Heatmap always represent the same market state
+// (spec section 1). Also drives useLiveLiquiditySnapshots so historical
+// collection keeps running whenever this panel is mounted, not only when
+// the heatmap's own Live tab happens to be open.
 export function OrderBookPanel({ symbol }: { symbol: string }) {
-  const [bids, setBids] = useState<Level[]>([]);
-  const [asks, setAsks] = useState<Level[]>([]);
-  const [source, setSource] = useState<"futures" | "spot" | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const { state, status } = useDepthStream(symbol);
+  useLiveLiquiditySnapshots(symbol, true);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function poll() {
-      try {
-        const res = await fetch(`/api/orderbook-depth?symbol=${symbol}&limit=12`);
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.error) {
-          setStatus("error");
-          return;
-        }
-        setBids(data.bids ?? []);
-        setAsks(data.asks ?? []);
-        setSource(data.source ?? null);
-        setStatus("ready");
-      } catch {
-        if (!cancelled) setStatus("error");
-      }
-    }
-    poll();
-    const id = setInterval(poll, 4000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [symbol]);
-
+  const bids = state?.bids ?? [];
+  const asks = state?.asks ?? [];
   const maxQty = Math.max(1, ...bids.map((b) => b.qty), ...asks.map((a) => a.qty));
 
   return (
     <div className="rounded-lg border border-line bg-bg-surface/60">
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
         <p className="text-xs font-semibold text-ink">Order Book</p>
-        <span className="text-[9px] uppercase tracking-wide text-ink-faint">{source ?? "—"}</span>
+        <span className="text-[9px] uppercase tracking-wide text-ink-faint">futures · live</span>
       </div>
 
       {status === "error" ? (
         <p className="px-3 py-6 text-center text-[11px] text-ink-faint">Order book tidak tersedia saat ini.</p>
-      ) : status === "loading" && asks.length === 0 ? (
+      ) : status !== "live" && asks.length === 0 ? (
         <p className="animate-pulse px-3 py-6 text-center text-[11px] text-ink-faint">Memuat order book…</p>
       ) : (
         <div className="mono-num px-2 py-1.5 text-[11px]">
