@@ -85,8 +85,17 @@ export interface CandleFootprint {
  * (the "giant solid block" glitch). Only candles whose time window is
  * covered by the trade sample get a footprint; older candles are simply
  * left blank rather than showing fabricated numbers.
+ *
+ * Row count is ADAPTIVE per candle rather than one fixed number for every
+ * candle: a quiet candle with a handful of trades doesn't need (and can't
+ * honestly fill) 10+ empty rows, while a big/volatile candle with a wide
+ * high-low range and many trades genuinely has room for more distinct
+ * price levels — this is what spec section C means by "large candles MUST
+ * also receive complete footprint levels... do not skip because trade
+ * count is high or candle range is large". Bin count scales with real
+ * trade count (sqrt, so it grows sub-linearly) between minBins and maxBins.
  */
-export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[], intervalMs: number, binsPerCandle = 4): Map<number, CandleFootprint> {
+export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[], intervalMs: number, minBins = 5, maxBins = 12): Map<number, CandleFootprint> {
   const byCandle = new Map<number, RecentTrade[]>();
   for (const t of trades) {
     const bucket = candles.find((c) => t.time >= c.time && t.time < c.time + intervalMs);
@@ -100,6 +109,10 @@ export function buildFootprintByCandle(candles: Candle[], trades: RecentTrade[],
   for (const candle of candles) {
     const candleTrades = byCandle.get(candle.time);
     if (!candleTrades || candleTrades.length === 0) continue;
+
+    // Adaptive resolution: sqrt(tradeCount) grows the ladder for genuinely
+    // busy candles without ballooning a quiet one into mostly-empty rows.
+    const binsPerCandle = Math.max(minBins, Math.min(maxBins, Math.round(Math.sqrt(candleTrades.length) * 1.6)));
 
     const high = candle.high;
     const low = candle.low;

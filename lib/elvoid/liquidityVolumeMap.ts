@@ -46,8 +46,18 @@ export interface LiquidityVolumeMap {
 export function buildLiquidityVolumeMap(candles: Candle[], binCount = 28, rollingWindow = 15): LiquidityVolumeMap {
   if (candles.length === 0) return { bins: [], columns: [], maxValue: 0 };
 
-  const rangeHigh = Math.max(...candles.map((c) => c.high));
-  const rangeLow = Math.min(...candles.map((c) => c.low));
+  const rawHigh = Math.max(...candles.map((c) => c.high));
+  const rawLow = Math.min(...candles.map((c) => c.low));
+  // Small padding above/below the real high/low range so the field reads
+  // as a continuous sheet spanning the visible chart area (matching the
+  // reference), rather than clipping exactly at the highest wick — the
+  // padding only widens which bins exist, it never invents volume: the
+  // extra top/bottom bins simply stay at 0 unless a candle's real range
+  // actually reaches them.
+  const rawSpan = rawHigh - rawLow || rawHigh * 0.001 || 1;
+  const pad = rawSpan * 0.08;
+  const rangeHigh = rawHigh + pad;
+  const rangeLow = rawLow - pad;
   const span = rangeHigh - rangeLow || 1;
   const binSize = span / binCount;
 
@@ -62,12 +72,13 @@ export function buildLiquidityVolumeMap(candles: Candle[], binCount = 28, rollin
     const windowLen = window.length;
     for (let j = 0; j < windowLen; j++) {
       const c = window[j];
-      // Linear decay: the oldest candle in the window contributes at ~15%
-      // weight, the newest at 100%. Real volume either way — this only
-      // changes how much a given real number *counts*, so a price level
-      // that stops trading tapers out over several columns instead of
-      // disappearing the instant it exits the trailing window.
-      const weight = windowLen === 1 ? 1 : 0.15 + 0.85 * ((j + 1) / windowLen);
+      // Linear decay: the oldest candle in the window contributes at ~40%
+      // weight, the newest at 100% (raised from 15% — a lower floor was
+      // fading zones out too fast, producing the sparse/gappy look; a
+      // level that keeps getting revisited should read as a continuous
+      // band, not a rectangle that visibly resets every ROLLING_WINDOW
+      // columns). Real volume either way — only the weighting changes.
+      const weight = windowLen === 1 ? 1 : 0.4 + 0.6 * ((j + 1) / windowLen);
       const cSpan = c.high - c.low || binSize;
       const startBin = Math.max(0, Math.floor((c.low - rangeLow) / binSize));
       const endBin = Math.min(binCount - 1, Math.floor((c.high - rangeLow) / binSize));

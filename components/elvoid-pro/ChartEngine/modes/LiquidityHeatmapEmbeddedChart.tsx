@@ -37,9 +37,9 @@ interface BubbleLayout {
 }
 
 const PRICE_ROWS = 28; // live order-book bucket count — unchanged, live mode wasn't asked to change
-const HIST_PRICE_ROWS = 36; // finer row count for historical mode only, for a smoother vertical gradient
+const HIST_PRICE_ROWS = 48; // finer row count for historical mode only, for a smoother vertical gradient (bumped from 36 for a denser field closer to the reference)
 const REFRESH_MS = 5000; // live-book poll interval, matches the depth endpoint's own 10s server-side cache
-const ROLLING_WINDOW = 15; // candles of lookback per historical column — smooths the flow without blending unrelated eras together
+const ROLLING_WINDOW = 20; // candles of lookback per historical column — widened from 15 for a smoother, more continuous field (paired with the flatter decay curve in liquidityVolumeMap.ts)
 const MIN_HISTORY_CANDLES = 10; // floor so a very sparse time-window still renders *something* real, never fabricated
 // How many real, persisted order-book snapshots must fall inside the
 // window before the chart trusts them enough to replace the candle-derived

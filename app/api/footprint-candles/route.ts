@@ -35,7 +35,7 @@ export async function GET(req: Request) {
 
   try {
     const [candles, trades] = await Promise.all([getKlines(symbol, interval, limit), getRecentTrades(symbol, 1000)]);
-    const liveFootprint = buildFootprintByCandle(candles, trades, intervalMs, 5);
+    const liveFootprint = buildFootprintByCandle(candles, trades, intervalMs);
 
     // Step 1: extend past Binance's live 1000-trade window using real,
     // previously-collected+persisted data (no network call, cheap).
@@ -57,7 +57,7 @@ export async function GET(req: Request) {
       // fabricated, not extrapolated from the live window.
       const historicalTrades = await getAggTradesRangeChunked(symbol, rangeStart, rangeEnd);
       const backfillCandles = candles.filter((c) => toBackfill.includes(c.time));
-      const backfilledFootprint = buildFootprintByCandle(backfillCandles, historicalTrades, intervalMs, 5);
+      const backfilledFootprint = buildFootprintByCandle(backfillCandles, historicalTrades, intervalMs);
       backfilledCount = backfilledFootprint.size;
       // Persist immediately so the next request/user doesn't have to redo
       // this same historical fetch — this is what makes history durable
