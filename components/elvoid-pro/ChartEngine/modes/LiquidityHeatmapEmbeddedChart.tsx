@@ -458,6 +458,14 @@ export function LiquidityHeatmapEmbeddedChart({
         if (x === null) continue;
 
         let colWidth: number;
+        // Real gap size to the next observed snapshot, in px — used below
+        // to fade fill alpha once a gap grows far beyond the chart's
+        // typical column spacing, instead of ever widening the solid
+        // fill rectangle without bound. Fixes the "giant rectangular
+        // block" artifact: when real snapshots are sparse (early
+        // collection, network hiccup), the old code stretched a single
+        // column's fill up to 25% of the chart width as one flat block.
+        let gapFade = 1;
         if (isSnapshotDriven) {
           // Extend to the midpoint with the next real column (or to the
           // right edge for the newest column, so "now" reaches the live
@@ -470,7 +478,19 @@ export function LiquidityHeatmapEmbeddedChart({
             }
           }
           const forwardSpan = nextX !== null ? nextX - x : Math.max(barSpacing * 1.4, containerWidth - x);
-          colWidth = Math.max(6, Math.min(forwardSpan, containerWidth * 0.25));
+          // Cap width to a small multiple of typical bar spacing (a real
+          // "wall" strip), not a fraction of the whole panel — a sparse
+          // gap should read as a fading trail, never one solid block.
+          const normalCap = Math.max(barSpacing * 3, 18);
+          colWidth = Math.max(6, Math.min(forwardSpan, normalCap));
+          // If the true gap to the next real snapshot is bigger than what
+          // we're actually painting, fade alpha proportionally so the
+          // unfilled remainder of that gap stays visibly darker/emptier —
+          // honest about the fact that there's no real observation there,
+          // rather than implying continuous coverage.
+          if (forwardSpan > colWidth) {
+            gapFade = Math.max(0.25, Math.min(1, colWidth / forwardSpan));
+          }
         } else {
           colWidth = Math.max(2, barSpacing * groupSize);
         }
@@ -485,12 +505,15 @@ export function LiquidityHeatmapEmbeddedChart({
           const yInfo = binYs[i];
           if (!yInfo) continue;
           const ratio = normalizedRatio(v / group.length, p95Reference);
-          offCtx.fillStyle = intensityColor(ratio).fill;
+          const { fill } = intensityColor(ratio);
+          offCtx.fillStyle = fill;
+          offCtx.globalAlpha = gapFade;
           // Snapshot-driven columns paint forward from x (continuous wall
           // fill toward the next real observation); the candle-proxy
           // fallback keeps its original centered strip.
           const drawX = isSnapshotDriven ? x : x - colWidth / 2;
           offCtx.fillRect(drawX, yInfo.top, colWidth + 0.5, yInfo.h);
+          offCtx.globalAlpha = 1;
           if (ratio > peakRatio) {
             peakRatio = ratio;
             peakBin = i;
