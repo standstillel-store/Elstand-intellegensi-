@@ -12,18 +12,23 @@ const INTERVAL_MS: Record<string, number> = {
   "1d": 86_400_000,
 };
 
-// Hard cap on how many missing candles get backfilled from real Binance
-// historical aggTrades in a single request. This is NOT an arbitrary
-// shortcut — it exists because Vercel's serverless function has a wall-clock
-// timeout, and a wide gap (e.g. a fresh 1h chart with 150 days of missing
-// history) would need thousands of sequential Binance calls if done in one
-// shot, which cannot finish before the platform kills the request. Instead,
-// each poll backfills a bounded batch of the OLDEST missing candles and
-// persists them to Supabase — so history genuinely fills in over a handful
-// of polls/page-visits rather than pretending to be instant. The response
-// tells the caller exactly how much is still missing so the UI can be
-// honest about "history still loading" instead of implying completeness.
-const MAX_BACKFILL_CANDLES_PER_REQUEST = 8;
+// Candles per historical Binance aggTrades batch. Kept small per-batch (not
+// an arbitrary total cap anymore — see BACKFILL_TIME_BUDGET_MS below) so a
+// single getAggTradesRangeChunked call stays a handful of hourly windows,
+// not thousands of sequential requests in one round trip.
+const BACKFILL_BATCH_SIZE = 8;
+
+// Wall-clock budget for how long this request is allowed to keep pulling
+// backfill batches before it MUST return. Vercel Hobby serverless functions
+// get ~10s by default; this leaves real margin for the klines/live-trades
+// fetch that already happened plus response serialization. Previously the
+// route did exactly ONE batch of 8 per request, meaning a fresh chart with
+// 150 missing candles took ~19 separate 8s-apart polls (~2.5 minutes) to
+// fill in. Looping batches until this budget is hit lets one request do the
+// work of many polls — history fills in seconds instead of minutes — while
+// still never risking a serverless timeout kill, since the loop always
+// checks elapsed time BEFORE starting another batch, not after.
+const BACKFILL_TIME_BUDGET_MS = 7_000;
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -43,14 +48,19 @@ export async function GET(req: Request) {
     const storedFootprint = await loadStoredFootprintCandles(symbol, interval, uncoveredAfterLive);
 
     // Step 2: whatever is STILL missing after live + stored is genuinely
-    // never-seen history. Backfill a bounded batch of it from Binance's real
-    // historical aggTrades endpoint (oldest-first, so coverage grows
-    // outward from the edge of what's already known rather than randomly).
+    // never-seen history. Backfill it from Binance's real historical
+    // aggTrades endpoint in oldest-first batches (coverage grows outward
+    // from the edge of what's already known rather than randomly), looping
+    // batches until either everything is filled or the time budget runs
+    // out — see BACKFILL_TIME_BUDGET_MS above for why this is a loop now
+    // instead of a single fixed-size batch per request.
     const stillMissingTimes = uncoveredAfterLive.filter((t) => !storedFootprint.has(t)).sort((a, b) => a - b);
-    const toBackfill = stillMissingTimes.slice(0, MAX_BACKFILL_CANDLES_PER_REQUEST);
-
+    const startedAt = Date.now();
     let backfilledCount = 0;
-    if (toBackfill.length > 0) {
+    let cursor = 0;
+    while (cursor < stillMissingTimes.length && Date.now() - startedAt < BACKFILL_TIME_BUDGET_MS) {
+      const toBackfill = stillMissingTimes.slice(cursor, cursor + BACKFILL_BATCH_SIZE);
+      cursor += BACKFILL_BATCH_SIZE;
       const rangeStart = toBackfill[0];
       const rangeEnd = toBackfill[toBackfill.length - 1] + intervalMs;
       // Real historical trades for exactly this candle-time range — not
@@ -58,10 +68,10 @@ export async function GET(req: Request) {
       const historicalTrades = await getAggTradesRangeChunked(symbol, rangeStart, rangeEnd);
       const backfillCandles = candles.filter((c) => toBackfill.includes(c.time));
       const backfilledFootprint = buildFootprintByCandle(backfillCandles, historicalTrades, intervalMs);
-      backfilledCount = backfilledFootprint.size;
-      // Persist immediately so the next request/user doesn't have to redo
-      // this same historical fetch — this is what makes history durable
-      // across reloads instead of resetting every time the chart reopens.
+      backfilledCount += backfilledFootprint.size;
+      // Persist immediately (per batch, not just at the end) so partial
+      // progress survives even if a later batch pushes past the time
+      // budget or the request errors out mid-loop.
       await persistFootprintCandles(symbol, interval, backfilledFootprint);
       backfilledFootprint.forEach((v, k) => storedFootprint.set(k, v));
     }

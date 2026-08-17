@@ -49,6 +49,17 @@ export function FootprintEmbeddedChart({
   interval: string;
   height: number;
 }) {
+  // "side": classic mode — ladder drawn in the gap beside each candle,
+  // candle body stays fully opaque (spec's NORMAL mode).
+  // "replace": spec section C's FOOTPRINT MODE — the real candle body/wick
+  // is made transparent (still the same lightweight-charts series, still
+  // the same real OHLC geometry as the X/Y anchor, just invisible) and the
+  // ladder is drawn full-width centered on the candle's own x position, so
+  // the footprint visually becomes the candle instead of sitting next to
+  // it. Kept as in-component state (not a prop) so this mode is a
+  // self-contained toggle the user controls directly on the chart, no
+  // wiring needed from AdvancedChart's mode router.
+  const [displayMode, setDisplayMode] = useState<"side" | "replace">("side");
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -145,6 +156,21 @@ export function FootprintEmbeddedChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height]);
 
+  // Spec section C, FOOTPRINT MODE: candle body/wick becomes transparent so
+  // the ladder reads as the candle itself instead of a decoration on top of
+  // it. This only touches color — the series keeps computing real geometry
+  // (open/high/low/close still drive the price scale and crosshair), it's
+  // just not painted, which is why candleHalfWidth/priceToCoordinate below
+  // stay correct anchors in both modes.
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    seriesRef.current.applyOptions(
+      displayMode === "replace"
+        ? { upColor: "transparent", downColor: "transparent", wickUpColor: "transparent", wickDownColor: "transparent", borderVisible: false }
+        : { upColor: "#22C55E", downColor: "#EF4444", wickUpColor: "#22C55E", wickDownColor: "#EF4444", borderVisible: false }
+    );
+  }, [displayMode]);
+
   // Push real candle data into the chart. Default candle count is derived
   // from the container's actual pixel width (not a hardcoded 14) so a wide
   // desktop panel gets close to MAX_VISIBLE_CANDLES and a narrow phone
@@ -215,14 +241,43 @@ export function FootprintEmbeddedChart({
   }, [candles, footprintByTime]);
 
   const tier = barSpacing >= LOD_FULL ? "full" : barSpacing >= LOD_MEDIUM ? "medium" : "compact";
-  // Ladder sits beside the candle (in the gap before the next one), never
-  // centered on top of it — this is what stops adjacent footprints from
-  // overlapping into a single blob when several candles have real data.
-  const ladderWidth = tier === "full" ? Math.min(74, barSpacing - 6) : Math.max(4, barSpacing - 6);
+  // "side" mode: ladder sits beside the candle (in the gap before the next
+  // one), never centered on top of it — this is what stops adjacent
+  // footprints from overlapping into a single blob when several candles
+  // have real data.
+  // "replace" mode: candle body is transparent (see the displayMode effect
+  // above), so the ladder is meant to occupy the candle's own footprint —
+  // full bar width, centered on the candle's x, no side offset.
+  const ladderWidth =
+    displayMode === "replace"
+      ? Math.max(6, barSpacing - 2)
+      : tier === "full"
+        ? Math.min(74, barSpacing - 6)
+        : Math.max(4, barSpacing - 6);
+  const ladderLeftOffset = displayMode === "replace" ? -ladderWidth / 2 : 1;
 
   return (
     <div style={{ height }} className="relative overflow-hidden rounded-md border border-line bg-bg-surface/40">
       <div ref={containerRef} className="h-full w-full" />
+
+      {/* Spec section C toggle — NORMAL (candle + ladder beside it) vs
+          FOOTPRINT MODE (candle transparent, ladder becomes the candle). */}
+      <div className="pointer-events-auto absolute right-2 top-2 z-10 flex overflow-hidden rounded-md border border-line bg-bg-raised/90 text-[9px] font-medium">
+        <button
+          type="button"
+          onClick={() => setDisplayMode("side")}
+          className={clsx("px-2 py-1 transition-colors", displayMode === "side" ? "bg-signal/20 text-ink" : "text-ink-faint hover:text-ink-muted")}
+        >
+          Normal
+        </button>
+        <button
+          type="button"
+          onClick={() => setDisplayMode("replace")}
+          className={clsx("px-2 py-1 transition-colors", displayMode === "replace" ? "bg-signal/20 text-ink" : "text-ink-faint hover:text-ink-muted")}
+        >
+          Footprint Mode
+        </button>
+      </div>
 
       {status === "loading" && candles.length === 0 && (
         <div className="absolute inset-0 flex animate-pulse items-center justify-center bg-bg-surface/60 text-xs text-ink-faint">
@@ -238,7 +293,11 @@ export function FootprintEmbeddedChart({
       {/* Overlay layer — pure positioning, no chart logic; real coordinates come from lightweight-charts itself. */}
       <div className="pointer-events-none absolute inset-0">
         {layout.map((col) => (
-          <div key={col.candleTime} className="absolute top-0" style={{ left: col.x + col.candleHalfWidth + 1, width: ladderWidth }}>
+          <div
+            key={col.candleTime}
+            className="absolute top-0"
+            style={{ left: displayMode === "replace" ? col.x + ladderLeftOffset : col.x + col.candleHalfWidth + ladderLeftOffset, width: ladderWidth }}
+          >
             {col.cells.map((c, i) => {
               const total = c.cell.buyVolume + c.cell.sellVolume;
               const sellShare = total > 0 ? c.cell.sellVolume / total : 0;
