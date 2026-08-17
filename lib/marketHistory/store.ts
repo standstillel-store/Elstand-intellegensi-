@@ -1,5 +1,6 @@
 import { getSupabase } from "@/lib/supabase";
 import { currentWeekStartUtc } from "./weekCycle";
+import { ensureStorageBudget } from "./storageGuard";
 import type { CandleFootprint, FootprintCell } from "@/lib/elvoid/footprint";
 import type { TpoSession } from "@/lib/elvoid/tpo";
 
@@ -22,6 +23,11 @@ interface MarketHistoryRow {
 export async function persistFootprintCandles(symbol: string, interval: string, footprintMap: Map<number, CandleFootprint>): Promise<void> {
   const supabase = getSupabase();
   if (!supabase || footprintMap.size === 0) return;
+  // Storage-guard check (cached in the common case, see storageGuard.ts) —
+  // never blocks this write; only opportunistically nudges a cleanup batch
+  // when usage is CRITICAL. Runs before the write so a pressure-triggered
+  // cleanup and this insert can't race into the same statement.
+  await ensureStorageBudget();
   const weekStart = currentWeekStartUtc().toISOString();
   const rows = Array.from(footprintMap.values()).map((fp) => ({
     symbol,
@@ -104,6 +110,7 @@ export async function loadStoredFootprintCandles(symbol: string, interval: strin
 export async function persistTpoSessions(symbol: string, chartInterval: string, sessions: TpoSession[]): Promise<void> {
   const supabase = getSupabase();
   if (!supabase || sessions.length === 0) return;
+  await ensureStorageBudget();
   const weekStart = currentWeekStartUtc().toISOString();
   const rows = sessions.map((s) => ({
     symbol,
@@ -186,6 +193,7 @@ const MIN_SNAPSHOT_SPACING_MS = 5 * 60 * 1000;
 export async function persistLiquiditySnapshotThrottled(symbol: string, timestampMs: number, levels: LiquiditySnapshotLevel[]): Promise<void> {
   const supabase = getSupabase();
   if (!supabase || levels.length === 0) return;
+  await ensureStorageBudget();
   try {
     const { data: last, error: lastErr } = await supabase
       .from(TABLE)

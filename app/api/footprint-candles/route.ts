@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getKlines, getRecentTrades, getAggTradesRangeChunked } from "@/lib/binance";
 import { buildFootprintByCandle } from "@/lib/elvoid/footprint";
 import { persistFootprintCandles, loadStoredFootprintCandles } from "@/lib/marketHistory/store";
+import { ensureStorageBudget } from "@/lib/marketHistory/storageGuard";
 
 const INTERVAL_MS: Record<string, number> = {
   "1m": 60_000,
@@ -58,7 +59,19 @@ export async function GET(req: Request) {
     const startedAt = Date.now();
     let backfilledCount = 0;
     let cursor = 0;
+    let stoppedForStoragePressure = false;
     while (cursor < stillMissingTimes.length && Date.now() - startedAt < BACKFILL_TIME_BUDGET_MS) {
+      // Storage guard: backfill is the one thing here that only ever grows
+      // older history. Under CRITICAL pressure the spec wants newest data
+      // prioritized, so this loop stops opening new historical batches
+      // (the live/current-candle footprint above and its persist call are
+      // untouched — those keep collecting normally, per "jangan
+      // menghentikan Footprint, TPO, atau Liquidity Heatmap").
+      const pressure = await ensureStorageBudget();
+      if (pressure === "CRITICAL") {
+        stoppedForStoragePressure = true;
+        break;
+      }
       const toBackfill = stillMissingTimes.slice(cursor, cursor + BACKFILL_BATCH_SIZE);
       cursor += BACKFILL_BATCH_SIZE;
       const rangeStart = toBackfill[0];
@@ -97,7 +110,7 @@ export async function GET(req: Request) {
       oldestTradeTime,
       // Honest progress signal — history is being reconstructed
       // incrementally from real data, not instantly complete on first load.
-      backfill: { backfilledThisRequest: backfilledCount, remainingMissing: Math.max(0, remainingMissing) },
+      backfill: { backfilledThisRequest: backfilledCount, remainingMissing: Math.max(0, remainingMissing), stoppedForStoragePressure },
     });
   } catch (err) {
     console.error("[ElVoid AI] footprint-candles error:", err);
