@@ -197,6 +197,33 @@ export async function getAggTradesRange(symbol: string, startTime: number, endTi
   return out;
 }
 
+/**
+ * Real trades starting from a specific Binance aggTrade ID (ascending,
+ * inclusive) — the cursor-based counterpart to getAggTradesRange's
+ * time-window pagination. Used for CONTINUOUS raw tick capture: caller
+ * remembers the highest agg_id it has already stored and asks for
+ * everything after it, so repeated calls (e.g. every ~30-60s from an
+ * external scheduler) never re-fetch or gap, regardless of how much real
+ * time actually elapsed between calls. Returns the raw aggId alongside
+ * each trade (unlike getRecentTrades/getAggTradesRange) since the caller
+ * needs it to both dedupe and advance its own cursor.
+ */
+export interface AggTradeWithId {
+  aggId: number;
+  price: number;
+  qty: number;
+  isSell: boolean;
+  time: number;
+}
+
+export async function getAggTradesFromId(symbol: string, fromId: number, limit = 1000): Promise<AggTradeWithId[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  const res = await fetch(`${BASE}/fapi/v1/aggTrades?symbol=${pair}&fromId=${fromId}&limit=${Math.min(1000, limit)}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Binance aggTrades (fromId) failed for ${pair}: ${res.status}`);
+  const raw = (await res.json()) as Array<{ a: number; p: string; q: string; m: boolean; T: number }>;
+  return raw.map((t) => ({ aggId: t.a, price: parseFloat(t.p), qty: parseFloat(t.q), isSell: t.m, time: t.T }));
+}
+
 /** Splits [startTime, endTime) into <1h sub-windows — Binance's aggTrades startTime/endTime constraint. */
 export function chunkIntoHourWindows(startTime: number, endTime: number): Array<[number, number]> {
   const HOUR = 59 * 60 * 1000; // stay a hair under 1h for safety margin

@@ -590,3 +590,41 @@ create index if not exists market_history_created_at_idx on market_history (crea
 alter table market_history enable row level security;
 -- Zero public policies (same posture as ai_signals/bn_* above): only the
 -- server-side service-role client (lib/supabase.ts) ever touches this table.
+
+-- ----------------------------------------------------------------------------
+-- bn_trade_ticks — raw per-trade tick data (Binance Futures aggTrades),
+-- rolling 7-day retention. This is intentionally a SEPARATE table from
+-- market_history: tick volume is orders of magnitude higher (hundreds of
+-- thousands to millions of rows/day for BTC alone) and needs a lean bigint
+-- PK + a narrow column set, not the shared jsonb-bucket shape the other
+-- indicators use. Populated by /api/tick-capture (see that route for the
+-- external-scheduler requirement — Vercel Hobby cron can't run this often
+-- enough on its own).
+--
+-- STORAGE WARNING (told to the user directly, repeating it here for whoever
+-- reads this file next): BTC futures tick volume can put this table at
+-- several hundred MB to 1-2GB+ over a full 7-day rolling window, which can
+-- exceed Supabase's Free-tier 500MB database cap. Monitor actual usage in
+-- the Supabase dashboard and be ready to either upgrade the plan or shorten
+-- TICK_RETENTION_DAYS in lib/marketHistory/tickStore.ts if it fills up.
+-- ----------------------------------------------------------------------------
+create table if not exists bn_trade_ticks (
+  id bigserial primary key,
+  symbol text not null,
+  agg_id bigint not null,        -- Binance aggTrade ID — real exchange-assigned sequence number, used both to dedupe and as the pagination cursor (fromId)
+  price numeric not null,
+  qty numeric not null,
+  is_sell boolean not null,      -- true = taker sold into the bid (aggressive sell), same convention as RecentTrade.isSell elsewhere in the codebase
+  trade_time timestamptz not null, -- real trade timestamp from Binance (not insertion time)
+  created_at timestamptz not null default now(),
+  unique (symbol, agg_id)
+);
+
+-- Supports both "what's the highest agg_id we have" (pagination cursor,
+-- order by agg_id desc limit 1) and "give me ticks in this time range".
+create index if not exists bn_trade_ticks_cursor_idx on bn_trade_ticks (symbol, agg_id desc);
+create index if not exists bn_trade_ticks_time_idx on bn_trade_ticks (symbol, trade_time);
+
+alter table bn_trade_ticks enable row level security;
+-- Zero public policies, same posture as every other table in this file:
+-- only the server-side service-role client ever touches this table.
