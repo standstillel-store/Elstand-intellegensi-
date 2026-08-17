@@ -35,9 +35,16 @@ const MIN_REAL_SNAPSHOTS = 5;
 // desktop panel, still readable on a short mobile card — computed from the
 // actual rendered height instead of one hardcoded row count regardless of
 // market/viewport.
-function adaptivePriceRows(panelHeight: number): number {
+function adaptivePriceRows(panelHeight: number, barSpacing = 6): number {
   const target = Math.round(panelHeight / 6.5); // ~6.5px per row is the densest that stays legible
-  return Math.max(36, Math.min(110, target));
+  const base = Math.max(36, Math.min(110, target));
+  // Spec section 11 (price-bucket LOD): when zoomed out (small barSpacing)
+  // there isn't enough horizontal room per column to resolve dense rows
+  // without turning into visual noise, so merge toward fewer, coarser
+  // bins; when zoomed in, allow the full row count for finer structure.
+  if (barSpacing < 3) return Math.max(24, Math.round(base * 0.55));
+  if (barSpacing < 6) return Math.max(30, Math.round(base * 0.78));
+  return base;
 }
 
 // Continuous colormap — near-black -> deep blue -> cyan -> green -> yellow
@@ -46,15 +53,16 @@ function adaptivePriceRows(panelHeight: number): number {
 // never random — color encodes liquidity intensity only, never a buy/sell
 // signal (bid/ask direction is never re-labeled as executed volume).
 const HEAT_STOPS: [number, number, number][] = [
-  [4, 7, 16], // 0.00 near-black background
-  [13, 30, 90], // 0.14 dark navy
-  [30, 80, 200], // 0.28 deep blue
-  [34, 170, 235], // 0.44 cyan-blue
-  [45, 220, 200], // 0.56 cyan-green
-  [80, 210, 90], // 0.68 green
-  [230, 220, 60], // 0.8 yellow
-  [250, 150, 30], // 0.9 orange
-  [235, 40, 40], // 1.00 hot red
+  [3, 6, 14], // 0.00 near-black background
+  [10, 24, 72], // 0.12 dark navy
+  [18, 55, 150], // 0.24 navy-blue
+  [24, 110, 210], // 0.36 blue
+  [30, 170, 230], // 0.48 cyan-blue
+  [50, 210, 185], // 0.58 cyan-green
+  [110, 220, 80], // 0.68 green
+  [210, 225, 55], // 0.80 yellow-green
+  [250, 175, 35], // 0.90 orange
+  [240, 60, 40], // 1.00 hot red
 ];
 
 function heatRgb(ratio: number): [number, number, number] {
@@ -71,7 +79,11 @@ function heatRgb(ratio: number): [number, number, number] {
 function intensityColor(ratio: number): { fill: string; dot: string } {
   const r = Math.max(0, Math.min(1, ratio));
   const [red, green, blue] = heatRgb(r);
-  const alpha = Math.min(0.97, 0.05 + r * 0.85);
+  // Slight power curve (spec section 8/9): keeps low-liquidity cells dim
+  // (most of the chart should stay dark/low-intensity) while letting real
+  // strong levels reach near-full opacity faster than a straight-line ramp
+  // would — a data-driven contrast boost, not a brightness floor increase.
+  const alpha = Math.min(0.98, 0.04 + Math.pow(r, 0.85) * 0.9);
   return { fill: `rgba(${red},${green},${blue},${alpha.toFixed(3)})`, dot: `rgb(${red},${green},${blue})` };
 }
 
@@ -156,7 +168,11 @@ export function LiquidityHeatmapEmbeddedChart({
   // and so Historical mode can merge in the freshest trail.
   const { buffer: liveBuffer, status: liveDepthStatus } = useLiveLiquiditySnapshots(symbol, true);
 
-  const priceRows = useMemo(() => adaptivePriceRows(height), [height]);
+  // Tracks the chart's own bar-spacing (px per candle) so price-row LOD can
+  // react to zoom level, not just panel height (spec section 11). Updated
+  // from the same visible-range subscription that already drives redraws.
+  const [barSpacing, setBarSpacing] = useState(6);
+  const priceRows = useMemo(() => adaptivePriceRows(height, barSpacing), [height, barSpacing]);
 
   // Real candles — same /api/klines source every other embedded mode uses.
   useEffect(() => {
@@ -294,6 +310,8 @@ export function LiquidityHeatmapEmbeddedChart({
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
+        const spacing = chart.timeScale().options().barSpacing;
+        if (typeof spacing === "number") setBarSpacing(spacing);
         recomputeRef.current?.();
       });
     };
@@ -475,7 +493,11 @@ export function LiquidityHeatmapEmbeddedChart({
       // lighter blur so real, distinct price levels stay legible.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.filter = `blur(${((isSnapshotDriven ? 1 : 2) * dpr).toFixed(1)}px)`;
+      // Lighter blur than before (spec section 7: "avoid excessive Gaussian
+      // blur... use blur primarily for atmospheric transition, not to hide
+      // poor resolution") — real snapshot data especially should read as
+      // sharp horizontal walls, not a soft haze.
+      ctx.filter = `blur(${((isSnapshotDriven ? 0.6 : 1.3) * dpr).toFixed(1)}px)`;
       ctx.drawImage(off, 0, 0);
       ctx.filter = "none";
 
