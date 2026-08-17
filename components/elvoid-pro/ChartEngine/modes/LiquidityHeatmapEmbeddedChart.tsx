@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { createChart, ColorType, CrosshairMode, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 import type { Candle } from "@/lib/elvoid/types";
-import { buildLiquidityVolumeMap, type LiquidityVolumeMap } from "@/lib/elvoid/liquidityVolumeMap";
+import { buildLiquidityVolumeMap, buildLiquidityMapFromSnapshots, type LiquidityVolumeMap } from "@/lib/elvoid/liquidityVolumeMap";
+import type { StoredLiquiditySnapshot } from "@/lib/marketHistory/store";
 import { getLiquidityHistoryMs } from "@/lib/market-data/liquidityHistory";
 import { formatUsd } from "@/lib/format";
 
@@ -40,6 +41,14 @@ const HIST_PRICE_ROWS = 36; // finer row count for historical mode only, for a s
 const REFRESH_MS = 5000; // live-book poll interval, matches the depth endpoint's own 10s server-side cache
 const ROLLING_WINDOW = 15; // candles of lookback per historical column — smooths the flow without blending unrelated eras together
 const MIN_HISTORY_CANDLES = 10; // floor so a very sparse time-window still renders *something* real, never fabricated
+// How many real, persisted order-book snapshots must fall inside the
+// window before the chart trusts them enough to replace the candle-derived
+// proxy. Snapshots are captured opportunistically (throttled, ~1 per 5min
+// per symbol whenever the live order-book endpoint is hit — see
+// persistLiquiditySnapshotThrottled), so freshly-added symbols/timeframes
+// will genuinely have zero coverage at first; this is expected, not a bug,
+// and the UI is honest about which source is actually showing.
+const MIN_REAL_SNAPSHOTS = 5;
 
 // Continuous 5-stop colormap — blue -> cyan -> green -> purple -> red,
 // interpolated (not stepped), so intensity reads as a smooth density field
@@ -113,6 +122,8 @@ export function LiquidityHeatmapEmbeddedChart({
   const [depthStatus, setDepthStatus] = useState<"loading" | "ready" | "error">("loading");
   const [bands, setBands] = useState<BandLayout[]>([]);
   const [bubbles, setBubbles] = useState<BubbleLayout[]>([]);
+  const [snapshots, setSnapshots] = useState<StoredLiquiditySnapshot[]>([]);
+  const [snapshotStatus, setSnapshotStatus] = useState<"loading" | "ready" | "error">("loading");
 
   // Real candles — same /api/klines source every other embedded mode uses.
   useEffect(() => {
@@ -166,14 +177,46 @@ export function LiquidityHeatmapEmbeddedChart({
     };
   }, [symbol, source]);
 
+  // Real, previously-persisted order-book snapshots for this symbol's
+  // window — only fetched in historical mode. Separate network source from
+  // candles/depth on purpose (see loadStoredLiquiditySnapshots), never
+  // blended with the candle-derived proxy.
+  useEffect(() => {
+    if (source !== "historical") return;
+    let cancelled = false;
+    setSnapshotStatus("loading");
+    fetch(`/api/liquidity-history?symbol=${symbol}&interval=${interval}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error || !Array.isArray(data.snapshots)) {
+          setSnapshotStatus("error");
+          return;
+        }
+        setSnapshots(data.snapshots);
+        setSnapshotStatus("ready");
+      })
+      .catch(() => !cancelled && setSnapshotStatus("error"));
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, interval, source]);
+
   // Real historical volume-at-price, windowed per the spec's timeframe
   // table. Pure client-side computation over candles already fetched above
   // — no extra network request.
   const windowedCandles = useMemo(() => sliceToHistoryWindow(candles, interval), [candles, interval]);
+  // Prefer REAL order-book history once enough real snapshots exist for
+  // this window (spec section G: never falsely label the proxy as real
+  // order-book liquidity — so this only switches when there's genuinely
+  // enough real coverage, not as soon as a single snapshot exists).
+  const usingRealSnapshots = source === "historical" && snapshots.length >= MIN_REAL_SNAPSHOTS;
   const liquidityMap: LiquidityVolumeMap | null = useMemo(() => {
-    if (source !== "historical" || windowedCandles.length === 0) return null;
+    if (source !== "historical") return null;
+    if (usingRealSnapshots) return buildLiquidityMapFromSnapshots(snapshots, HIST_PRICE_ROWS);
+    if (windowedCandles.length === 0) return null;
     return buildLiquidityVolumeMap(windowedCandles, HIST_PRICE_ROWS, ROLLING_WINDOW);
-  }, [source, windowedCandles]);
+  }, [source, usingRealSnapshots, snapshots, windowedCandles]);
 
   // Mount the real candlestick chart once — identical setup to
   // ProfileEmbeddedChart/FootprintEmbeddedChart so it behaves consistently.
@@ -444,7 +487,11 @@ export function LiquidityHeatmapEmbeddedChart({
   const historyLabel = formatHistoryLabel(getLiquidityHistoryMs(interval));
   const modeLabel =
     source === "historical"
-      ? `volume historis (real) · window ${historyLabel}`
+      ? usingRealSnapshots
+        ? `order book historis (real snapshot, ${snapshots.length}x) · window ${historyLabel}`
+        : snapshotStatus === "loading"
+          ? `proxy volume-at-price (dari candle) · mengecek snapshot real…`
+          : `proxy volume-at-price (dari candle, bukan order-book asli) · window ${historyLabel}`
       : depthStatus === "error"
         ? "order book tidak tersedia"
         : depthStatus === "loading" && bids.length === 0

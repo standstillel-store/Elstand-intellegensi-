@@ -152,6 +152,118 @@ export async function loadStoredTpoSessions(symbol: string, chartInterval: strin
   }
 }
 
+export interface LiquiditySnapshotLevel {
+  price: number;
+  bidLiquidity: number;
+  askLiquidity: number;
+  totalLiquidity: number;
+}
+
+const LIQUIDITY_KIND = "liquidity" as const;
+// Liquidity snapshots aren't tied to a chart interval — they're a raw
+// point-in-time order-book capture — but market_history's unique key is
+// (symbol, interval, kind, candle_time), so a fixed literal interval value
+// is used to slot them into the same shared table without touching schema.
+const LIQUIDITY_INTERVAL = "snapshot";
+// Minimum spacing between persisted snapshots per symbol. Real order-book
+// depth doesn't need per-second resolution to show a meaningful time×price
+// picture, and Supabase Free's row budget is finite — this keeps storage
+// compact (see spec section J, "aggregate, don't blindly store everything").
+const MIN_SNAPSHOT_SPACING_MS = 5 * 60 * 1000;
+
+/**
+ * Best-effort, THROTTLED persistence of a real order-book depth snapshot.
+ * Checked at the database level (not in-memory) so the throttle survives
+ * serverless cold starts — a single cheap indexed lookup for this symbol's
+ * most recent liquidity row, skipped entirely if one already exists inside
+ * MIN_SNAPSHOT_SPACING_MS. This is what section G's "capture order-book
+ * depth snapshots periodically and persist them" turns into on a platform
+ * without reliable frequent cron (Vercel Hobby): every real call to the
+ * live order-book endpoint opportunistically tries to persist, and the
+ * throttle makes repeated calls within the window free no-ops instead of
+ * flooding the table.
+ */
+export async function persistLiquiditySnapshotThrottled(symbol: string, timestampMs: number, levels: LiquiditySnapshotLevel[]): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase || levels.length === 0) return;
+  try {
+    const { data: last, error: lastErr } = await supabase
+      .from(TABLE)
+      .select("candle_time")
+      .eq("symbol", symbol)
+      .eq("interval", LIQUIDITY_INTERVAL)
+      .eq("kind", LIQUIDITY_KIND)
+      .order("candle_time", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastErr) {
+      console.error("[ElVoid AI] persistLiquiditySnapshotThrottled (lookup):", lastErr.message);
+      return;
+    }
+    if (last && timestampMs - new Date(last.candle_time).getTime() < MIN_SNAPSHOT_SPACING_MS) return;
+
+    const totalLiquidity = levels.reduce((s, l) => s + l.totalLiquidity, 0);
+    const weekStart = currentWeekStartUtc(timestampMs).toISOString();
+    const { error } = await supabase.from(TABLE).upsert(
+      {
+        symbol,
+        interval: LIQUIDITY_INTERVAL,
+        kind: LIQUIDITY_KIND,
+        candle_time: new Date(timestampMs).toISOString(),
+        price_buckets: levels,
+        delta: null,
+        total_volume: totalLiquidity,
+        week_start: weekStart,
+      },
+      { onConflict: "symbol,interval,kind,candle_time" },
+    );
+    if (error) console.error("[ElVoid AI] persistLiquiditySnapshotThrottled (insert):", error.message);
+  } catch (err) {
+    console.error("[ElVoid AI] persistLiquiditySnapshotThrottled:", err instanceof Error ? err.message : err);
+  }
+}
+
+export interface StoredLiquiditySnapshot {
+  timestamp: number;
+  levels: LiquiditySnapshotLevel[];
+  totalLiquidity: number;
+}
+
+/**
+ * Reads real, previously-persisted order-book snapshots for a symbol within
+ * [sinceMs, now]. This is the genuine historical order-book series — never
+ * confused with the trade/volume-derived proxy (buildLiquidityVolumeMap),
+ * which is what the chart uses whenever real snapshot coverage is too thin
+ * for the requested window. Empty array (never throws) if Supabase isn't
+ * configured or the query fails.
+ */
+export async function loadStoredLiquiditySnapshots(symbol: string, sinceMs: number): Promise<StoredLiquiditySnapshot[]> {
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("candle_time, price_buckets, total_volume")
+      .eq("symbol", symbol)
+      .eq("interval", LIQUIDITY_INTERVAL)
+      .eq("kind", LIQUIDITY_KIND)
+      .gte("candle_time", new Date(sinceMs).toISOString())
+      .order("candle_time", { ascending: true });
+    if (error || !data) {
+      if (error) console.error("[ElVoid AI] loadStoredLiquiditySnapshots:", error.message);
+      return [];
+    }
+    return (data as { candle_time: string; price_buckets: LiquiditySnapshotLevel[]; total_volume: number }[]).map((row) => ({
+      timestamp: new Date(row.candle_time).getTime(),
+      levels: row.price_buckets ?? [],
+      totalLiquidity: row.total_volume,
+    }));
+  } catch (err) {
+    console.error("[ElVoid AI] loadStoredLiquiditySnapshots:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 /**
  * Deletes market_history rows older than the 7-day retention window,
  * regardless of `kind` — one shared table, one shared cleanup. Server-side

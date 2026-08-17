@@ -1,4 +1,5 @@
 import type { Candle } from "./types";
+import type { StoredLiquiditySnapshot } from "../marketHistory/store";
 
 export interface LiquidityVolumeBin {
   priceLow: number;
@@ -87,6 +88,47 @@ export function buildLiquidityVolumeMap(candles: Candle[], binCount = 28, rollin
     const start = Math.max(0, i - rollingWindow + 1);
     const { values, touch } = distribute(candles.slice(start, i + 1));
     return { time: c.time, values, touch };
+  });
+
+  const maxValue = Math.max(...columns.flatMap((col) => col.values), 1e-9);
+  return { bins, columns, maxValue };
+}
+
+/**
+ * Builds the SAME LiquidityVolumeMap shape (bins/columns/maxValue) directly
+ * from real, previously-persisted order-book snapshots — genuine
+ * time×price liquidity, not a candle-derived proxy. Kept as a fully
+ * separate function from buildLiquidityVolumeMap (never merged) so the two
+ * data sources can never accidentally blend into one misleadingly-labeled
+ * series (spec section G). Each snapshot becomes exactly one column at its
+ * real captured timestamp; `touch` is always 1 per populated bin (a real
+ * snapshot either has liquidity at that price level or it doesn't — there's
+ * no rolling-window smoothing to fade, unlike the candle proxy).
+ */
+export function buildLiquidityMapFromSnapshots(snapshots: StoredLiquiditySnapshot[], binCount = 36): LiquidityVolumeMap {
+  if (snapshots.length === 0) return { bins: [], columns: [], maxValue: 0 };
+
+  const allPrices = snapshots.flatMap((s) => s.levels.map((l) => l.price));
+  if (allPrices.length === 0) return { bins: [], columns: [], maxValue: 0 };
+  const rangeHigh = Math.max(...allPrices);
+  const rangeLow = Math.min(...allPrices);
+  const span = rangeHigh - rangeLow || 1;
+  const binSize = span / binCount;
+
+  const bins: LiquidityVolumeBin[] = Array.from({ length: binCount }, (_, i) => ({
+    priceLow: rangeLow + i * binSize,
+    priceHigh: rangeLow + (i + 1) * binSize,
+  }));
+
+  const columns: LiquidityVolumeColumn[] = snapshots.map((snap) => {
+    const values = new Array(binCount).fill(0);
+    const touch = new Array(binCount).fill(0);
+    for (const level of snap.levels) {
+      const idx = Math.min(binCount - 1, Math.max(0, Math.floor((level.price - rangeLow) / binSize)));
+      values[idx] += level.totalLiquidity;
+      touch[idx] = 1;
+    }
+    return { time: snap.timestamp, values, touch };
   });
 
   const maxValue = Math.max(...columns.flatMap((col) => col.values), 1e-9);
