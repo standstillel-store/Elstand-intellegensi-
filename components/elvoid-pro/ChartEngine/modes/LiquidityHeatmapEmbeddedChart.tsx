@@ -175,23 +175,40 @@ export function LiquidityHeatmapEmbeddedChart({
   const priceRows = useMemo(() => adaptivePriceRows(height, barSpacing), [height, barSpacing]);
 
   // Real candles — same /api/klines source every other embedded mode uses.
+  // Refetched every 8s (mirrors FootprintEmbeddedChart's own pattern) —
+  // NOT optional here: the trade-cluster bubble layer and the live-snapshot
+  // heatmap both plot real "now" timestamps via chart.timeScale()
+  // .timeToCoordinate(), which returns null for any time past the chart's
+  // last known bar. Without this refresh the last bar freezes at mount
+  // time, so every bubble/live-column silently stops mapping to an X
+  // coordinate and vanishes the longer the panel stays open — exactly the
+  // "no circles at all" symptom. Refetching keeps the last bar's timestamp
+  // tracking real time so those coordinates keep resolving.
   useEffect(() => {
     let cancelled = false;
     setCandleStatus("loading");
-    fetch(`/api/klines?symbol=${symbol}&interval=${interval}&limit=150`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data.error || !Array.isArray(data.candles)) {
-          setCandleStatus("error");
-          return;
-        }
-        setCandles(data.candles);
-        setCandleStatus("ready");
-      })
-      .catch(() => !cancelled && setCandleStatus("error"));
+    function load(showLoading: boolean) {
+      if (showLoading) setCandleStatus("loading");
+      fetch(`/api/klines?symbol=${symbol}&interval=${interval}&limit=150`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled) return;
+          if (data.error || !Array.isArray(data.candles)) {
+            if (showLoading) setCandleStatus("error");
+            return;
+          }
+          setCandles(data.candles);
+          setCandleStatus("ready");
+        })
+        .catch(() => {
+          if (!cancelled && showLoading) setCandleStatus("error");
+        });
+    }
+    load(true);
+    const id = setInterval(() => load(false), 8000);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [symbol, interval]);
 
