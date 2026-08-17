@@ -160,6 +160,67 @@ export async function getRecentTrades(symbol: string, limit = 1000): Promise<Rec
   });
 }
 
+/**
+ * Real historical aggTrades for an exact [startTime, endTime) window — the
+ * genuine historical source (not the live 1000-trade window getRecentTrades
+ * uses). Binance's own constraint: startTime/endTime together must span
+ * < 1 hour, so callers with a wider range must chunk into sub-hour windows
+ * first (see chunkIntoHourWindows below). Within one sub-hour window this
+ * paginates via fromId whenever a window holds >1000 trades (rare, but real
+ * on high-volume symbols like BTC/ETH during volatile hours) — it keeps
+ * requesting from the last returned aggId+1 until either fewer than `limit`
+ * trades come back or the last trade's time reaches endTime.
+ */
+export async function getAggTradesRange(symbol: string, startTime: number, endTime: number): Promise<RecentTrade[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  const out: RecentTrade[] = [];
+  let cursorStart = startTime;
+  let fromId: number | null = null;
+  const MAX_PAGES = 10; // hard safety cap per sub-hour window — real windows rarely need more than 1-2 pages
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = fromId != null
+      ? `${BASE}/fapi/v1/aggTrades?symbol=${pair}&fromId=${fromId}&limit=1000`
+      : `${BASE}/fapi/v1/aggTrades?symbol=${pair}&startTime=${cursorStart}&endTime=${endTime}&limit=1000`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Binance aggTrades (range) failed for ${pair}: ${res.status}`);
+    const raw = (await res.json()) as Array<{ a: number; p: string; q: string; m: boolean; T: number }>;
+    if (raw.length === 0) break;
+    for (const t of raw) {
+      if (t.T < startTime || t.T >= endTime) continue;
+      out.push({ price: parseFloat(t.p), qty: parseFloat(t.q), isSell: t.m, time: t.T });
+    }
+    const last = raw[raw.length - 1];
+    if (raw.length < 1000 || last.T >= endTime) break;
+    fromId = last.a + 1;
+    cursorStart = last.T;
+  }
+  return out;
+}
+
+/** Splits [startTime, endTime) into <1h sub-windows — Binance's aggTrades startTime/endTime constraint. */
+export function chunkIntoHourWindows(startTime: number, endTime: number): Array<[number, number]> {
+  const HOUR = 59 * 60 * 1000; // stay a hair under 1h for safety margin
+  const chunks: Array<[number, number]> = [];
+  let t = startTime;
+  while (t < endTime) {
+    const next = Math.min(t + HOUR, endTime);
+    chunks.push([t, next]);
+    t = next;
+  }
+  return chunks;
+}
+
+/** Fetches real historical trades across an arbitrarily wide [startTime, endTime) range, chunked to respect Binance's per-request 1h window limit. Sequential (not parallel) to stay polite to Binance's public rate limits. */
+export async function getAggTradesRangeChunked(symbol: string, startTime: number, endTime: number): Promise<RecentTrade[]> {
+  const windows = chunkIntoHourWindows(startTime, endTime);
+  const out: RecentTrade[] = [];
+  for (const [s, e] of windows) {
+    const trades = await getAggTradesRange(symbol, s, e);
+    out.push(...trades);
+  }
+  return out;
+}
+
 export async function getOrderBookDepth(symbol: string, limit = 20): Promise<OrderBookSnapshot & { source: "futures" | "spot" }> {
   const pair = `${symbol.toUpperCase()}USDT`;
   return cached(`bn:depth:${pair}:${limit}`, 10_000, async () => {
