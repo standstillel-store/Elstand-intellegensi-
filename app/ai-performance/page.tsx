@@ -3,6 +3,7 @@ import { AiPerformanceView } from "@/components/ai-performance/AiPerformanceView
 import { getWallet, getDefaultWallet, getStatistics, getDefaultStatistics } from "@/lib/elvoid/paperTrader";
 import { listSignals } from "@/lib/elvoid/signals";
 import { getPerformanceReport, getJournalEntries } from "@/lib/elvoid/performance";
+import { maskPremiumSignals, maskPremiumJournalEntries } from "@/lib/ai/oracle/presentation";
 
 // AI PERFORMANCE — single source of truth for "how good is the AI doing".
 // Every number here is re-read from the exact same tables Portfolio, AI
@@ -31,9 +32,9 @@ export default async function AiPerformancePage() {
       <AiPerformanceView
         wallet={wallet ?? getDefaultWallet()}
         stats={stats ?? getDefaultStatistics()}
-        openSignals={openSignals}
+        openSignals={maskPremiumSignals(openSignals)}
         report={report}
-        recentJournal={recentJournal}
+        recentJournal={maskPremiumJournalEntries(recentJournal)}
       />
     </AppShell>
   );

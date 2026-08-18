@@ -628,3 +628,13 @@ create index if not exists bn_trade_ticks_time_idx on bn_trade_ticks (symbol, tr
 alter table bn_trade_ticks enable row level security;
 -- Zero public policies, same posture as every other table in this file:
 -- only the server-side service-role client ever touches this table.
+
+-- ELVOID PRO ORACLE — premium signal tracking (Phase 5, 2026-08).
+-- See supabase/migrations/2026-08-oracle-premium.sql for the standalone
+-- migration; mirrored here so schema.sql stays the single source of truth
+-- for a fresh database, same convention as the `tp3` column above.
+alter table ai_signals add column if not exists source text not null default 'AI_SIGNAL' check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE'));
+alter table ai_signals add column if not exists premium boolean not null default false;
+alter table ai_signals add column if not exists oracle_grade text check (oracle_grade in ('B+', 'A', 'A+'));
+alter table ai_signals add column if not exists oracle_signal_id text;
+create unique index if not exists ai_signals_oracle_signal_id_key on ai_signals (oracle_signal_id) where oracle_signal_id is not null;

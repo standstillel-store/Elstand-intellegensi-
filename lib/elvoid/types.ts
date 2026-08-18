@@ -45,6 +45,10 @@ export interface AiSignal {
   /** Entry System (Phase 2.8) — status snapshot at generation time; re-evaluate with lib/elvoid/confirmation.ts + confirmation_zone_ok for a live read. */
   confirmation_status: "confirmed" | "waiting" | "invalid" | null;
   confirmation_zone_ok: boolean | null;
+  /** ELVOID PRO ORACLE integration (Phase 5) — optional/nullable so every pre-existing signal row and every place that reads AiSignal keeps compiling unchanged. Absent/undefined means "normal AI Signal", exactly like before this field existed. */
+  source?: "AI_SIGNAL" | "ELVOID_PRO_ORACLE";
+  premium?: boolean;
+  oracle_grade?: "B+" | "A" | "A+" | null;
   created_at: string;
 }
 
@@ -85,7 +89,16 @@ export interface PaperWallet {
 
 /** A closed trade with its originating signal joined in, for journal/table display. */
 export interface JournalWithSignal extends AiJournalEntry {
-  signal: Pick<AiSignal, "coin" | "side" | "strategy" | "confidence" | "entry" | "reason" | "timeframe" | "scans" | "extra_reasoning"> | null;
+  // `side`/`entry` widened to nullable (vs. AiSignal's non-null originals) so
+  // Phase 5 presentation-layer masking can null them out for premium/Oracle
+  // trades without a type lie — see lib/ai/oracle/presentation.ts. Real,
+  // non-premium reads always populate them exactly as before.
+  signal:
+    | (Pick<AiSignal, "coin" | "strategy" | "confidence" | "reason" | "timeframe" | "scans" | "extra_reasoning" | "premium"> & {
+        side: SignalSide | null;
+        entry: number | null;
+      })
+    | null;
 }
 
 /** One scanner's read — the building block every ElVoid AI signal is assembled from. */

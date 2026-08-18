@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, ImageIcon, Brain, CheckCircle2, XCircle, Lightb
 import { formatUsd, timeAgo } from "@/lib/format";
 import { generateTradeReview } from "@/lib/elvoid/review";
 import type { JournalWithSignal } from "@/lib/elvoid/types";
+import { PREMIUM_BADGE } from "@/lib/ai/oracle/presentation";
 
 const RESULT_STYLE: Record<string, string> = {
   win: "bg-up/15 text-up border-up/30",
@@ -116,8 +117,8 @@ export function JournalView({ entries }: { entries: JournalWithSignal[] }) {
                   {e.result}
                 </span>
                 <span className="w-14 shrink-0 font-medium">{e.signal?.coin ?? "?"}</span>
-                <span className={`mono-num w-12 shrink-0 text-xs ${e.signal?.side === "LONG" ? "text-up" : "text-down"}`}>
-                  {e.signal?.side}
+                <span className={`mono-num w-12 shrink-0 text-xs ${e.signal?.premium ? "text-amber-400" : e.signal?.side === "LONG" ? "text-up" : "text-down"}`}>
+                  {e.signal?.premium ? PREMIUM_BADGE : e.signal?.side}
                 </span>
                 <span className="hidden flex-1 truncate text-xs text-ink-faint sm:block">{e.signal?.strategy}</span>
                 <span className={`mono-num shrink-0 text-xs ${e.profit_percent >= 0 ? "text-up" : "text-down"}`}>
@@ -137,8 +138,12 @@ export function JournalView({ entries }: { entries: JournalWithSignal[] }) {
                 <div className="space-y-3 border-t border-line bg-bg/40 px-4 py-3 text-xs text-ink-muted">
                   {e.signal && (
                     <p>
-                      Entry sinyal: <span className="mono-num text-ink">{formatUsd(e.signal.entry)}</span> · Confidence saat
-                      sinyal dibuat: <span className="mono-num text-ink">{e.signal.confidence}%</span>
+                      {e.signal.premium ? (
+                        <>Entry sinyal: <span className="mono-num text-amber-400">👑 PRO — disembunyikan</span></>
+                      ) : (
+                        <>Entry sinyal: <span className="mono-num text-ink">{formatUsd(e.signal.entry ?? 0)}</span></>
+                      )}{" "}
+                      · Confidence saat sinyal dibuat: <span className="mono-num text-ink">{e.signal.confidence}%</span>
                     </p>
                   )}
                   {e.signal?.reason && <p className="leading-relaxed">{e.signal.reason}</p>}

@@ -59,7 +59,14 @@ export function detectAlerts(base: NoctrunSnapshot, openSignals: AiSignal[]): Al
   }
 
   // Liquidity Sweep / BOS-CHoCH — pulled from live signals' own stored scan snapshot.
+  // Premium/Oracle signals are skipped here entirely: both alert types embed
+  // `s.side` (LONG/SHORT) directly into the message text, and `sweep.detail`/
+  // `structure.detail` can reference specific price levels — exactly the
+  // fields spec §3/§17 require hidden for premium trades. There's no
+  // direction-free way to keep these two alert types meaningful, so for
+  // premium signals they're suppressed rather than leaked.
   for (const s of openSignals) {
+    if (s.premium) continue;
     const winningBias = s.side === "LONG" ? "bullish" : "bearish";
     const sweep = s.scans?.find((sc) => sc.key === "liquidity_sweep" && sc.bias === winningBias && sc.weight > 0);
     if (sweep) {

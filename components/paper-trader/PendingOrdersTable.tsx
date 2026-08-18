@@ -3,13 +3,16 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { Badge } from "@/components/ui/Badge";
 import { formatUsd, timeAgo } from "@/lib/format";
 import type { AiSignal } from "@/lib/elvoid/types";
+import type { PublicAiSignal } from "@/lib/ai/oracle/presentation";
+import { PREMIUM_BADGE } from "@/lib/ai/oracle/presentation";
 
-function triggerDescription(s: AiSignal): string {
+function triggerDescription(s: PublicAiSignal): string {
+  if (s.premium || s.entry === null || s.side === null) return "👑 PRO — trigger detail disembunyikan.";
   const dir = s.side === "LONG" ? 1 : -1;
   if (s.order_type === "limit") {
     return `Limit — fill saat harga ${dir === 1 ? "turun ke" : "naik ke"} ${formatUsd(s.entry)}`;
   }
-  const riskDistance = Math.abs(s.entry - s.sl) || s.entry * 0.02;
+  const riskDistance = Math.abs(s.entry - (s.sl ?? s.entry)) || s.entry * 0.02;
   const trigger = s.entry + dir * riskDistance * 0.3;
   return `Stop — fill saat harga ${dir === 1 ? "menembus naik" : "menembus turun"} ${formatUsd(trigger)}`;
 }
@@ -19,7 +22,7 @@ export function PendingOrdersTable({
   onCancel,
   cancelingId,
 }: {
-  signals: AiSignal[];
+  signals: PublicAiSignal[];
   onCancel: (signal: AiSignal) => void;
   cancelingId: string | null;
 }) {
@@ -43,9 +46,15 @@ export function PendingOrdersTable({
           <tbody className="divide-y divide-line">
             {signals.map((s) => (
               <tr key={s.id}>
-                <td className="py-2.5 pr-3 font-medium">{s.coin}</td>
+                <td className="py-2.5 pr-3 font-medium">
+                  {s.coin} {s.premium && <span className="ml-1 text-amber-400">{PREMIUM_BADGE}</span>}
+                </td>
                 <td className="py-2.5 pr-3">
-                  <span className={`mono-num text-xs font-medium ${s.side === "LONG" ? "text-up" : "text-down"}`}>{s.side}</span>
+                  {s.premium ? (
+                    <span className="mono-num text-xs text-amber-400">••••</span>
+                  ) : (
+                    <span className={`mono-num text-xs font-medium ${s.side === "LONG" ? "text-up" : "text-down"}`}>{s.side}</span>
+                  )}
                 </td>
                 <td className="py-2.5 pr-3">
                   <Badge tone="amber">{s.order_type}</Badge>
@@ -54,7 +63,7 @@ export function PendingOrdersTable({
                 <td className="py-2.5 pr-3 text-xs text-ink-faint">{timeAgo(s.created_at)}</td>
                 <td className="py-2.5">
                   <button
-                    onClick={() => onCancel(s)}
+                    onClick={() => onCancel(s as AiSignal)}
                     disabled={cancelingId === s.id}
                     className="rounded-md border border-line px-2.5 py-1 text-[11px] text-ink-muted hover:border-down/50 hover:text-down disabled:opacity-50"
                   >

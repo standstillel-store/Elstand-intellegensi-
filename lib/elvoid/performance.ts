@@ -65,7 +65,7 @@ export async function getJournalEntries(limit = 200): Promise<JournalWithSignal[
   if (!sb) return [];
   const { data, error } = await sb
     .from("ai_journal")
-    .select("*, signal:ai_signals(coin,side,strategy,confidence,entry,reason,timeframe,scans,extra_reasoning)")
+    .select("*, signal:ai_signals(coin,side,strategy,confidence,entry,reason,timeframe,scans,extra_reasoning,premium)")
     .order("closed_at", { ascending: false })
     .limit(limit);
   if (error) {
@@ -81,7 +81,7 @@ export async function getJournalEntryById(id: string): Promise<JournalWithSignal
   if (!sb) return null;
   const { data, error } = await sb
     .from("ai_journal")
-    .select("*, signal:ai_signals(coin,side,strategy,confidence,entry,reason,timeframe,scans,extra_reasoning)")
+    .select("*, signal:ai_signals(coin,side,strategy,confidence,entry,reason,timeframe,scans,extra_reasoning,premium)")
     .eq("id", id)
     .maybeSingle();
   if (error) {

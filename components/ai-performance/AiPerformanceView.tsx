@@ -6,8 +6,10 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { EquityCurveChart } from "@/components/paper-trader/EquityCurveChart";
 import { Disclaimer } from "@/components/Disclaimer";
 import { formatUsd } from "@/lib/format";
-import type { AiSignal, AiStatistics, PaperWallet } from "@/lib/elvoid/types";
+import type { AiStatistics, PaperWallet } from "@/lib/elvoid/types";
 import type { PerformanceReport } from "@/lib/elvoid/performance";
+import type { PublicAiSignal } from "@/lib/ai/oracle/presentation";
+import { PREMIUM_BADGE } from "@/lib/ai/oracle/presentation";
 import type { JournalWithSignal } from "@/lib/elvoid/types";
 
 // One value formatter shared by every KPI on this page so the "don't show
@@ -50,7 +52,7 @@ export function AiPerformanceView({
 }: {
   wallet: PaperWallet;
   stats: AiStatistics;
-  openSignals: AiSignal[];
+  openSignals: PublicAiSignal[];
   report: PerformanceReport;
   recentJournal: JournalWithSignal[];
 }) {
@@ -60,10 +62,10 @@ export function AiPerformanceView({
   const expectancy = hasClosedTrades ? stats.total_profit / stats.total_trade : null;
 
   const totalRisk = openSignals.reduce((s, sig) => s + sig.risk_percent, 0) || 1;
-  const allocationMap = new Map<string, { coin: string; side: "LONG" | "SHORT"; risk: number; count: number }>();
+  const allocationMap = new Map<string, { coin: string; side: "LONG" | "SHORT" | null; premium: boolean; risk: number; count: number }>();
   for (const s of openSignals) {
-    const key = `${s.coin}-${s.side}`;
-    const prev = allocationMap.get(key) ?? { coin: s.coin, side: s.side, risk: 0, count: 0 };
+    const key = `${s.coin}-${s.side ?? "PRO"}`;
+    const prev = allocationMap.get(key) ?? { coin: s.coin, side: s.side, premium: !!s.premium, risk: 0, count: 0 };
     prev.risk += s.risk_percent;
     prev.count += 1;
     allocationMap.set(key, prev);
@@ -183,7 +185,9 @@ export function AiPerformanceView({
                 {recentJournal.map((e) => (
                   <tr key={e.id} className="border-t border-line/60">
                     <td className="py-2 font-medium">{e.signal?.coin ?? "—"}</td>
-                    <td className={clsx("py-2", e.signal?.side === "LONG" ? "text-up" : "text-down")}>{e.signal?.side ?? "—"}</td>
+                    <td className={clsx("py-2", e.signal?.premium ? "text-amber-400" : e.signal?.side === "LONG" ? "text-up" : "text-down")}>
+                      {e.signal?.premium ? PREMIUM_BADGE : e.signal?.side ?? "—"}
+                    </td>
                     <td className="mono-num py-2">{e.rr.toFixed(2)}R</td>
                     <td className="py-2">
                       <ResultBadge result={e.result} />
@@ -257,9 +261,14 @@ export function AiPerformanceView({
           {allocation.length > 0 && (
             <div className="mt-3 space-y-1.5">
               {allocation.map((a) => (
-                <div key={`${a.coin}-${a.side}`} className="flex items-center justify-between text-[11px]">
+                <div key={`${a.coin}-${a.side ?? "PRO"}`} className="flex items-center justify-between text-[11px]">
                   <span>
-                    {a.coin} <span className={a.side === "LONG" ? "text-up" : "text-down"}>{a.side}</span>
+                    {a.coin}{" "}
+                    {a.premium ? (
+                      <span className="text-amber-400">{PREMIUM_BADGE}</span>
+                    ) : (
+                      <span className={a.side === "LONG" ? "text-up" : "text-down"}>{a.side}</span>
+                    )}
                   </span>
                   <span className="mono-num text-ink-muted">{((a.risk / totalRisk) * 100).toFixed(0)}%</span>
                 </div>

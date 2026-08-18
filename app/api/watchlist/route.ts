@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWatchlist, addWatchlistCoin } from "@/lib/elvoid/watchlist";
 import { listSignals } from "@/lib/elvoid/signals";
+import { PREMIUM_BADGE } from "@/lib/ai/oracle/presentation";
 
 // GET /api/watchlist — every tracked coin plus its latest signal (any status),
 // so the AI Signal -> Watchlist tab can show side / confidence / status /
@@ -25,11 +26,17 @@ export async function GET() {
       added_at: item.added_at,
       latestSignal: latest
         ? {
-            side: latest.side,
+            // `side` withheld for premium trades — trade_grade is already
+            // always null on premium rows (Oracle uses a separate
+            // oracle_grade scale, spec §9/§11), so no extra masking needed
+            // there.
+            side: latest.premium ? null : latest.side,
             confidence: latest.confidence,
             status: latest.status,
             trade_grade: latest.trade_grade,
             created_at: latest.created_at,
+            premium: !!latest.premium,
+            premiumBadge: latest.premium ? PREMIUM_BADGE : null,
           }
         : null,
     };

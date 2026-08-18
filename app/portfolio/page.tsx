@@ -3,6 +3,7 @@ import { getWallet, getDefaultWallet, getStatistics, getDefaultStatistics } from
 import { listSignals } from "@/lib/elvoid/signals";
 import { getPerformanceReport } from "@/lib/elvoid/performance";
 import { PortfolioView } from "@/components/portfolio/PortfolioView";
+import { maskPremiumSignals } from "@/lib/ai/oracle/presentation";
 
 export const metadata = { title: "Portfolio | ELSTAND INTELLIGENCE" };
 export const revalidate = 60;
@@ -23,7 +24,7 @@ export default async function PortfolioPage() {
       <PortfolioView
         wallet={wallet ?? getDefaultWallet()}
         stats={stats ?? getDefaultStatistics()}
-        openSignals={openSignals}
+        openSignals={maskPremiumSignals(openSignals)}
         equityCurve={performance.equityCurve}
       />
     </AppShell>

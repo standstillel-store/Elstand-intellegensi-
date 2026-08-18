@@ -11,12 +11,13 @@ import { ClosedTradesTable } from "./ClosedTradesTable";
 import { formatUsd } from "@/lib/format";
 import type { AiSignal, AiStatistics, PaperWallet, JournalWithSignal } from "@/lib/elvoid/types";
 import type { EquityPoint, MonthlyPoint } from "@/lib/elvoid/performance";
+import type { PublicAiSignal } from "@/lib/ai/oracle/presentation";
 
 interface ViewState {
   wallet: PaperWallet | null;
   stats: AiStatistics | null;
-  openSignals: AiSignal[];
-  pendingSignals: AiSignal[];
+  openSignals: PublicAiSignal[];
+  pendingSignals: PublicAiSignal[];
   closedEntries: JournalWithSignal[];
   equityCurve: EquityPoint[];
   monthly: MonthlyPoint[];

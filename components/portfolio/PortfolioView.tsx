@@ -2,22 +2,24 @@ import { StatCard } from "@/components/StatCard";
 import { EquityCurveChart } from "@/components/paper-trader/EquityCurveChart";
 import { SectionHeader } from "@/components/SectionHeader";
 import { formatUsd } from "@/lib/format";
-import type { AiSignal, AiStatistics, PaperWallet } from "@/lib/elvoid/types";
+import type { AiStatistics, PaperWallet } from "@/lib/elvoid/types";
 import type { EquityPoint } from "@/lib/elvoid/performance";
+import type { PublicAiSignal } from "@/lib/ai/oracle/presentation";
+import { PREMIUM_BADGE } from "@/lib/ai/oracle/presentation";
 
-function AllocationBar({ coin, side, pct, count }: { coin: string; side: "LONG" | "SHORT"; pct: number; count: number }) {
+function AllocationBar({ coin, side, premium, pct, count }: { coin: string; side: "LONG" | "SHORT" | null; premium: boolean; pct: number; count: number }) {
   return (
     <div>
       <div className="mb-1 flex items-center justify-between text-xs">
         <span className="flex items-center gap-1.5">
           <span className="font-medium">{coin}</span>
-          <span className={side === "LONG" ? "text-up" : "text-down"}>{side}</span>
+          {premium ? <span className="text-amber-400">{PREMIUM_BADGE}</span> : <span className={side === "LONG" ? "text-up" : "text-down"}>{side}</span>}
           {count > 1 && <span className="text-ink-faint">×{count}</span>}
         </span>
         <span className="mono-num text-ink-muted">{pct.toFixed(1)}%</span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-raised">
-        <div className={`h-full rounded-full ${side === "LONG" ? "bg-up" : "bg-down"}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full ${premium ? "bg-amber-400" : side === "LONG" ? "bg-up" : "bg-down"}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -31,14 +33,14 @@ export function PortfolioView({
 }: {
   wallet: PaperWallet;
   stats: AiStatistics;
-  openSignals: AiSignal[];
+  openSignals: PublicAiSignal[];
   equityCurve: EquityPoint[];
 }) {
   const totalRisk = openSignals.reduce((s, sig) => s + sig.risk_percent, 0) || 1;
-  const grouped = new Map<string, { coin: string; side: "LONG" | "SHORT"; risk: number; count: number }>();
+  const grouped = new Map<string, { coin: string; side: "LONG" | "SHORT" | null; premium: boolean; risk: number; count: number }>();
   for (const s of openSignals) {
-    const key = `${s.coin}-${s.side}`;
-    const prev = grouped.get(key) ?? { coin: s.coin, side: s.side, risk: 0, count: 0 };
+    const key = `${s.coin}-${s.side ?? "PRO"}`;
+    const prev = grouped.get(key) ?? { coin: s.coin, side: s.side, premium: !!s.premium, risk: 0, count: 0 };
     prev.risk += s.risk_percent;
     prev.count += 1;
     grouped.set(key, prev);
@@ -67,7 +69,7 @@ export function PortfolioView({
         ) : (
           <div className="space-y-3">
             {allocation.map((a) => (
-              <AllocationBar key={`${a.coin}-${a.side}`} coin={a.coin} side={a.side} pct={(a.risk / totalRisk) * 100} count={a.count} />
+              <AllocationBar key={`${a.coin}-${a.side ?? "PRO"}`} coin={a.coin} side={a.side} premium={a.premium} pct={(a.risk / totalRisk) * 100} count={a.count} />
             ))}
           </div>
         )}

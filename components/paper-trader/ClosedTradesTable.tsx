@@ -4,6 +4,7 @@ import { ImageIcon, Upload, Loader2 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { timeAgo } from "@/lib/format";
 import type { JournalWithSignal } from "@/lib/elvoid/types";
+import { PREMIUM_BADGE } from "@/lib/ai/oracle/presentation";
 
 const RESULT_STYLE: Record<string, string> = {
   win: "bg-up/15 text-up border-up/30",
@@ -88,7 +89,11 @@ export function ClosedTradesTable({ entries, onRefresh }: { entries: JournalWith
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{e.signal?.coin ?? "?"}</span>
                   {e.signal && (
-                    <span className={`mono-num text-[11px] ${e.signal.side === "LONG" ? "text-up" : "text-down"}`}>{e.signal.side}</span>
+                    e.signal.premium ? (
+                      <span className="mono-num text-[11px] text-amber-400">{PREMIUM_BADGE}</span>
+                    ) : (
+                      <span className={`mono-num text-[11px] ${e.signal.side === "LONG" ? "text-up" : "text-down"}`}>{e.signal.side}</span>
+                    )
                   )}
                   <span className="truncate text-[11px] text-ink-faint">{e.signal?.strategy}</span>
                 </div>
