@@ -1,4 +1,4 @@
-import { getSupabase } from "@/lib/supabase";
+import { getDataSupabase } from "@/lib/supabaseData";
 import type { AggTradeWithId } from "@/lib/binance";
 
 const TABLE = "bn_trade_ticks";
@@ -18,7 +18,7 @@ const TICK_RETENTION_DAYS = 7;
  * any failure, same as every other store function in this codebase.
  */
 export async function getLastStoredAggId(symbol: string): Promise<number | null> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase) return null;
   try {
     const { data, error } = await supabase
@@ -45,7 +45,7 @@ export async function getLastStoredAggId(symbol: string): Promise<number | null>
  * a partial failure) without creating duplicate rows. Never throws.
  */
 export async function insertTicks(symbol: string, ticks: AggTradeWithId[]): Promise<number> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase || ticks.length === 0) return 0;
   const rows = ticks.map((t) => ({
     symbol,
@@ -74,7 +74,7 @@ export async function insertTicks(symbol: string, ticks: AggTradeWithId[]): Prom
  * a week-boundary reset" rule market_history's cleanup already follows.
  */
 export async function cleanupExpiredTicks(symbol?: string): Promise<{ configured: boolean; deleted: number }> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase) return { configured: false, deleted: 0 };
   const cutoff = new Date(Date.now() - TICK_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   try {
