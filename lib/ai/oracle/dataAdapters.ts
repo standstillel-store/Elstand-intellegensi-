@@ -34,7 +34,33 @@ const INTERVAL_MS: Record<string, number> = {
  * swapped for a fabricated placeholder) — Phase 3 grading must treat an
  * "unavailable" source as reduced evidence, not as neutral-bullish filler.
  */
+/**
+ * Short-lived in-process cache so the ELVOID Pro Oracle panel and the AI
+ * Insights & Patterns panel (which both need the same underlying market
+ * data for the same symbol, mounted on the same page) don't each trigger
+ * their own independent Binance fetch — spec §16 explicitly forbids
+ * duplicate Binance/footprint/orderbook requests. Deliberately short (5s):
+ * long enough to absorb the ~simultaneous mount of both panels, short
+ * enough that neither panel is ever looking at meaningfully stale data.
+ * Best-effort only — serverless/edge cold starts reset it, which is fine,
+ * it degrades to "fetch again" rather than ever serving wrong data.
+ */
+const CONTEXT_CACHE_TTL_MS = 5_000;
+const contextCache = new Map<string, { expires: number; promise: Promise<OracleContext> }>();
+
 export async function assembleOracleContext(symbol: string, interval = "15m"): Promise<OracleContext> {
+  const cacheKey = `${symbol.toUpperCase()}:${interval}`;
+  const cached = contextCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.promise;
+
+  const promise = assembleOracleContextUncached(symbol, interval);
+  contextCache.set(cacheKey, { expires: Date.now() + CONTEXT_CACHE_TTL_MS, promise });
+  // Don't let a rejected promise poison the cache for the full TTL.
+  promise.catch(() => contextCache.delete(cacheKey));
+  return promise;
+}
+
+async function assembleOracleContextUncached(symbol: string, interval: string): Promise<OracleContext> {
   const dataQuality: OracleDataSourceStatus[] = [];
   const intervalMs = INTERVAL_MS[interval] ?? INTERVAL_MS["15m"];
 
