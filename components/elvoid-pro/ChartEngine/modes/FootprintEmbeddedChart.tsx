@@ -176,6 +176,17 @@ export function FootprintEmbeddedChart({
   // desktop panel gets close to MAX_VISIBLE_CANDLES and a narrow phone
   // screen still clears MIN_VISIBLE_CANDLES — this is what keeps the chart
   // from ever visually collapsing to only a couple of candles on load.
+  //
+  // hasSetInitialRangeRef guards setVisibleLogicalRange so it only runs
+  // ONCE per symbol/interval (on first data arrival), not on every 8s poll.
+  // Previously this ran on every `candles` update — meaning every single
+  // poll silently snapped the user's zoom/pan back to the default range,
+  // which is what looked like the chart "flickering then disappearing"
+  // whenever someone zoomed in and waited more than ~8 seconds.
+  const hasSetInitialRangeRef = useRef(false);
+  useEffect(() => {
+    hasSetInitialRangeRef.current = false;
+  }, [symbol, interval]);
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return;
     seriesRef.current.setData(
@@ -187,11 +198,14 @@ export function FootprintEmbeddedChart({
         close: c.close,
       }))
     );
-    const total = candles.length;
-    const containerWidth = containerRef.current?.clientWidth ?? 380;
-    const byWidth = Math.round(containerWidth / DEFAULT_TARGET_SPACING);
-    const visibleCount = Math.min(total, Math.max(MIN_VISIBLE_CANDLES, Math.min(MAX_VISIBLE_CANDLES, byWidth)));
-    chartRef.current?.timeScale().setVisibleLogicalRange({ from: total - visibleCount - 1, to: total + 1 });
+    if (!hasSetInitialRangeRef.current) {
+      hasSetInitialRangeRef.current = true;
+      const total = candles.length;
+      const containerWidth = containerRef.current?.clientWidth ?? 380;
+      const byWidth = Math.round(containerWidth / DEFAULT_TARGET_SPACING);
+      const visibleCount = Math.min(total, Math.max(MIN_VISIBLE_CANDLES, Math.min(MAX_VISIBLE_CANDLES, byWidth)));
+      chartRef.current?.timeScale().setVisibleLogicalRange({ from: total - visibleCount - 1, to: total + 1 });
+    }
     recomputeLayoutRef.current?.();
   }, [candles]);
 
