@@ -5,6 +5,7 @@ import { ChartToolbar } from "./ChartEngine/ChartToolbar";
 import { AdvancedChart } from "./ChartEngine/AdvancedChart";
 import { OrderBookPanel } from "./OrderBook/OrderBookPanel";
 import { AISignalPanel } from "./AISignal/AISignalPanel";
+import { OraclePanel } from "./AISignal/OraclePanel";
 import { FundingOIPanel } from "./Analytics/FundingOIPanel";
 import { CVDPanel } from "./Analytics/CVDPanel";
 import { ComingSoonPanel } from "./Analytics/ComingSoonPanel";
@@ -51,6 +52,7 @@ export function TerminalShell() {
         <div className="space-y-3">
           <OrderBookPanel symbol={symbol} />
           <AISignalPanel symbol={symbol} />
+          <OraclePanel symbol={symbol} />
         </div>
       </div>
 
