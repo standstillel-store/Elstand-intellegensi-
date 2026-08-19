@@ -547,14 +547,6 @@ drop policy if exists wallets_delete_own on wallets;
 create policy wallets_delete_own on wallets for delete using (auth.uid() = user_id);
 
 -- ============================================================================
--- [MIGRATED] market_history + bn_trade_ticks di bawah ini SUDAH PINDAH ke
--- Supabase #2 (DATA ENGINE) — lihat supabase/data-engine-schema.sql dan
--- lib/supabaseData.ts. Blok di bawah dibiarkan apa adanya sebagai histori
--- schema lama / referensi, TIDAK dijalankan lagi terhadap database ini
--- setelah migrasi selesai. Kalau sudah yakin data sudah pindah & stabil,
--- boleh DROP TABLE market_history, bn_trade_ticks, market_history_meta di
--- Supabase #1 (CORE) secara manual.
--- ============================================================================
 -- Shared historical market-data layer (Footprint / TPO / Liquidity Heatmap)
 -- ============================================================================
 -- Backs real historical coverage beyond what a single live Binance request

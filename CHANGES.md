@@ -1,5 +1,38 @@
 # ElStand AI — Market Intelligence Dashboard: apa yang berubah
 
+## V5.0 — Phase: ELSTAND PREMIUM (second intelligence layer — macro + altcoin + FOMC + news)
+
+Brief baru: bikin destinasi kedua yang terpisah dari ELVOID PRO (trading/execution terminal) — fokusnya macro regime + market regime + altcoin intelligence + news, bukan trading. Rute baru `/elstand-premium`, group nav baru "Premium Intelligence" (di `Sidebar.tsx` & `mobile/NavDrawer.tsx`, dua-duanya diupdate biar tetap sinkron kayak konvensi yang udah ada). **ELVOID PRO, Footprint, TPO, Liquidity Heatmap, Order Book, Oracle, AI Signal, PaperTrade, AI Performance — nggak disentuh sama sekali**, sesuai batasan di brief.
+
+**Penamaan beda dari reference image, sengaja:** Reference image nyebut grup ini "ELVOID INTELLIGENCE PRO" — tapi itu mirip banget sama nama "ELVOID PRO" (terminal trading yang udah ada), padahal brief teksnya sendiri eksplisit warning "jangan sampai ELSTAND PREMIUM dan ELVOID PRO ketuker". Jadi dipakai nama dari brief teks: **"ELSTAND PREMIUM"**. Kalau Karin lebih suka nama dari gambar, gampang diganti — cuma string di 3 tempat (`Sidebar.tsx`, `NavDrawer.tsx`, judul halaman).
+
+**Scope round ini:** satu halaman gabungan ("Dashboard Utama" dari reference image) yang isinya strip + regime + screener + FOMC/news. Reference image juga nunjukkin 4 halaman detail terpisah (Altcoin Screener PRO / Accumulation Scanner / Dump-Rugpull Scanner / Macro & News Intelligence sebagai route sendiri-sendiri) — itu belum dibikin round ini (scope-nya besar banget buat sekali jalan), tapi datanya sudah di `lib/intelligence/premium.ts` jadi tinggal bikin halaman baru yang manggil snapshot yang sama kalau mau di-split.
+
+**Data real yang di-reuse langsung (0 fetch baru):**
+- DXY → `getUsdReading()` (udah ada sejak V2)
+- S&P 500 / Nasdaq → `getStocksReading()` (SPY/QQQ dari Finnhub — ditandai **PROXY** di UI, bukan REAL, karena index ticker asli butuh Finnhub tier berbayar; ini jujur ditulis di badge-nya, bukan disamarkan)
+- Total Crypto Mcap / BTC Dominance / 24H change → `getGlobal()` (CoinGecko)
+- BTC/ETH price + sparkline 7D → `getTopMarkets()` (sparkline dari field `sparkline_in_7d` yang ternyata udah ke-fetch tapi belum pernah dipakai di UI manapun)
+- Fear & Greed → `getFearGreed()`
+- Global Risk Regime (gauge + AI Summary + Key Factors) → `deriveGlobalSentiment()` dipakai apa adanya, cuma dirender ulang; nggak bikin scoring baru
+- Altcoin Screener Pro (2 mode) → `buildPumpCandidates()` buat mode Accumulation, `buildRugpullRisks()` buat mode Dump/Rugpull Risk — persis fungsi yang sama yang dipakai `/api/pump-candidates` & `/api/rugpull-risk`, dipanggil langsung (server component, bukan self-fetch API)
+- News Intelligence → komponen `MacroNewsPanel` yang udah ada dipakai apa adanya (kategorisasi Crypto/Macro/Stocks/Forex/ETF-nya real, bukan bikin klasifikasi baru)
+
+**Data real yang baru ditambah (`lib/macro.ts`, pola sama persis kayak `getDxyProxy`/`getM2Supply` yang udah ada — FRED_API_KEY, cache, graceful-undefined kalau gagal):**
+- `getUs10Y()` — FRED `DGS10`, primary source (bukan proxy)
+- `getFedFundsRate()` — FRED `DFEDTARU`/`DFEDTARL` (target range asli FOMC), plus "Last Rate Change" yang dihitung dari histori 400 hari terakhir (tanggal terakhir angkanya beneran berubah — bukan diklaim sebagai "keputusan meeting terakhir", karena app ini nggak punya feed hasil meeting per-tanggal, cuma punya deret rate-nya)
+- `getUsNationalDebt()` — **US Treasury Fiscal Data API** (`api.fiscaldata.treasury.gov/.../debt_to_penny`), bukan FRED — no API key sama sekali (public, unauthenticated), perubahan YoY dihitung dari record ~365 hari lalu di deret yang sama (Treasury nggak nerbitin field YoY-nya sendiri)
+
+**Yang sengaja ditandai UNAVAILABLE, bukan dikarang:**
+- **Rate-cut probability distribution** (gaya CME FedWatch) — nggak ada sumber gratis buat ini, jadi kartunya nampilin "DATA UNAVAILABLE" persis kayak instruksi di brief, bukan angka contoh (67.3%/32.7%) yang emang cuma placeholder ilustratif di brief.
+- **Tanggal FOMC berikutnya** kalau lagi nggak ada di window `getEconomicCalendar()` (feed itu cuma cover "this week") — fallback ke jadwal resmi FOMC 2026 yang dipublikasi Fed (`federalreserve.gov`, di-hardcode sebagai *tanggal publik*, bukan data pasar — beda kategori sama "data dikarang"), badge-nya nunjukkin sumbernya "live calendar" vs "published schedule" biar jujur ke user mana yang mana.
+
+**UI baru** (`components/dashboard/premium/`): `MarketIntelligenceStrip` (11 tile, REAL/PROXY/UNAVAILABLE badge di tiap tile + sparkline kalau ada deret asli), `GlobalRiskRegimePanel`, `AltcoinScreenerPro` (mobile: toggle 1 tabel aktif; desktop: dua tabel Accumulation/Dump-Rugpull side-by-side sekaligus — beda layout desktop/mobile sesuai konvensi app ini), `FomcPanel` (countdown live client-side, ticking per detik). Sparkline-nya reuse `components/intelligence/ui/Sparkline.tsx` yang udah ada (sempet ke-duplikat sebentar pas nulis, ketauan pas final check, langsung dibetulin ke versi reuse). Satu atom baru yang genuinely baru: `components/ui/DataStateBadge.tsx` (badge REAL/PROXY/UNAVAILABLE, dipakai di semua panel di atas).
+
+**Testing:** `tsc --noEmit` 0 error (baseline sebelum perubahan juga 0 error, jadi ini murni tambahan bersih). `next build` sempet dicoba di sandbox ini tapi gagal di step fetch Google Fonts (`app/layout.tsx`, `fonts.googleapis.com` diblokir jaringan sandbox-nya, bukan error dari kode baru) — webpack sempet jalan sampai compile module sebelum kena error font itu, jadi resolusi import/module graph-nya udah kevalidasi.
+
+**Gak disentuh:** `/elvoid-pro` & semua yang di bawahnya (`components/elvoid-pro/*`, `lib/elvoid/*`), Footprint/TPO/Liquidity Heatmap/Order Book/Oracle/AI Signal/PaperTrade/AI Performance, `lib/scoring.ts` & `lib/types.ts` (dipakai apa adanya, nggak diubah sama sekali — jadi 0 risiko ke `/scanner` atau route lain yang udah pakai fungsi yang sama), semua halaman selain yang disebut di atas.
+
 ## V4.1 — Phase: Global Market Intelligence Map → AI Relationship Graph
 
 Brief-nya kali ini beda dari V4.0: bukan restyle doang, tapi minta Map-nya jadi "fully interactive AI relationship graph" 3 tingkat (Global Market → 6 kategori → aset masing-masing → 6 koin di bawah Altcoin), dengan left panel, top bar, dan relationship timeline. Karena brief-nya secara eksplisit minta struktur data baru (bukan cuma tampilan), ronde ini **beda dari V4.0** — `lib/intelligence/marketMap.ts` dan beberapa source file memang disentuh, tapi dengan aturan yang sama seperti semua fase sebelumnya: **nggak ada angka dikarang.**

@@ -15,6 +15,7 @@ import {
   Gift,
   WalletMinimal,
   Gauge,
+  Crown,
 } from "lucide-react";
 import clsx from "clsx";
 import { SidebarProfile } from "../layout/SidebarProfile";
@@ -42,6 +43,12 @@ const NAV_GROUPS = [
       { href: "/ai-performance", label: "AI Performance", icon: LineChart },
       { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
     ],
+  },
+  {
+    // Keep in sync with Sidebar.tsx — see note there on why this is its
+    // own top-level group rather than nested under Intelligence/Ecosystem.
+    label: "Premium Intelligence",
+    items: [{ href: "/elstand-premium", label: "ELSTAND PREMIUM", icon: Crown, badge: "PRO" }],
   },
   {
     label: "Ecosystem",

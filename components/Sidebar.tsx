@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart, Gift, WalletMinimal, Gauge } from "lucide-react";
+import { LayoutDashboard, Radar, ScanSearch, Settings, BookOpen, LineChart, Gift, WalletMinimal, Gauge, Crown } from "lucide-react";
 import { SidebarProfile } from "./layout/SidebarProfile";
 
 // AI PERFORMANCE CONSOLIDATION: Portfolio / AI Journal / Paper Trader are no
@@ -30,6 +30,14 @@ const NAV_GROUPS = [
       { href: "/ai-performance", label: "AI Performance", icon: LineChart },
       { href: "/scanner", label: "Token Scanner", icon: ScanSearch },
     ],
+  },
+  {
+    // New second intelligence layer — deliberately its own top-level group
+    // (not nested under "Intelligence" or merged into "Ecosystem"/ELVOID
+    // PRO) so it reads as a visibly separate destination, per spec: macro +
+    // market regime + altcoin + news intelligence, NOT trading/execution.
+    label: "Premium Intelligence",
+    items: [{ href: "/elstand-premium", label: "ELSTAND PREMIUM", icon: Crown, badge: "PRO" }],
   },
   {
     label: "Ecosystem",

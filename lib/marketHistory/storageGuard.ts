@@ -1,4 +1,4 @@
-import { getDataSupabase } from "@/lib/supabaseData";
+import { getSupabase } from "@/lib/supabase";
 
 const TABLE = "market_history";
 
@@ -63,7 +63,7 @@ function pressureFor(bytes: number): StoragePressure {
  * pipeline over a monitoring failure.
  */
 async function queryActualSizeBytes(): Promise<number | null> {
-  const supabase = getDataSupabase();
+  const supabase = getSupabase();
   if (!supabase) return null;
   try {
     const { data, error } = await supabase.rpc("market_history_table_size");
@@ -79,7 +79,7 @@ async function queryActualSizeBytes(): Promise<number | null> {
 }
 
 async function readCachedMeta(): Promise<{ bytes: number; checkedAt: number } | null> {
-  const supabase = getDataSupabase();
+  const supabase = getSupabase();
   if (!supabase) return null;
   try {
     const { data, error } = await supabase.from("market_history_meta").select("last_size_bytes, last_checked_at").eq("id", 1).maybeSingle();
@@ -91,7 +91,7 @@ async function readCachedMeta(): Promise<{ bytes: number; checkedAt: number } | 
 }
 
 async function writeCachedMeta(bytes: number): Promise<void> {
-  const supabase = getDataSupabase();
+  const supabase = getSupabase();
   if (!supabase) return;
   try {
     await supabase.from("market_history_meta").upsert({ id: 1, last_size_bytes: bytes, last_checked_at: new Date().toISOString() }, { onConflict: "id" });
@@ -156,7 +156,7 @@ export function shouldTriggerCleanup(pressure: StoragePressure): boolean {
  * maintenance had a hiccup" contract.
  */
 export async function cleanupOldestMarketHistory(maxRows: number = CRON_CLEANUP_BATCH_ROWS): Promise<{ deleted: number; error?: string }> {
-  const supabase = getDataSupabase();
+  const supabase = getSupabase();
   if (!supabase) return { deleted: 0 };
   try {
     const { data: victims, error: selErr } = await supabase.from(TABLE).select("id").order("created_at", { ascending: true }).limit(maxRows);
