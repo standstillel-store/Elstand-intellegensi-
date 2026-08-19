@@ -35,7 +35,16 @@ export function AiSignalView() {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/ai-signals?limit=60").then((r) => r.json());
-      setSignals(res.signals ?? []);
+      // This page (and SignalCardPro below it) is built entirely around the
+      // normal AI Signal shape — TradeGrade filters, per-target TP1/TP2/TP3
+      // R:R, the 10-item reasoning checklist. None of that applies to
+      // premium/Oracle signals (separate grading scale, entry/sl/tp/side
+      // masked to null here anyway), and this page has no Oracle-aware
+      // rendering of its own — that lives in OraclePanel on /elvoid-pro.
+      // Filtering premium out here avoids rendering a signal shape this
+      // page was never designed for.
+      const allSignals: AiSignal[] = res.signals ?? [];
+      setSignals(allSignals.filter((s) => !s.premium));
     } catch {
       // Keep whatever signals are already on screen; don't wipe the list on a transient fetch failure.
     } finally {

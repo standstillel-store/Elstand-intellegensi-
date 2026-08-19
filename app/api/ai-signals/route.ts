@@ -6,7 +6,7 @@ import type { GeneratedSignal } from "@/lib/elvoid/engine";
 import { reserveEnergy, settleEnergy } from "@/lib/energyGate";
 import { executeSignal, AUTO_EXECUTE_ALL_GRADES } from "@/lib/elvoid/paperTrader";
 import { runAiOracle, runAiTechnicalAnalyst, runAiConfidenceEngine, isAiCoreConfigured } from "@/lib/ai/core/router";
-import { maskPremiumSignals } from "@/lib/ai/oracle/presentation";
+import { maskPremiumSignals, attachUnrealizedPnl } from "@/lib/ai/oracle/presentation";
 
 // Phase: AI CORE ENGINE — opt-in only (POST body `includeAiReasoning: true`).
 // Runs Oracle + Technical Analyst + Confidence Engine in parallel and
@@ -41,10 +41,15 @@ export async function GET(req: Request) {
     : undefined;
   const limit = Number(searchParams.get("limit") ?? 50);
   const signals = await listSignals({ status, limit });
+  // Compute premium trades' unrealized P&L BEFORE masking (needs the real
+  // entry/sl, which masking removes) — see attachUnrealizedPnl for why this
+  // is safe to still expose (it's a derived result, not the hidden fields
+  // themselves).
+  const withPnl = await attachUnrealizedPnl(signals);
   // Premium/Oracle-origin rows have entry/SL/TP/side stripped here — the DB
   // row itself is untouched, this only affects what this JSON response
   // contains (spec §3/§17). See lib/ai/oracle/presentation.ts for scope.
-  return NextResponse.json({ signals: maskPremiumSignals(signals) });
+  return NextResponse.json({ signals: maskPremiumSignals(withPnl) });
 }
 
 // Phase 3.2: gated as "Generate AI Signal" (-4 AI Energy). "Berhasil" means

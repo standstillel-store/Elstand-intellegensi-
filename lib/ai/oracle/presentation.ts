@@ -21,6 +21,8 @@
 // ---------------------------------------------------------------------------
 
 import type { AiSignal, JournalWithSignal } from "../../elvoid/types";
+import { computeUnrealized } from "../../elvoid/math";
+import { get24hTicker } from "../../binance";
 
 /** Crown badge shown wherever a premium/Oracle-origin trade is rendered. */
 export const PREMIUM_BADGE = "👑 PRO";
@@ -32,7 +34,58 @@ export type PublicAiSignal = Omit<AiSignal, "side" | "entry" | "sl" | "tp1" | "t
   tp1: number | null;
   tp2: number | null;
   tp3: number | null;
+  /**
+   * Derived P&L, computed server-side (see attachUnrealizedPnl below) while
+   * the real entry/sl were still available, BEFORE masking. These two
+   * numbers alone don't reveal entry/SL/TP/direction — they're the "Result"
+   * spec §5 explicitly allows to stay visible for premium trades — so they
+   * survive masking untouched. Present only for open/tp1_hit signals where
+   * a live price was successfully fetched.
+   */
+  unrealizedPercent?: number;
+  unrealizedRr?: number;
 };
+
+/**
+ * Computes and attaches unrealizedPercent/unrealizedRr to every open/
+ * tp1_hit PREMIUM signal in `signals`, using each signal's real (still
+ * unmasked at this point) entry/sl and one live price fetch per distinct
+ * coin. Non-premium signals pass through untouched — the client already
+ * computes their unrealized P&L itself from the (unmasked, non-premium)
+ * entry/sl it receives, same as before this function existed.
+ *
+ * Call this BEFORE maskPremiumSignal/maskPremiumSignals, on the real
+ * AiSignal[] straight from the DB — it reads `signal.entry`/`signal.sl`
+ * which won't exist anymore once masked.
+ */
+export async function attachUnrealizedPnl(signals: AiSignal[], riskPerTrade = 1): Promise<(AiSignal & { unrealizedPercent?: number; unrealizedRr?: number })[]> {
+  const premiumOpen = signals.filter((s) => s.premium && (s.status === "open" || s.status === "tp1_hit"));
+  if (premiumOpen.length === 0) return signals;
+
+  const coins = Array.from(new Set(premiumOpen.map((s) => s.coin)));
+  const priceByCoin = new Map<string, number>();
+  await Promise.all(
+    coins.map(async (coin) => {
+      try {
+        const ticker = await get24hTicker(coin);
+        priceByCoin.set(coin, ticker.lastPrice);
+      } catch {
+        // Live price unavailable for this coin — that signal just won't get
+        // an unrealizedPercent/unrealizedRr attached; the UI already falls
+        // back to a neutral placeholder rather than showing a wrong number.
+      }
+    })
+  );
+
+  return signals.map((s) => {
+    if (!s.premium || (s.status !== "open" && s.status !== "tp1_hit")) return s;
+    const livePrice = priceByCoin.get(s.coin);
+    if (livePrice === undefined) return s;
+    const effectiveSl = s.status === "tp1_hit" ? s.entry : s.sl;
+    const { unrealizedPercent, unrealizedRr } = computeUnrealized({ side: s.side, entry: s.entry, sl: effectiveSl }, livePrice, riskPerTrade);
+    return { ...s, unrealizedPercent, unrealizedRr };
+  });
+}
 
 /**
  * Masks entry/SL/TP/side on a premium signal for normal-UI presentation.

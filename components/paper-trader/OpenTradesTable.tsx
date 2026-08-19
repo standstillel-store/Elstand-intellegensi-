@@ -44,18 +44,19 @@ export function OpenTradesTable({
             <tbody className="divide-y divide-line">
               {signals.map((s) => {
                 const live = priceBySymbol[s.coin.toLowerCase()];
-                // Premium/Oracle trades: entry/sl/side arrive as null from
-                // /api/ai-signals (masked server-side, spec §3/§17) — that's
-                // the whole point, but it also means unrealized P&L can't be
-                // computed client-side from this payload without either
-                // leaking entry back into the browser or shipping a wrong
-                // number. Rather than do either, we show "🔒" here — a real
-                // gap, documented rather than silently faked. A correct fix
-                // needs the % computed server-side (where the real entry is
-                // still available) and returned as a derived field.
+                // Non-premium: computed client-side as before (real entry/sl
+                // are right here in the payload). Premium: entry/sl arrive
+                // null (masked server-side, spec §3/§17), but
+                // unrealizedPercent/unrealizedRr — a derived result, not the
+                // hidden fields themselves — were already computed
+                // server-side in /api/ai-signals and travel through masking
+                // untouched. Only truly unavailable (e.g. live price fetch
+                // failed server-side) falls back to "—".
                 const canComputeUnrealized = !s.premium && s.entry !== null && s.sl !== null && s.side !== null;
                 const unrealized = canComputeUnrealized
                   ? computeUnrealized({ side: s.side as "LONG" | "SHORT", entry: s.entry as number, sl: s.sl as number }, live, riskPerTrade)
+                  : s.premium && s.unrealizedPercent !== undefined && s.unrealizedRr !== undefined
+                  ? { unrealizedPercent: s.unrealizedPercent, unrealizedRr: s.unrealizedRr }
                   : null;
                 const positive = (unrealized?.unrealizedPercent ?? 0) >= 0;
                 const effectiveSl = s.status === "tp1_hit" ? s.entry : s.sl;
@@ -93,7 +94,7 @@ export function OpenTradesTable({
                           {unrealized.unrealizedPercent.toFixed(2)}% ({unrealized.unrealizedRr.toFixed(2)}R)
                         </>
                       ) : (
-                        "🔒"
+                        "🔒 belum tersedia"
                       )}
                     </td>
                     <td className="py-2.5">
