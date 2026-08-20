@@ -32,7 +32,7 @@ async function run(req: Request) {
     const result = await runIncrementalScan();
     if (!result.skippedNoWork) {
       console.log(
-        `[Whale] indexed blocks ${result.fromBlock}-${result.toBlock} — erc20 logs: ${result.erc20LogsScanned}, native tx: ${result.nativeTxScanned}, whale rows inserted: ${result.whaleTransfersInserted}`
+        `[Whale] indexed blocks ${result.fromBlock}-${result.toBlock} (latest=${result.latestBlock}) — erc20 logs: ${result.erc20LogsScanned}, native tx: ${result.nativeTransactionsScanned}, decoded: ${result.transfersDecoded}, qualified: ${result.transfersQualified}, inserted: ${result.transfersInserted}, checkpoint ${result.checkpointBefore ?? "null"} -> ${result.checkpointAfter}, ${result.durationMs}ms`
       );
     }
     return NextResponse.json({ ok: true, ...result });

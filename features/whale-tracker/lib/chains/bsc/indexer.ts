@@ -4,7 +4,7 @@ import { getLastProcessedBlock, setLastProcessedBlock } from "../../checkpoint";
 import { getTokenMetadataBatch, upsertTokenMetadata, upsertTokenPrice } from "../../tokenMetadataStore";
 import { getPricesForTokens } from "../../priceSource";
 import { insertWhaleTransfers, type NewWhaleTransfer } from "../../transfersStore";
-import { touchWallet, getWallet } from "../../walletStore";
+import { touchWallet } from "../../walletStore";
 import { ensureWhaleStorageBudget } from "../../storageGuard";
 import { WHALE_CHAIN, WHALE_USD_THRESHOLD, NATIVE_TOKEN_ADDRESS, BSC_BLOCK_BATCH_SIZE } from "../../config";
 
@@ -13,29 +13,49 @@ import { WHALE_CHAIN, WHALE_USD_THRESHOLD, NATIVE_TOKEN_ADDRESS, BSC_BLOCK_BATCH
 //   BSC RPC → Block Listener → Transfer Event Parser → Token Metadata →
 //   USD Valuation → Whale Filter → Supabase → Whale API → Dashboard
 //
-// Whale-filter rule (documented tradeoff — see README "Known limitations"):
-//   - price known  + value_usd >= WHALE_USD_THRESHOLD  → keep
-//   - price known  + value_usd <  WHALE_USD_THRESHOLD  → discard (not whale)
-//   - price unknown + counterparty is an already-tracked whale wallet → keep,
-//     stored with price_usd/value_usd = null ("Price unavailable" in the UI)
-//   - price unknown + neither side is a tracked wallet → discard
-// This keeps the "jangan membuat USD value palsu" + "tetap simpan token
-// transfer" requirement satisfiable WITHOUT ingesting every zero-price
-// spam/microcap token transfer on the chain, which would defeat both the
-// whale filter's purpose and the 150MB storage budget.
+// Whale-filter rule (revised 2026-08 — see AUDIT.md "Phase 4"):
+//   - is_native = true (BNB)                              → ALWAYS keep,
+//     regardless of price/value (native transfers are the rarest/most
+//     load-bearing signal; never worth discarding over a CoinGecko miss).
+//   - price known  + value_usd >= WHALE_USD_THRESHOLD      → keep
+//   - price known  + value_usd <  WHALE_USD_THRESHOLD      → discard (genuinely not whale-sized)
+//   - price unknown (any BEP-20 token CoinGecko doesn't list — meme/microcap/new)
+//                                                            → ALWAYS keep,
+//     stored with price_usd/value_usd = null ("Price unavailable" in the UI).
+// Per explicit spec correction: "Do NOT discard the transfer simply because
+// USD pricing is unavailable." A transfer with no resolvable price is no
+// longer conditioned on either side being an already-tracked wallet — every
+// decoded BEP-20 Transfer log and every native BNB tx that clears the RPC
+// layer is a real on-chain transfer and gets persisted. The USD threshold
+// only prunes transfers that DO have a price and are provably below
+// WHALE_USD_THRESHOLD — it was never meant to prune transfers we simply
+// can't price yet. Storage-budget protection is handled entirely by
+// storageGuard.ts's 150MB/120MB retention sweep (which already prioritizes
+// dropping oldest+lowest/null-value rows first), not by refusing to ingest.
 // ---------------------------------------------------------------------------
 
 export interface IndexerRunResult {
+  latestBlock: number;
   fromBlock: number;
   toBlock: number;
   scannedBlocks: number;
   erc20LogsScanned: number;
+  nativeTransactionsScanned: number;
+  transfersDecoded: number;
+  transfersQualified: number;
+  transfersInserted: number;
+  checkpointBefore: number | null;
+  checkpointAfter: number;
+  durationMs: number;
+  skippedNoWork: boolean;
+  // Deprecated aliases — kept so any existing caller reading the old field
+  // names doesn't break; new callers should read the names above.
   nativeTxScanned: number;
   whaleTransfersInserted: number;
-  skippedNoWork: boolean;
 }
 
 export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<IndexerRunResult> {
+  const startedAt = Date.now();
   // Non-blocking pressure check — never delays or skips indexing itself.
   void ensureWhaleStorageBudget();
 
@@ -47,7 +67,23 @@ export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<I
   const toBlock = fromBlock + BigInt(BSC_BLOCK_BATCH_SIZE) - BigInt(1) > latestBlock ? latestBlock : fromBlock + BigInt(BSC_BLOCK_BATCH_SIZE) - BigInt(1);
 
   if (fromBlock > toBlock) {
-    return { fromBlock: Number(fromBlock), toBlock: Number(toBlock), scannedBlocks: 0, erc20LogsScanned: 0, nativeTxScanned: 0, whaleTransfersInserted: 0, skippedNoWork: true };
+    return {
+      latestBlock: Number(latestBlock),
+      fromBlock: Number(fromBlock),
+      toBlock: Number(toBlock),
+      scannedBlocks: 0,
+      erc20LogsScanned: 0,
+      nativeTransactionsScanned: 0,
+      transfersDecoded: 0,
+      transfersQualified: 0,
+      transfersInserted: 0,
+      checkpointBefore: checkpoint,
+      checkpointAfter: checkpoint ?? Number(toBlock),
+      durationMs: Date.now() - startedAt,
+      skippedNoWork: true,
+      nativeTxScanned: 0,
+      whaleTransfersInserted: 0,
+    };
   }
 
   // Native transfers also gives us block timestamps for the whole range —
@@ -126,17 +162,21 @@ export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<I
     });
   }
 
-  // --- Whale filter --------------------------------------------------------
+  // --- Whale filter (see rule doc above — revised 2026-08) ----------------
   const whaleRows: NewWhaleTransfer[] = [];
   for (const row of candidates) {
-    if (row.valueUsd != null) {
-      if (row.valueUsd >= WHALE_USD_THRESHOLD) whaleRows.push(row);
+    if (row.isNative) {
+      whaleRows.push(row); // native BNB: always keep, priced or not
       continue;
     }
-    // Price unavailable — only keep if either side is an already-tracked
-    // whale wallet (see rule doc above).
-    const [fromWallet, toWallet] = await Promise.all([getWallet(row.fromAddress, chain), getWallet(row.toAddress, chain)]);
-    if (fromWallet || toWallet) whaleRows.push(row);
+    if (row.valueUsd != null) {
+      if (row.valueUsd >= WHALE_USD_THRESHOLD) whaleRows.push(row);
+      continue; // priced but below threshold — genuinely not whale-sized, discard
+    }
+    // Price unavailable (meme/microcap/new token CoinGecko hasn't indexed
+    // yet) — no longer gated on wallet-tracked status. Every real decoded
+    // transfer is persisted; USD stays null ("Price unavailable" in UI).
+    whaleRows.push(row);
   }
 
   const inserted = await insertWhaleTransfers(whaleRows);
@@ -152,12 +192,21 @@ export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<I
   await setLastProcessedBlock(Number(toBlock), chain);
 
   return {
+    latestBlock: Number(latestBlock),
     fromBlock: Number(fromBlock),
     toBlock: Number(toBlock),
     scannedBlocks: Number(toBlock - fromBlock + BigInt(1)),
     erc20LogsScanned: erc20Logs.length,
+    nativeTransactionsScanned: nativeTransfers.length,
+    transfersDecoded: candidates.length,
+    transfersQualified: whaleRows.length,
+    transfersInserted: inserted,
+    checkpointBefore: checkpoint,
+    checkpointAfter: Number(toBlock),
+    durationMs: Date.now() - startedAt,
+    skippedNoWork: false,
+    // deprecated aliases, same values
     nativeTxScanned: nativeTransfers.length,
     whaleTransfersInserted: inserted,
-    skippedNoWork: false,
   };
 }
