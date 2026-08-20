@@ -43,8 +43,8 @@ export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<I
   const latestBlock = await client.getBlockNumber();
 
   const checkpoint = await getLastProcessedBlock(chain);
-  const fromBlock = checkpoint != null ? BigInt(checkpoint + 1) : latestBlock > BigInt(BSC_BLOCK_BATCH_SIZE) ? latestBlock - BigInt(BSC_BLOCK_BATCH_SIZE) : 0n;
-  const toBlock = fromBlock + BigInt(BSC_BLOCK_BATCH_SIZE) - 1n > latestBlock ? latestBlock : fromBlock + BigInt(BSC_BLOCK_BATCH_SIZE) - 1n;
+  const fromBlock = checkpoint != null ? BigInt(checkpoint + 1) : latestBlock > BigInt(BSC_BLOCK_BATCH_SIZE) ? latestBlock - BigInt(BSC_BLOCK_BATCH_SIZE) : BigInt(0);
+  const toBlock = fromBlock + BigInt(BSC_BLOCK_BATCH_SIZE) - BigInt(1) > latestBlock ? latestBlock : fromBlock + BigInt(BSC_BLOCK_BATCH_SIZE) - BigInt(1);
 
   if (fromBlock > toBlock) {
     return { fromBlock: Number(fromBlock), toBlock: Number(toBlock), scannedBlocks: 0, erc20LogsScanned: 0, nativeTxScanned: 0, whaleTransfersInserted: 0, skippedNoWork: true };
@@ -88,7 +88,7 @@ export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<I
       txHash: log.txHash,
       logIndex: log.logIndex,
       blockNumber: Number(log.blockNumber),
-      blockTimestamp: new Date(Number(ts ?? 0n) * 1000).toISOString(),
+      blockTimestamp: new Date(Number(ts ?? BigInt(0)) * 1000).toISOString(),
       fromAddress: log.from,
       toAddress: log.to,
       isNative: false,
@@ -112,7 +112,7 @@ export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<I
       txHash: tx.txHash,
       logIndex: -1,
       blockNumber: Number(tx.blockNumber),
-      blockTimestamp: new Date(Number(ts ?? 0n) * 1000).toISOString(),
+      blockTimestamp: new Date(Number(ts ?? BigInt(0)) * 1000).toISOString(),
       fromAddress: tx.from,
       toAddress: tx.to,
       isNative: true,
@@ -154,7 +154,7 @@ export async function runIncrementalScan(chain: string = WHALE_CHAIN): Promise<I
   return {
     fromBlock: Number(fromBlock),
     toBlock: Number(toBlock),
-    scannedBlocks: Number(toBlock - fromBlock + 1n),
+    scannedBlocks: Number(toBlock - fromBlock + BigInt(1)),
     erc20LogsScanned: erc20Logs.length,
     nativeTxScanned: nativeTransfers.length,
     whaleTransfersInserted: inserted,

@@ -74,7 +74,7 @@ export async function fetchNativeTransfers(fromBlock: bigint, toBlock: bigint): 
     blockTimestamps.set(bn.toString(), block.timestamp);
     for (const tx of block.transactions) {
       if (typeof tx === "string") continue; // shouldn't happen with includeTransactions: true, but keep the type guard
-      if (tx.value > 0n && tx.to) {
+      if (tx.value > BigInt(0) && tx.to) {
         transfers.push({ txHash: tx.hash, blockNumber: bn, from: tx.from.toLowerCase(), to: tx.to.toLowerCase(), rawValue: tx.value });
       }
     }
