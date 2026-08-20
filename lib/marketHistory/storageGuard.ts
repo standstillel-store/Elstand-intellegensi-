@@ -7,12 +7,18 @@ const TABLE = "market_history";
 // Liquidity Heatmap all write here — see supabase/schema.sql). Supabase
 // Free's whole-project cap is 500MB; this keeps ONE table's rolling buffer
 // well inside that regardless of how volatile a week gets (NFP/FOMC/CPI can
-// inflate footprint row counts fast). See PHASE spec: "target maksimum
-// market_history: 250 MB", not the project-wide limit.
+// inflate footprint row counts fast).
+//
+// Behavior (2026-08 revision): at CRITICAL (>=250MB) the table is FULLY
+// RESET (TRUNCATE, ~0MB) rather than drained down to a target — see
+// resetMarketHistory() below and supabase/migrations/market-history-full-reset.sql.
+// Ingestion (persistFootprintCandles/persistTpoSessions/
+// persistLiquiditySnapshotThrottled) keeps writing immediately afterward —
+// nothing about the table schema/constraints changes, so fresh rows insert
+// exactly as before.
 // ---------------------------------------------------------------------------
-export const STORAGE_WARNING_BYTES = 200 * 1024 * 1024; // 200 MB — enter pressure mode
-export const STORAGE_CRITICAL_BYTES = 250 * 1024 * 1024; // 250 MB — must cleanup now
-export const STORAGE_TARGET_BYTES = 190 * 1024 * 1024; // cleanup drains back to ~180-200MB, aim for the middle
+export const STORAGE_WARNING_BYTES = 200 * 1024 * 1024; // 200 MB — informational "pressure" flag only
+export const STORAGE_CRITICAL_BYTES = 250 * 1024 * 1024; // 250 MB — triggers automatic full reset
 
 // How long a cached size reading is trusted before re-querying Postgres.
 // Every indicator persist call goes through ensureStorageBudget(), so
@@ -21,22 +27,6 @@ export const STORAGE_TARGET_BYTES = 190 * 1024 * 1024; // cleanup drains back to
 // minutes is frequent enough to react well within a single volatile
 // session, cheap enough to never be a bottleneck on the hot path.
 const SIZE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
-
-// ensureStorageBudget() runs INLINE on the hot persist path (called from
-// every Footprint/TPO/Liquidity write), so its own cleanup nudge must stay
-// small and non-blocking — never a scan-until-done loop. The daily cron
-// (see app/api/market-history/cleanup) is what does the heavy multi-batch
-// draining; this just keeps pressure from growing unchecked on a busy day
-// between cron runs.
-const INLINE_CLEANUP_BATCH_ROWS = 500;
-
-// Cron's batch size per DELETE — larger since it isn't on the hot path,
-// still bounded so no single query scans/locks too much at once.
-export const CRON_CLEANUP_BATCH_ROWS = 2000;
-// Hard cap on how many batches one cron invocation will run — a real
-// safety limit against turning a bad backlog into a function-timeout risk,
-// not a "delete exactly N and stop" number.
-export const CRON_MAX_BATCHES = 25;
 
 export type StoragePressure = "NORMAL" | "WARNING" | "CRITICAL";
 
@@ -135,50 +125,65 @@ export function shouldTriggerCleanup(pressure: StoragePressure): boolean {
 }
 
 /**
- * Deletes the oldest `maxRows` market_history rows (across ALL kinds —
- * Footprint/TPO/Liquidity share one rolling buffer, one shared cleanup) and
- * returns how many were actually removed. Ordered by `created_at` ascending
- * — same timestamp column the existing daily retention job
- * (cleanupExpiredMarketHistory in store.ts) already uses as its source of
- * truth, so both cleanup paths agree on what "oldest" means and can never
- * fight each other. Two-step select-then-delete (not a single DELETE ...
- * ORDER BY ... LIMIT) so this only ever removes exactly the batch it
- * inspected — no surprises from a concurrent insert changing what "the
- * oldest N" means between planning and deleting.
+ * FULL reset of market_history — TRUNCATEs the table via the
+ * reset_market_history_full() SQL function (see
+ * supabase/migrations/market-history-full-reset.sql) and returns how many
+ * rows were removed. TRUNCATE (not a batched DELETE) so the table's
+ * physical size actually drops to ~0 bytes immediately — no waiting on
+ * autovacuum — which matters because callers log the real post-reset size
+ * right after this runs.
  *
- * Never deletes everything: bounded by `maxRows`, and if fewer than
- * `maxRows` old rows exist it simply deletes what's there and stops —
- * there is no scenario where this empties the table, since callers always
- * re-check real usage before running another batch (see the cron loop in
- * app/api/market-history/cleanup) rather than looping blindly. Best-effort
- * and never throws, matching every other function in this file's "an
- * indicator pipeline write/read must never crash because storage
- * maintenance had a hiccup" contract.
+ * Only ever touches market_history. Every other table (whale_transfers,
+ * whale_wallets, token_metadata, wallet_balances, users, profiles,
+ * bn_credentials, ai_signals, bn_trade_ticks, etc.) lives outside this
+ * function's reach entirely — the SQL function's body is a single
+ * `truncate table market_history`, nothing else.
+ *
+ * Never throws — degrades to `{ deleted: 0, error }` like every other
+ * function in this file, so a reset failure can never crash the indicator
+ * write path that triggered it.
  */
-export async function cleanupOldestMarketHistory(maxRows: number = CRON_CLEANUP_BATCH_ROWS): Promise<{ deleted: number; error?: string }> {
+export async function resetMarketHistory(): Promise<{ deleted: number; error?: string }> {
   const supabase = getDataSupabase();
   if (!supabase) return { deleted: 0 };
   try {
-    const { data: victims, error: selErr } = await supabase.from(TABLE).select("id").order("created_at", { ascending: true }).limit(maxRows);
-    if (selErr) {
-      console.error("[MarketHistory] cleanup select failed:", selErr.message);
-      return { deleted: 0, error: selErr.message };
+    const { data, error } = await supabase.rpc("reset_market_history_full");
+    if (error) {
+      console.error("[MarketHistory] reset failed:", error.message);
+      return { deleted: 0, error: error.message };
     }
-    if (!victims || victims.length === 0) return { deleted: 0 };
-    const ids = victims.map((v) => v.id as string);
-    const { error: delErr, count } = await supabase.from(TABLE).delete({ count: "exact" }).in("id", ids);
-    if (delErr) {
-      console.error("[MarketHistory] cleanup delete failed:", delErr.message);
-      return { deleted: 0, error: delErr.message };
-    }
-    return { deleted: count ?? ids.length };
+    return { deleted: Number(data ?? 0) };
   } catch (err) {
-    console.error("[MarketHistory] cleanup failed:", err instanceof Error ? err.message : err);
+    console.error("[MarketHistory] reset failed:", err instanceof Error ? err.message : err);
     return { deleted: 0, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
-let inlineCleanupInFlight = false;
+let inlineResetInFlight = false;
+
+/**
+ * Runs the full reset with the exact logging trail requested: current
+ * size, threshold reached, reset triggered, rows deleted, size after
+ * reset, timestamp. Shared by both the inline (write-path) trigger and the
+ * daily cron, so the log shape is identical no matter which one fires it.
+ */
+async function performAutomaticReset(usageBeforeMb: number): Promise<void> {
+  const resetAt = new Date().toISOString();
+  console.log(`[MarketHistory] current size: ${usageBeforeMb.toFixed(1)} MB`);
+  console.log(`[MarketHistory] threshold reached: CRITICAL (>= ${(STORAGE_CRITICAL_BYTES / 1024 / 1024).toFixed(0)} MB)`);
+  console.log(`[MarketHistory] reset triggered at ${resetAt}`);
+
+  const result = await resetMarketHistory();
+  if (result.error) {
+    console.error(`[MarketHistory] reset failed, table left as-is: ${result.error}`);
+    return;
+  }
+  console.log(`[MarketHistory] rows deleted: ${result.deleted}`);
+
+  const after = await getMarketHistoryStorageUsage(true); // force a real query — must reflect the post-TRUNCATE size, not a stale cache
+  console.log(`[MarketHistory] size after reset: ${after.mb.toFixed(2)} MB`);
+  console.log(`[MarketHistory] reset completed at ${new Date().toISOString()}`);
+}
 
 /**
  * Called at the top of every Footprint/TPO/Liquidity persist path (see
@@ -186,18 +191,17 @@ let inlineCleanupInFlight = false;
  * a new historical batch (see app/api/footprint-candles/route.ts). Cheap
  * (usually just the cached meta read) and NEVER blocks or skips the
  * caller's own write — persistence must keep working regardless of
- * pressure, per spec ("jangan menghentikan Footprint, TPO, atau Liquidity
- * Heatmap"). All this does is:
+ * pressure. All this does is:
  *
  *   1. Read current pressure (cached in the common case).
- *   2. If CRITICAL, fire a SINGLE bounded inline cleanup batch in the
- *      background (not awaited by the caller, so it can never slow down
- *      the indicator write that triggered this check) — a small nudge
- *      downward between cron runs, not the full drain. `inlineCleanupInFlight`
- *      is a same-instance guard so a burst of concurrent persist calls on a
- *      warm serverless instance doesn't fire a dozen redundant cleanup
- *      batches at once; it resets per cold start, which is fine since the
- *      worst case is one extra harmless batch.
+ *   2. If CRITICAL (>=250MB), fire the full reset in the background (not
+ *      awaited by the caller, so it can never slow down the indicator
+ *      write that triggered this check). `inlineResetInFlight` is a
+ *      same-instance guard so a burst of concurrent persist calls on a
+ *      warm serverless instance doesn't fire the reset more than once at
+ *      a time; it resets per cold start, which is fine — a second reset
+ *      attempt on an already-empty table is a harmless no-op (deletes 0
+ *      rows).
  *
  * Returns the pressure so callers with a real choice — e.g. footprint's
  * backfill loop, which is the one place still expanding older history —
@@ -207,15 +211,12 @@ let inlineCleanupInFlight = false;
  */
 export async function ensureStorageBudget(): Promise<StoragePressure> {
   const usage = await getMarketHistoryStorageUsage();
-  if (usage.pressure === "CRITICAL" && !inlineCleanupInFlight) {
-    inlineCleanupInFlight = true;
-    cleanupOldestMarketHistory(INLINE_CLEANUP_BATCH_ROWS)
-      .then((result) => {
-        if (result.deleted > 0) console.log(`[MarketHistory] inline pressure cleanup deleted ${result.deleted} rows`);
-      })
+  if (usage.pressure === "CRITICAL" && !inlineResetInFlight) {
+    inlineResetInFlight = true;
+    performAutomaticReset(usage.mb)
       .catch(() => {})
       .finally(() => {
-        inlineCleanupInFlight = false;
+        inlineResetInFlight = false;
       });
   }
   return usage.pressure;

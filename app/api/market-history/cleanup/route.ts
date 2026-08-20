@@ -1,13 +1,6 @@
 import { NextResponse } from "next/server";
 import { cleanupExpiredMarketHistory } from "@/lib/marketHistory/store";
-import {
-  getMarketHistoryStorageUsage,
-  cleanupOldestMarketHistory,
-  shouldTriggerCleanup,
-  STORAGE_TARGET_BYTES,
-  CRON_CLEANUP_BATCH_ROWS,
-  CRON_MAX_BATCHES,
-} from "@/lib/marketHistory/storageGuard";
+import { getMarketHistoryStorageUsage, resetMarketHistory, shouldTriggerCleanup, STORAGE_CRITICAL_BYTES } from "@/lib/marketHistory/storageGuard";
 
 // ---------------------------------------------------------------------------
 // Daily rolling-7-day retention cleanup for market_history (see
@@ -24,19 +17,17 @@ import {
 // this one deletes data, so no unauthenticated path is exposed for either
 // verb once CRON_SECRET is set.
 //
-// Two cleanup passes, run in this order:
+// Two passes, run in this order:
 //   1. cleanupExpiredMarketHistory() — the original time-based 7-day
 //      retention (created_at cutoff), UNCHANGED. This stays the normal-day
 //      behavior; storage pressure is not the only reason old rows get
 //      dropped.
-//   2. Storage-guard pass — real Postgres size query, then batched deletes
-//      (oldest created_at first, same ordering cleanupOldestMarketHistory
-//      always uses) looped until usage is back under STORAGE_TARGET_BYTES
-//      or CRON_MAX_BATCHES is hit. This is what makes cleanup react FASTER
-//      than 7 days when a volatile week (NFP/FOMC/CPI) inflates footprint
-//      row counts faster than time-based retention alone would catch —
-//      per spec: "storage limit adalah prioritas utama" over the fixed
-//      7-day number.
+//   2. Storage-guard pass — real Postgres size query (pg_total_relation_size,
+//      never a row-count estimate). If usage is CRITICAL (>=250MB), the
+//      table is FULLY RESET (TRUNCATE, ~0MB) rather than drained — see
+//      resetMarketHistory() in storageGuard.ts. Ingestion (Footprint/TPO/
+//      Liquidity persistence) is untouched and keeps writing immediately
+//      afterward.
 // ---------------------------------------------------------------------------
 
 function isAuthorizedCron(req: Request): boolean {
@@ -53,29 +44,31 @@ async function runCleanup(req: Request): Promise<NextResponse> {
     const expiredResult = await cleanupExpiredMarketHistory();
 
     let usage = await getMarketHistoryStorageUsage(true); // force a real query — the cron is exactly the place that should never trust a stale cache
-    console.log(`[MarketHistory] storage usage: ${usage.mb.toFixed(1)} MB`);
+    console.log(`[MarketHistory] current size: ${usage.mb.toFixed(1)} MB`);
     console.log(`[MarketHistory] pressure: ${usage.pressure}`);
 
-    let totalDeleted = 0;
-    let batches = 0;
+    let rowsDeleted = 0;
+    let resetTriggered = false;
     if (shouldTriggerCleanup(usage.pressure)) {
-      console.log("[MarketHistory] cleanup started");
-      while (batches < CRON_MAX_BATCHES && usage.bytes > STORAGE_TARGET_BYTES) {
-        const result = await cleanupOldestMarketHistory(CRON_CLEANUP_BATCH_ROWS);
-        batches++;
-        if (result.deleted === 0) break; // nothing left to delete — stop instead of spinning
-        totalDeleted += result.deleted;
-        console.log(`[MarketHistory] deleted: ${result.deleted} rows`);
-        usage = await getMarketHistoryStorageUsage(true);
-      }
-      console.log("[MarketHistory] cleanup completed");
-      console.log(`[MarketHistory] storage target restored: ${usage.mb.toFixed(1)} MB (pressure: ${usage.pressure})`);
+      resetTriggered = true;
+      const resetAt = new Date().toISOString();
+      console.log(`[MarketHistory] threshold reached: CRITICAL (>= ${(STORAGE_CRITICAL_BYTES / 1024 / 1024).toFixed(0)} MB)`);
+      console.log(`[MarketHistory] reset triggered at ${resetAt}`);
+
+      const result = await resetMarketHistory();
+      rowsDeleted = result.deleted;
+      console.log(`[MarketHistory] rows deleted: ${rowsDeleted}`);
+      if (result.error) console.error(`[MarketHistory] reset error: ${result.error}`);
+
+      usage = await getMarketHistoryStorageUsage(true);
+      console.log(`[MarketHistory] size after reset: ${usage.mb.toFixed(2)} MB`);
+      console.log(`[MarketHistory] reset completed at ${new Date().toISOString()}`);
     }
 
     return NextResponse.json({
       ok: true,
       ...expiredResult,
-      storage: { mb: usage.mb, pressure: usage.pressure, batchesRun: batches, rowsDeleted: totalDeleted },
+      storage: { mb: usage.mb, pressure: usage.pressure, resetTriggered, rowsDeleted },
     });
   } catch (err) {
     console.error("[ElVoid AI] market-history cleanup error:", err instanceof Error ? err.message : err);
