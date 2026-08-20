@@ -1,5 +1,6 @@
 import { getDataSupabase } from "@/lib/supabaseData";
 import type { AggTradeWithId } from "@/lib/binance";
+import { ensureTickStorageBudget } from "./tickStorageGuard";
 
 const TABLE = "bn_trade_ticks";
 
@@ -47,6 +48,10 @@ export async function getLastStoredAggId(symbol: string): Promise<number | null>
 export async function insertTicks(symbol: string, ticks: AggTradeWithId[]): Promise<number> {
   const supabase = getDataSupabase();
   if (!supabase || ticks.length === 0) return 0;
+  // Size check before every insert — same pattern as market_history's
+  // ensureStorageBudget(). Fires a background full reset if >=250MB;
+  // never blocks or skips this insert.
+  void ensureTickStorageBudget();
   const rows = ticks.map((t) => ({
     symbol,
     agg_id: t.aggId,
