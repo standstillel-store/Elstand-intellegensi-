@@ -1,4 +1,4 @@
-import { getSupabase } from "@/lib/supabase";
+import { getDataSupabase } from "@/lib/supabaseData";
 import { currentWeekStartUtc } from "./weekCycle";
 import { ensureStorageBudget } from "./storageGuard";
 import type { CandleFootprint, FootprintCell } from "@/lib/elvoid/footprint";
@@ -18,10 +18,10 @@ interface MarketHistoryRow {
  * Best-effort persistence of freshly-computed candle footprints. Never
  * throws — a Supabase hiccup should never break a response that already has
  * real data in hand, same "everything degrades gracefully" rule every other
- * getSupabase() caller in this codebase follows.
+ * getDataSupabase() caller in this codebase follows.
  */
 export async function persistFootprintCandles(symbol: string, interval: string, footprintMap: Map<number, CandleFootprint>): Promise<void> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase || footprintMap.size === 0) return;
   // Storage-guard check (cached in the common case, see storageGuard.ts) —
   // never blocks this write; only opportunistically nudges a cleanup batch
@@ -56,7 +56,7 @@ export async function persistFootprintCandles(symbol: string, interval: string, 
  */
 export async function loadStoredFootprintCandles(symbol: string, interval: string, candleTimesMs: number[]): Promise<Map<number, CandleFootprint>> {
   const result = new Map<number, CandleFootprint>();
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase || candleTimesMs.length === 0) return result;
   try {
     const isoTimes = candleTimesMs.map((t) => new Date(t).toISOString());
@@ -108,7 +108,7 @@ export async function loadStoredFootprintCandles(symbol: string, interval: strin
  * risking one bracket size's session silently overwriting another's.
  */
 export async function persistTpoSessions(symbol: string, chartInterval: string, sessions: TpoSession[]): Promise<void> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase || sessions.length === 0) return;
   await ensureStorageBudget();
   const weekStart = currentWeekStartUtc().toISOString();
@@ -137,7 +137,7 @@ export async function persistTpoSessions(symbol: string, chartInterval: string, 
  * throws) if Supabase isn't configured or the query fails.
  */
 export async function loadStoredTpoSessions(symbol: string, chartInterval: string, sinceMs: number): Promise<TpoSession[]> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase) return [];
   try {
     const { data, error } = await supabase
@@ -191,7 +191,7 @@ const MIN_SNAPSHOT_SPACING_MS = 5 * 60 * 1000;
  * flooding the table.
  */
 export async function persistLiquiditySnapshotThrottled(symbol: string, timestampMs: number, levels: LiquiditySnapshotLevel[]): Promise<void> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase || levels.length === 0) return;
   await ensureStorageBudget();
   try {
@@ -246,7 +246,7 @@ export interface StoredLiquiditySnapshot {
  * configured or the query fails.
  */
 export async function loadStoredLiquiditySnapshots(symbol: string, sinceMs: number): Promise<StoredLiquiditySnapshot[]> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase) return [];
   try {
     const { data, error } = await supabase
@@ -279,7 +279,7 @@ export async function loadStoredLiquiditySnapshots(symbol: string, sinceMs: numb
  * browser.
  */
 export async function cleanupExpiredMarketHistory(): Promise<{ configured: boolean; deleted: number }> {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase) return { configured: false, deleted: 0 };
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { error, count } = await supabase.from(TABLE).delete({ count: "exact" }).lt("created_at", cutoff);

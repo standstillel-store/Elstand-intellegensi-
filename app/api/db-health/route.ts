@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { getDataSupabase, isDataSupabaseConfigured } from "@/lib/supabaseData";
 
 // ---------------------------------------------------------------------------
 // DB_HEALTH — one-shot ground truth for "which Supabase project is the
@@ -16,7 +16,7 @@ import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 // ---------------------------------------------------------------------------
 
 async function checkTable(tableName: string) {
-  const supabase = getSupabase();
+  const supabase = getDataSupabase();
   if (!supabase) return { table: tableName, ok: false, error: "Supabase client not configured." };
   try {
     const { count, error } = await supabase.from(tableName).select("*", { count: "exact", head: true });
@@ -28,7 +28,7 @@ async function checkTable(tableName: string) {
 }
 
 export async function GET() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? null;
+  const url = process.env.DATA_SUPABASE_URL ?? null;
   // Extract just the project ref (the xxxxx in https://xxxxx.supabase.co)
   // so this is easy to eyeball-compare against a Supabase dashboard URL
   // without a human having to paste the whole string somewhere to diff it.
@@ -45,9 +45,9 @@ export async function GET() {
   return NextResponse.json({
     // What the RUNNING deployment actually has configured — not what a
     // human remembers setting, not what's in a stale browser tab.
-    supabaseConfigured: isSupabaseConfigured(),
+    supabaseConfigured: isDataSupabaseConfigured(),
     supabaseProjectRef: projectRef,
-    serviceRoleKeyPresent: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    serviceRoleKeyPresent: Boolean(process.env.DATA_SUPABASE_SERVICE_ROLE_KEY),
     deploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? null,
     environment: process.env.VERCEL_ENV ?? null,
     checkedAt: new Date().toISOString(),
