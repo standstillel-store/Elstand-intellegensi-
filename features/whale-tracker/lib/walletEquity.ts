@@ -6,7 +6,7 @@ import { getTokenMetadataBatch } from "./tokenMetadataStore";
 import { getPricesForTokens } from "./priceSource";
 import { getWallet, upsertWalletBalances, setWalletEquity, getWalletBalances } from "./walletStore";
 import { getRecentTransfersForAddress } from "./transfersStore";
-import type { WalletDetail, WalletHolding, WalletCounterparty } from "../types";
+import type { WalletDetail, WalletHolding, WalletCounterparty, WhaleChain } from "../types";
 
 const ERC20_BALANCE_ABI = [{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
 
@@ -22,7 +22,7 @@ const ERC20_BALANCE_ABI = [{ type: "function", name: "balanceOf", stateMutabilit
  * terakhir"), just bounded to a discoverable token set. Documented in
  * README under "Known limitations".
  */
-export async function refreshWalletEquity(address: string, chain: string = WHALE_CHAIN): Promise<number | null> {
+export async function refreshWalletEquity(address: string, chain: WhaleChain = WHALE_CHAIN): Promise<number | null> {
   const supabase = getDataSupabase();
   const addr = address.toLowerCase();
   const client = getBscClient();
@@ -77,7 +77,7 @@ export async function refreshWalletEquity(address: string, chain: string = WHALE
 }
 
 /** Full Wallet Intelligence payload for the wallet-detail panel. Reads cached data (balances, flow, counterparties) — does NOT trigger a live on-chain refresh; call refreshWalletEquity() separately (e.g. from the indexer, or a manual "Refresh" action) to keep that expensive path off the hot read. */
-export async function getWalletDetail(address: string, chain: string = WHALE_CHAIN): Promise<WalletDetail> {
+export async function getWalletDetail(address: string, chain: WhaleChain = WHALE_CHAIN): Promise<WalletDetail> {
   const addr = address.toLowerCase();
   const supabase = getDataSupabase();
 
