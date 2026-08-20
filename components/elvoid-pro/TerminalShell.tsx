@@ -12,7 +12,10 @@ import { CVDPanel } from "./Analytics/CVDPanel";
 import { ComingSoonPanel } from "./Analytics/ComingSoonPanel";
 import { TradingOverviewPanel } from "./Intelligence/TradingOverviewPanel";
 import { NewsFeedPanel } from "./News/NewsFeedPanel";
+import { WhaleTrackerPanel } from "@/features/whale-tracker/components/WhaleTrackerPanel";
 import type { ChartMode } from "./ChartEngine/chartModes";
+
+type ShellView = "terminal" | "whale-tracker";
 
 const TF_TO_INTERVAL: Record<string, string> = {
   "1m": "1m",
@@ -29,47 +32,80 @@ export function TerminalShell() {
   // Elvoid Pro = Footprint / Order Flow terminal — footprint is the mode a
   // person lands on, not a candlestick chart with footprint buried in a menu.
   const [chartMode, setChartMode] = useState<ChartMode>("footprint");
+  // Premium Navigation → Premium Dashboard (this terminal) → Whale Tracker.
+  // A view switcher, not a route — Whale Tracker stays a module inside the
+  // existing Premium Dashboard shell rather than a new standalone page.
+  // Default view unchanged ("terminal"), so nothing existing moves unless a
+  // person explicitly clicks the new tab.
+  const [view, setView] = useState<ShellView>("terminal");
 
   return (
     <div className="space-y-3">
       <MarketHeader symbol={symbol} />
 
-      {/* Chart + right rail — chart dominates, right rail is the secondary column. */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="rounded-lg border border-line bg-bg-surface/40">
-          <ChartToolbar
-            symbol={symbol}
-            onSymbolChange={setSymbol}
-            timeframe={timeframe}
-            onTimeframeChange={setTimeframe}
-            chartMode={chartMode}
-            onChartModeChange={setChartMode}
-          />
-          <div className="p-2">
-            <AdvancedChart symbol={symbol} timeframe={timeframe} chartMode={chartMode} />
+      <div className="flex gap-1.5 border-b border-line">
+        {(
+          [
+            { key: "terminal", label: "Terminal" },
+            { key: "whale-tracker", label: "Whale Tracker" },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setView(tab.key)}
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+              view === tab.key ? "border-b-2 border-gold text-gold" : "border-b-2 border-transparent text-ink-muted hover:text-ink"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {view === "whale-tracker" ? (
+        <div className="h-[calc(100vh-220px)] min-h-[560px]">
+          <WhaleTrackerPanel />
+        </div>
+      ) : (
+        <>
+          {/* Chart + right rail — chart dominates, right rail is the secondary column. */}
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="rounded-lg border border-line bg-bg-surface/40">
+              <ChartToolbar
+                symbol={symbol}
+                onSymbolChange={setSymbol}
+                timeframe={timeframe}
+                onTimeframeChange={setTimeframe}
+                chartMode={chartMode}
+                onChartModeChange={setChartMode}
+              />
+              <div className="p-2">
+                <AdvancedChart symbol={symbol} timeframe={timeframe} chartMode={chartMode} />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <OrderBookPanel symbol={symbol} />
+              <AISignalPanel symbol={symbol} />
+              <OraclePanel symbol={symbol} />
+              <InsightsPanel symbol={symbol} />
+            </div>
           </div>
-        </div>
 
-        <div className="space-y-3">
-          <OrderBookPanel symbol={symbol} />
-          <AISignalPanel symbol={symbol} />
-          <OraclePanel symbol={symbol} />
-          <InsightsPanel symbol={symbol} />
-        </div>
-      </div>
+          {/* Bottom analytics — secondary panels, never larger than the chart above. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <CVDPanel symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} />
+            <FundingOIPanel symbol={symbol} />
+          </div>
 
-      {/* Bottom analytics — secondary panels, never larger than the chart above. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <CVDPanel symbol={symbol} interval={TF_TO_INTERVAL[timeframe] ?? "5m"} />
-        <FundingOIPanel symbol={symbol} />
-      </div>
-
-      {/* Bottom intelligence — news / AI insights / performance. */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <NewsFeedPanel />
-        <ComingSoonPanel title="AI Insights & Patterns" phase="Phase 7" />
-        <TradingOverviewPanel />
-      </div>
+          {/* Bottom intelligence — news / AI insights / performance. */}
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+            <NewsFeedPanel />
+            <ComingSoonPanel title="AI Insights & Patterns" phase="Phase 7" />
+            <TradingOverviewPanel />
+          </div>
+        </>
+      )}
     </div>
   );
 }

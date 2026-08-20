@@ -1,6 +1,7 @@
 {
   "regions": ["sin1"],
   "crons": [
-    { "path": "/api/market-history/cleanup", "schedule": "0 19 * * *" }
+    { "path": "/api/market-history/cleanup", "schedule": "0 19 * * *" },
+    { "path": "/api/whale/cleanup", "schedule": "30 19 * * *" }
   ]
 }

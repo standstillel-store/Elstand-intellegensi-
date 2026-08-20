@@ -1,0 +1,118 @@
+"use client";
+import { formatUsd, shortAddr, timeAgo } from "@/lib/format";
+import { BSC_EXPLORER_URL } from "../lib/config";
+import type { PaginatedTransfers } from "../types";
+
+function AddressCell({ address, onSelect }: { address: string; onSelect: (address: string) => void }) {
+  return (
+    <button onClick={() => onSelect(address)} className="mono-num text-[11px] text-ink-muted transition-colors hover:text-gold hover:underline" title={address}>
+      {shortAddr(address)}
+    </button>
+  );
+}
+
+export function TransfersTable({
+  data,
+  loading,
+  page,
+  onPageChange,
+  onSelectAddress,
+  onRefresh,
+}: {
+  data: PaginatedTransfers | null;
+  loading: boolean;
+  page: number;
+  onPageChange: (page: number) => void;
+  onSelectAddress: (address: string) => void;
+  onRefresh: () => void;
+}) {
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize ?? 25;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(total, page * pageSize);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table className="w-full border-collapse text-left">
+          <thead className="sticky top-0 z-10 bg-bg-surface">
+            <tr className="border-b border-line text-[10px] uppercase tracking-wide text-ink-faint">
+              <th className="px-3 py-2 font-medium">Time</th>
+              <th className="px-3 py-2 font-medium">From</th>
+              <th className="px-3 py-2 font-medium"></th>
+              <th className="px-3 py-2 font-medium">To</th>
+              <th className="px-3 py-2 text-right font-medium">Value</th>
+              <th className="px-3 py-2 font-medium">Token</th>
+              <th className="px-3 py-2 text-right font-medium">USD</th>
+            </tr>
+          </thead>
+          <tbody className="mono-num text-[11px]">
+            {loading && rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="animate-pulse px-3 py-8 text-center text-ink-faint">
+                  Memuat whale transfers…
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-8 text-center text-ink-faint">
+                  Belum ada transfer yang cocok dengan filter ini.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => (
+                <tr key={`${row.txHash}-${row.logIndex}`} className="border-b border-line/60 transition-colors hover:bg-bg-base/60">
+                  <td className="px-3 py-1.5 text-ink-muted">
+                    <a href={`${BSC_EXPLORER_URL}/tx/${row.txHash}`} target="_blank" rel="noreferrer" className="hover:text-gold hover:underline">
+                      {timeAgo(row.blockTimestamp)}
+                    </a>
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <AddressCell address={row.fromAddress} onSelect={onSelectAddress} />
+                  </td>
+                  <td className="px-1 py-1.5 text-ink-faint">→</td>
+                  <td className="px-3 py-1.5">
+                    <AddressCell address={row.toAddress} onSelect={onSelectAddress} />
+                  </td>
+                  <td className="px-3 py-1.5 text-right text-ink">{row.amount.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
+                  <td className="px-3 py-1.5 text-ink-muted">{row.tokenSymbol ?? "—"}</td>
+                  <td className="px-3 py-1.5 text-right font-semibold text-gold">{row.valueUsd == null ? "Price unavailable" : formatUsd(row.valueUsd)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between border-t border-line px-3 py-2 text-[11px] text-ink-faint">
+        <button onClick={onRefresh} className="rounded-md border border-line px-2 py-1 text-ink-muted transition-colors hover:border-gold/40 hover:text-gold">
+          ⟳ Refresh
+        </button>
+        <span>
+          {total === 0 ? "Showing 0" : `Showing ${rangeStart}-${rangeEnd}`} of {total.toLocaleString("en-US")} transfers
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            disabled={page <= 1}
+            onClick={() => onPageChange(page - 1)}
+            className="rounded-md border border-line px-2 py-1 text-ink-muted transition-colors hover:border-gold/40 hover:text-gold disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            ‹
+          </button>
+          <span className="mono-num">
+            {page} / {totalPages}
+          </span>
+          <button
+            disabled={page >= totalPages}
+            onClick={() => onPageChange(page + 1)}
+            className="rounded-md border border-line px-2 py-1 text-ink-muted transition-colors hover:border-gold/40 hover:text-gold disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
