@@ -60,6 +60,7 @@ export async function GET(req: Request) {
     let backfilledCount = 0;
     let cursor = 0;
     let stoppedForStoragePressure = false;
+    let backfillError: string | null = null;
     while (cursor < stillMissingTimes.length && Date.now() - startedAt < BACKFILL_TIME_BUDGET_MS) {
       // Storage guard: backfill is the one thing here that only ever grows
       // older history. Under CRITICAL pressure the spec wants newest data
@@ -76,17 +77,30 @@ export async function GET(req: Request) {
       cursor += BACKFILL_BATCH_SIZE;
       const rangeStart = toBackfill[0];
       const rangeEnd = toBackfill[toBackfill.length - 1] + intervalMs;
-      // Real historical trades for exactly this candle-time range — not
-      // fabricated, not extrapolated from the live window.
-      const historicalTrades = await getAggTradesRangeChunked(symbol, rangeStart, rangeEnd);
-      const backfillCandles = candles.filter((c) => toBackfill.includes(c.time));
-      const backfilledFootprint = buildFootprintByCandle(backfillCandles, historicalTrades, intervalMs);
-      backfilledCount += backfilledFootprint.size;
-      // Persist immediately (per batch, not just at the end) so partial
-      // progress survives even if a later batch pushes past the time
-      // budget or the request errors out mid-loop.
-      await persistFootprintCandles(symbol, interval, backfilledFootprint);
-      backfilledFootprint.forEach((v, k) => storedFootprint.set(k, v));
+      try {
+        // Real historical trades for exactly this candle-time range — not
+        // fabricated, not extrapolated from the live window.
+        const historicalTrades = await getAggTradesRangeChunked(symbol, rangeStart, rangeEnd);
+        const backfillCandles = candles.filter((c) => toBackfill.includes(c.time));
+        const backfilledFootprint = buildFootprintByCandle(backfillCandles, historicalTrades, intervalMs);
+        backfilledCount += backfilledFootprint.size;
+        // Persist immediately (per batch, not just at the end) so partial
+        // progress survives even if a later batch pushes past the time
+        // budget or the request errors out mid-loop.
+        await persistFootprintCandles(symbol, interval, backfilledFootprint);
+        backfilledFootprint.forEach((v, k) => storedFootprint.set(k, v));
+      } catch (batchErr) {
+        // FOOTPRINT_BACKFILL_ERROR: historical backfill is best-effort
+        // enrichment on top of an already-valid live response — it must
+        // NEVER be able to turn a good live payload into a 502. Most likely
+        // trigger: market_history persistence broken (missing table/RPC),
+        // forcing this loop to redo full history every request until it
+        // eventually gets throttled by Binance. Stop backfilling for this
+        // request, keep whatever succeeded so far, still return 200.
+        backfillError = batchErr instanceof Error ? batchErr.message : String(batchErr);
+        console.error("[ElVoid AI] FOOTPRINT_BACKFILL_ERROR", { symbol, interval, rangeStart, rangeEnd, error: backfillError });
+        break;
+      }
     }
 
     // Merge order: stored/backfilled first, live overwrites (live is always
@@ -103,17 +117,34 @@ export async function GET(req: Request) {
     const coveredTimes = candles.map((c) => c.time).filter((t) => footprintMap.has(t));
     const oldestTradeTime = coveredTimes.length > 0 ? Math.min(...coveredTimes) : null;
     const remainingMissing = stillMissingTimes.length - backfilledCount;
+    // Honest quality signal (spec item 16 / 13): REAL when full requested
+    // history is covered, PARTIAL when only some candles have footprint
+    // (still 100% real data, just incomplete), never fabricated as REAL.
+    const quality: "REAL" | "PARTIAL" | "UNAVAILABLE" =
+      footprintMap.size === 0 ? "UNAVAILABLE" : coveredTimes.length >= candles.length ? "REAL" : "PARTIAL";
 
     return NextResponse.json({
+      symbol,
+      interval,
       candles,
       footprintByTime,
       oldestTradeTime,
+      quality,
+      generatedAt: Date.now(),
       // Honest progress signal — history is being reconstructed
       // incrementally from real data, not instantly complete on first load.
-      backfill: { backfilledThisRequest: backfilledCount, remainingMissing: Math.max(0, remainingMissing), stoppedForStoragePressure },
+      backfill: {
+        backfilledThisRequest: backfilledCount,
+        remainingMissing: Math.max(0, remainingMissing),
+        stoppedForStoragePressure,
+        // Non-fatal: backfill (older history) failed this request but the
+        // live footprint above is still real and still returned as 200.
+        lastError: backfillError,
+      },
     });
   } catch (err) {
-    console.error("[ElVoid AI] footprint-candles error:", err);
-    return NextResponse.json({ error: "Gagal membangun footprint per-candle." }, { status: 502 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[ElVoid AI] FOOTPRINT_QUERY_ERROR", { symbol, interval, limit, error: message });
+    return NextResponse.json({ error: "Gagal membangun footprint per-candle.", code: "FOOTPRINT_QUERY_ERROR", message }, { status: 502 });
   }
 }
