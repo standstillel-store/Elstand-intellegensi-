@@ -31,12 +31,14 @@ function isAuthorizedCron(req: Request): boolean {
   return req.headers.get("authorization") === `Bearer ${secret}`;
 }
 
-// Hard cap on pagination pages per invocation — same reasoning as the
-// footprint historical backfill: a serverless function has a wall-clock
-// timeout, so a very large backlog (e.g. after extended scheduler downtime)
-// is caught up over several subsequent calls rather than attempted in one
-// shot that might not finish in time.
-const MAX_PAGES_PER_RUN = 8;
+// TIME budget for one invocation's catch-up loop — same pattern as the
+// footprint historical backfill: keeps pulling pages until either caught
+// up to the live edge or this budget runs out, rather than a fixed page
+// count. This is what lets a multi-hour backlog (e.g. after the table was
+// unreachable for a while) catch up in a handful of calls instead of
+// crawling forward at a fixed 8000 trades/minute regardless of how far
+// behind it is.
+const CATCHUP_TIME_BUDGET_MS = 8_000; // serverless function has ~10s on Hobby
 const SYMBOL = "BTC";
 
 async function runCapture(req: Request): Promise<NextResponse> {
@@ -47,6 +49,15 @@ async function runCapture(req: Request): Promise<NextResponse> {
     let cursor = await getLastStoredAggId(SYMBOL);
     let totalInserted = 0;
     let pages = 0;
+    // TICK_CAPTURE_PAGE_ERROR: same fix as FOOTPRINT_BACKFILL_ERROR — a
+    // single page failing (most commonly Binance 429 rate-limit mid
+    // catch-up, since this loop can fire up to 8x1000-trade requests every
+    // ~60s) must NOT wipe out the progress already inserted by earlier
+    // pages in this same call, nor return 502 for what is otherwise a
+    // successful partial catch-up. The DB-derived cursor (getLastStoredAggId)
+    // means whatever WAS inserted this call is never lost even if we stop
+    // early — the next call just resumes from there.
+    let pageError: string | null = null;
 
     if (cursor === null) {
       // First-ever run for this symbol: no historical agg_id is known yet,
@@ -63,17 +74,30 @@ async function runCapture(req: Request): Promise<NextResponse> {
       if (raw.length === 0) return NextResponse.json({ ok: true, bootstrapped: false, inserted: 0, note: "Bootstrap fetch returned nothing." });
       const latest = raw[0];
       const inserted = await insertTicks(SYMBOL, [{ aggId: latest.a, price: parseFloat(latest.p), qty: parseFloat(latest.q), isSell: latest.m, time: latest.T }]);
-      return NextResponse.json({ ok: true, bootstrapped: true, inserted, cursor: latest.a });
+      return NextResponse.json({ ok: true, bootstrapped: true, inserted, cursor: latest.a, lastTradeTime: new Date(latest.T).toISOString() });
     }
 
-    while (pages < MAX_PAGES_PER_RUN) {
-      const trades = await getAggTradesFromId(SYMBOL, cursor + 1, 1000);
-      if (trades.length === 0) break;
-      const inserted = await insertTicks(SYMBOL, trades);
-      totalInserted += inserted;
-      cursor = trades[trades.length - 1].aggId;
-      pages += 1;
-      if (trades.length < 1000) break; // caught up to the live edge
+    let lastTradeTimeMs: number | null = null;
+    const startedAt = Date.now();
+    // Time-budget loop (not a fixed page cap): keeps pulling pages until
+    // either caught up to the live edge, the wall-clock budget runs out, or
+    // a page fails. This is what lets a multi-hour backlog catch up in a
+    // handful of calls instead of crawling forward 8000 trades/minute.
+    while (Date.now() - startedAt < CATCHUP_TIME_BUDGET_MS) {
+      try {
+        const trades = await getAggTradesFromId(SYMBOL, cursor + 1, 1000);
+        if (trades.length === 0) break;
+        const inserted = await insertTicks(SYMBOL, trades);
+        totalInserted += inserted;
+        cursor = trades[trades.length - 1].aggId;
+        lastTradeTimeMs = trades[trades.length - 1].time;
+        pages += 1;
+        if (trades.length < 1000) break; // caught up to the live edge
+      } catch (pageErr) {
+        pageError = pageErr instanceof Error ? pageErr.message : String(pageErr);
+        console.error("[ElVoid AI] TICK_CAPTURE_PAGE_ERROR", { symbol: SYMBOL, cursor, pages, error: pageError });
+        break;
+      }
     }
 
     // Cheap, deterministic throttle for the retention sweep — no extra
@@ -84,7 +108,22 @@ async function runCapture(req: Request): Promise<NextResponse> {
       cleanup = await cleanupExpiredTicks(SYMBOL);
     }
 
-    return NextResponse.json({ ok: true, inserted: totalInserted, pages, cursor, cleanup });
+    // Honest lag signal — how far behind "now" the freshest inserted tick
+    // is, in seconds. Lets the caller (or a human staring at the JSON
+    // response) tell "still catching up, working normally" apart from
+    // "stuck" at a glance, without digging through Vercel logs.
+    const lagSeconds = lastTradeTimeMs != null ? Math.round((Date.now() - lastTradeTimeMs) / 1000) : null;
+
+    return NextResponse.json({
+      ok: true,
+      inserted: totalInserted,
+      pages,
+      cursor,
+      lastTradeTime: lastTradeTimeMs != null ? new Date(lastTradeTimeMs).toISOString() : null,
+      lagSeconds,
+      pageError,
+      cleanup,
+    });
   } catch (err) {
     console.error("[ElVoid AI] tick-capture error:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Gagal capture tick." }, { status: 502 });
