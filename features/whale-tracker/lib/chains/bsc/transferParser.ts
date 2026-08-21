@@ -104,9 +104,25 @@ export async function readErc20Metadata(client: PublicClient, tokenAddress: stri
   ]);
   return {
     decimals: decimalsRes.status === "fulfilled" ? Number(decimalsRes.value) : null,
-    symbol: symbolRes.status === "fulfilled" ? String(symbolRes.value) : null,
-    name: nameRes.status === "fulfilled" ? String(nameRes.value) : null,
+    symbol: symbolRes.status === "fulfilled" ? sanitizeTokenText(String(symbolRes.value)) : null,
+    name: nameRes.status === "fulfilled" ? sanitizeTokenText(String(nameRes.value)) : null,
   };
+}
+
+/**
+ * Some BEP-20 contracts (spam/scam tokens, or ones returning bytes32 instead
+ * of a proper string for symbol()/name()) return garbage that renders as
+ * tofu/mojibake in the UI (see AUDIT.md — "嘘嘘蟲"-style output on the All
+ * Transfers table). Strips anything outside printable ASCII/common symbol
+ * ranges and null-bytes, and falls back to null (UI already renders "—" for
+ * that) rather than persisting unreadable text — never fabricates a fake
+ * symbol, just declines to store one that isn't real text.
+ */
+function sanitizeTokenText(raw: string): string | null {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = raw.replace(/\u0000/g, "").replace(/[^\x20-\x7E]/g, "").trim();
+  if (!cleaned) return null;
+  return cleaned.slice(0, 32);
 }
 
 /** Decodes a raw integer amount using the token's decimals. Falls back to 18 (the BEP-20/EVM norm) only for display purposes when decimals genuinely couldn't be resolved — the row still gets persisted (spec: "tetap simpan token transfer" even without full metadata). */

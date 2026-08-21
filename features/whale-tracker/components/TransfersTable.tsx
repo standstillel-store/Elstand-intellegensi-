@@ -36,7 +36,7 @@ export function TransfersTable({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-left">
+        <table className="w-full min-w-[560px] border-collapse text-left">
           <thead className="sticky top-0 z-10 bg-bg-surface">
             <tr className="border-b border-line text-[10px] uppercase tracking-wide text-ink-faint">
               <th className="px-3 py-2 font-medium">Time</th>
@@ -78,7 +78,9 @@ export function TransfersTable({
                   </td>
                   <td className="px-3 py-1.5 text-right text-ink">{row.amount.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
                   <td className="px-3 py-1.5 text-ink-muted">{row.tokenSymbol ?? "—"}</td>
-                  <td className="px-3 py-1.5 text-right font-semibold text-gold">{row.valueUsd == null ? "Price unavailable" : formatUsd(row.valueUsd)}</td>
+                  <td className="whitespace-nowrap px-3 py-1.5 text-right text-[9.5px] font-semibold text-gold sm:text-[11px]">
+                    {row.valueUsd == null ? "Price unavailable" : formatUsd(row.valueUsd)}
+                  </td>
                 </tr>
               ))
             )}
