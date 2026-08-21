@@ -34,12 +34,17 @@ export function TransfersTable({
   const rangeEnd = Math.min(total, page * pageSize);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* pb-16 so the last rows aren't hidden behind the floating AI chat
-          bubble (fixed bottom-right, see AIChatDock.tsx) on mobile. */}
-      <div className="min-h-0 flex-1 overflow-auto pb-16 sm:pb-0">
+    <div className="flex flex-col sm:min-h-0 sm:flex-1">
+      {/* overflow-x-auto here (not overflow-auto) so on mobile the table
+          scrolls sideways within its own box instead of the From/To address
+          columns pushing past the screen edge ("nerobos batas") — the table
+          has min-w-[560px] below so it needs somewhere to overflow into. On
+          sm: and up, this also becomes the vertical scroll container since
+          the panel has real bounded height there. pb-16 keeps the last rows
+          clear of the floating AI chat bubble on mobile. */}
+      <div className="overflow-x-auto pb-16 sm:min-h-0 sm:flex-1 sm:overflow-auto sm:pb-0">
         <table className="w-full min-w-[560px] border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-bg-surface">
+          <thead className="bg-bg-surface sm:sticky sm:top-0 sm:z-10">
             <tr className="border-b border-line text-[10px] uppercase tracking-wide text-ink-faint">
               <th className="px-3 py-2 font-medium">Time</th>
               <th className="px-3 py-2 font-medium">From</th>

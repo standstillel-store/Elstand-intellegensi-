@@ -63,13 +63,14 @@ export function TerminalShell() {
       </div>
 
       {view === "whale-tracker" ? (
-        // dvh (dynamic viewport height) instead of vh — vh on mobile Chrome/Safari
-        // is measured against the *largest* possible viewport (address bar hidden),
-        // so this div used to be taller than what's actually visible whenever the
-        // address bar was showing, pushing the footer/refresh row into overlap
-        // with table content. dvh tracks the real visible height. min-h-[420px]
-        // lowered too, so it never forces overflow on short phone screens.
-        <div className="h-[calc(100dvh-220px)] min-h-[420px]">
+        // Fixed height + internal scroll only from sm: up. On mobile, the
+        // stacked SummaryCards + wrapped FilterBar eat far more vertical
+        // space than this budget assumes (they're single-row on desktop,
+        // multi-row on narrow screens), so a forced height there left too
+        // little room for the table and caused it to overlap its own
+        // footer. Below sm:, no height is forced — the panel just flows in
+        // the page and the whole page scrolls, which is normal on mobile.
+        <div className="sm:h-[calc(100dvh-220px)] sm:min-h-[420px]">
           <WhaleTrackerPanel />
         </div>
       ) : (
