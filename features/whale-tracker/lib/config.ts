@@ -18,6 +18,12 @@ export const WHALE_USD_THRESHOLD = Number(process.env.WHALE_USD_THRESHOLD_BSC ??
 /** BSC RPC endpoint for the block/log indexer. Public default works for read-only log scans at low volume; set BSC_RPC_URL to a dedicated provider (your existing Alchemy key also serves BSC — see README) for production reliability and rate limits. */
 export const BSC_RPC_URL = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.binance.org";
 
+/** Optional comma-separated backup RPC URLs, tried in order if BSC_RPC_URL fails/times out/rate-limits (viem's fallback() transport — see client.ts). E.g. BSC_RPC_FALLBACK_URLS="https://bsc-mainnet.nodereal.io/v1/<key>,https://1rpc.io/bnb". Empty by default — a paid/dedicated primary (Alchemy) shouldn't silently mask real errors by always having a fallback layered on; only set this once you've decided which specific backup endpoints you trust. */
+export const BSC_RPC_FALLBACK_URLS = (process.env.BSC_RPC_FALLBACK_URLS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 /** How many blocks the incremental scanner pulls per invocation — bounded so a single run can never balloon into an unbounded catch-up scan.
  *  Kept small by default: native-BNB detection fetches one FULL block per number, sequentially (see transferParser.ts), so even a fast RPC
  *  turns 500 blocks into minutes — far past a serverless function's duration limit (Vercel Hobby caps at 10s). Raise this only if BSC_RPC_URL
