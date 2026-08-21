@@ -63,7 +63,13 @@ export function TerminalShell() {
       </div>
 
       {view === "whale-tracker" ? (
-        <div className="h-[calc(100vh-220px)] min-h-[560px]">
+        // dvh (dynamic viewport height) instead of vh — vh on mobile Chrome/Safari
+        // is measured against the *largest* possible viewport (address bar hidden),
+        // so this div used to be taller than what's actually visible whenever the
+        // address bar was showing, pushing the footer/refresh row into overlap
+        // with table content. dvh tracks the real visible height. min-h-[420px]
+        // lowered too, so it never forces overflow on short phone screens.
+        <div className="h-[calc(100dvh-220px)] min-h-[420px]">
           <WhaleTrackerPanel />
         </div>
       ) : (

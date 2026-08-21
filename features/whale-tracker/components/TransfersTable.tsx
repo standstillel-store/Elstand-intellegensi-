@@ -35,7 +35,9 @@ export function TransfersTable({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* pb-16 so the last rows aren't hidden behind the floating AI chat
+          bubble (fixed bottom-right, see AIChatDock.tsx) on mobile. */}
+      <div className="min-h-0 flex-1 overflow-auto pb-16 sm:pb-0">
         <table className="w-full min-w-[560px] border-collapse text-left">
           <thead className="sticky top-0 z-10 bg-bg-surface">
             <tr className="border-b border-line text-[10px] uppercase tracking-wide text-ink-faint">
@@ -78,8 +80,8 @@ export function TransfersTable({
                   </td>
                   <td className="px-3 py-1.5 text-right text-ink">{row.amount.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
                   <td className="px-3 py-1.5 text-ink-muted">{row.tokenSymbol ?? "—"}</td>
-                  <td className="whitespace-nowrap px-3 py-1.5 text-right text-[9.5px] font-semibold text-gold sm:text-[11px]">
-                    {row.valueUsd == null ? "Price unavailable" : formatUsd(row.valueUsd)}
+                  <td className="whitespace-nowrap px-3 py-1.5 text-right text-[9.5px] font-semibold text-gold sm:text-[11px]" title={row.valueUsd == null ? "Harga token ini belum ke-index / tidak ada pool likuiditas yang kedeteksi" : undefined}>
+                    {row.valueUsd == null ? <span className="text-ink-faint">—</span> : formatUsd(row.valueUsd)}
                   </td>
                 </tr>
               ))
@@ -88,12 +90,18 @@ export function TransfersTable({
         </table>
       </div>
 
-      <div className="flex items-center justify-between border-t border-line px-3 py-2 text-[11px] text-ink-faint">
+      {/* Solid bg + relative z so this footer always sits cleanly above/below
+          the scroll area instead of visually blending into table rows when
+          the panel's height math is tight (short mobile viewports). */}
+      <div className="relative z-10 flex items-center justify-between border-t border-line bg-bg-surface px-3 py-2 text-[11px] text-ink-faint">
         <button onClick={onRefresh} className="rounded-md border border-line px-2 py-1 text-ink-muted transition-colors hover:border-gold/40 hover:text-gold">
           ⟳ Refresh
         </button>
-        <span>
+        <span className="hidden sm:inline">
           {total === 0 ? "Showing 0" : `Showing ${rangeStart}-${rangeEnd}`} of {total.toLocaleString("en-US")} transfers
+        </span>
+        <span className="sm:hidden mono-num">
+          {rangeStart}-{rangeEnd} / {total.toLocaleString("en-US")}
         </span>
         <div className="flex items-center gap-2">
           <button
