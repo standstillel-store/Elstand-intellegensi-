@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { runIncrementalScan } from "@/features/whale-tracker/lib/chains/bsc/indexer";
 import { isAuthorizedCron } from "@/features/whale-tracker/lib/config";
 
+// Let this route run up to 60s on plans that allow it (Vercel Pro+). Hobby
+// plan hard-caps functions at 10s regardless of this value, which is
+// exactly why BSC_BLOCK_BATCH_SIZE defaults small (config.ts) — the batch
+// size, not this setting, is what actually keeps a Hobby-plan run inside
+// budget.
+export const maxDuration = 60;
+
 // Runs one bounded incremental scan pass (BSC_BLOCK_BATCH_SIZE blocks,
 // default 500) and returns. Two ways it gets called, exactly like
 // app/api/binance/auto-trade/tick:

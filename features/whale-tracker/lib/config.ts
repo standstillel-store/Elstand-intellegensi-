@@ -18,8 +18,11 @@ export const WHALE_USD_THRESHOLD = Number(process.env.WHALE_USD_THRESHOLD_BSC ??
 /** BSC RPC endpoint for the block/log indexer. Public default works for read-only log scans at low volume; set BSC_RPC_URL to a dedicated provider (your existing Alchemy key also serves BSC — see README) for production reliability and rate limits. */
 export const BSC_RPC_URL = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.binance.org";
 
-/** How many blocks the incremental scanner pulls per invocation — bounded so a single run can never balloon into an unbounded catch-up scan. */
-export const BSC_BLOCK_BATCH_SIZE = Number(process.env.BSC_BLOCK_BATCH_SIZE ?? 500);
+/** How many blocks the incremental scanner pulls per invocation — bounded so a single run can never balloon into an unbounded catch-up scan.
+ *  Kept small by default: native-BNB detection fetches one FULL block per number, sequentially (see transferParser.ts), so even a fast RPC
+ *  turns 500 blocks into minutes — far past a serverless function's duration limit (Vercel Hobby caps at 10s). Raise this only if BSC_RPC_URL
+ *  points at a fast dedicated provider AND the deployment plan allows a longer function duration. */
+export const BSC_BLOCK_BATCH_SIZE = Number(process.env.BSC_BLOCK_BATCH_SIZE ?? 20);
 
 /** How long a resolved token price is trusted before re-fetching — avoids one external price request per individual transfer. */
 export const TOKEN_PRICE_CACHE_MS = Number(process.env.WHALE_PRICE_CACHE_MS ?? 60_000);
