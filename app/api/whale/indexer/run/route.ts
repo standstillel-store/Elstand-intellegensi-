@@ -44,8 +44,13 @@ async function run(req: Request) {
     }
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    console.error("[Whale] indexer run failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Whale indexer run gagal." }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[Whale] indexer run failed:", message);
+    // Safe to return the real message here (not just a generic string):
+    // this branch is only reachable after isAuthorizedCron already passed,
+    // so only a caller holding CRON_SECRET ever sees it — never exposed to
+    // an unauthenticated request or to the browser bundle.
+    return NextResponse.json({ error: "Whale indexer run gagal.", detail: message }, { status: 500 });
   }
 }
 
