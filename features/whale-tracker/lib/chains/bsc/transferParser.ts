@@ -65,17 +65,29 @@ export async function fetchNativeTransfers(fromBlock: bigint, toBlock: bigint): 
   const blockNumbers: bigint[] = [];
   for (let b = fromBlock; b <= toBlock; b++) blockNumbers.push(b);
 
-  // Sequential (not Promise.all over the whole range) — a 500-block batch of
-  // full-transaction blocks is already a meaningful RPC load; sequential
-  // keeps a single indexer run from firing hundreds of concurrent requests
-  // at a public/rate-limited RPC endpoint.
-  for (const bn of blockNumbers) {
-    const block = await client.getBlock({ blockNumber: bn, includeTransactions: true });
-    blockTimestamps.set(bn.toString(), block.timestamp);
-    for (const tx of block.transactions) {
-      if (typeof tx === "string") continue; // shouldn't happen with includeTransactions: true, but keep the type guard
-      if (tx.value > BigInt(0) && tx.to) {
-        transfers.push({ txHash: tx.hash, blockNumber: bn, from: tx.from.toLowerCase(), to: tx.to.toLowerCase(), rawValue: tx.value });
+  // Bounded-concurrency (not fully sequential, not unbounded Promise.all) —
+  // a small BSC_BLOCK_BATCH_SIZE still meant, in practice, several dozen
+  // seconds of wall time per run against a free/shared RPC when each
+  // getBlock call was awaited one at a time (confirmed via a real
+  // "Task timed out after 60 seconds" Vercel log — the code wasn't hung on
+  // any single call, it was just cumulatively too slow). CONCURRENCY caps
+  // how many blocks are in flight at once so a batch of e.g. 10-20 blocks
+  // finishes in roughly (batch/CONCURRENCY) round-trips instead of
+  // (batch) round-trips, without firing hundreds of requests at once the
+  // way an unbounded Promise.all over a 500-block batch would.
+  const CONCURRENCY = 5;
+  for (let i = 0; i < blockNumbers.length; i += CONCURRENCY) {
+    const chunk = blockNumbers.slice(i, i + CONCURRENCY);
+    const blocks = await Promise.all(chunk.map((bn) => client.getBlock({ blockNumber: bn, includeTransactions: true })));
+    for (let j = 0; j < chunk.length; j++) {
+      const bn = chunk[j];
+      const block = blocks[j];
+      blockTimestamps.set(bn.toString(), block.timestamp);
+      for (const tx of block.transactions) {
+        if (typeof tx === "string") continue; // shouldn't happen with includeTransactions: true, but keep the type guard
+        if (tx.value > BigInt(0) && tx.to) {
+          transfers.push({ txHash: tx.hash, blockNumber: bn, from: tx.from.toLowerCase(), to: tx.to.toLowerCase(), rawValue: tx.value });
+        }
       }
     }
   }
