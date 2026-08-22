@@ -111,14 +111,16 @@ export async function activateReferral(params: { referredUserId: string; referra
       .update({ status: "REWARDED", rewarded_at: new Date().toISOString() })
       .eq("id", created.id)
       .eq("status", "ACTIVATED");
-    await db()
-      .from("ai_energy_ledger")
-      .upsert(
-        { wallet_address: `user:${referrer.userId}`, amount: QUEST_REWARDS.referral.aiEnergy, type: "ai_energy", reference_id: null, description: "Referral reward" },
-        { onConflict: "reference_id,type" }
-      )
-      .then(() => undefined)
-      .catch(() => undefined); // best-effort audit trail only — the ai_token credit above is the balance of record for AI Energy
+    try {
+      await db()
+        .from("ai_energy_ledger")
+        .upsert(
+          { wallet_address: `user:${referrer.userId}`, amount: QUEST_REWARDS.referral.aiEnergy, type: "ai_energy", reference_id: null, description: "Referral reward" },
+          { onConflict: "reference_id,type" }
+        );
+    } catch {
+      // best-effort audit trail only — the ai_token credit above is the balance of record for AI Energy
+    }
   }
   // If the energy credit failed (infra_error), the referral row stays
   // ACTIVATED (not REWARDED) — a background reconciliation job or a manual
