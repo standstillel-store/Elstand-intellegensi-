@@ -121,7 +121,7 @@ export async function verifyAddLiquidityTransaction(txHash: string, walletAddres
   // into PoolManager internally). If positionManager IS configured,
   // additionally require it as the tx target for a tighter check.
   const touchesPoolManager =
-    normalize(tx.to ?? "") === poolManager || receipt.logs.some((log) => normalize(log.address) === poolManager);
+    normalize(tx.to ?? "") === poolManager || receipt.logs.some((log: any) => normalize(log.address) === poolManager);
   if (!touchesPoolManager) {
     return { status: "INVALID", reason: "Transaction does not interact with the Uniswap V4 PoolManager." };
   }
@@ -209,7 +209,7 @@ export async function verifyBuyElsTransaction(txHash: string, walletAddress: str
   // Rule 6: correct contract/pool/router is involved.
   const touchesPurchaseContract =
     normalize(tx.to ?? "") === normalize(purchaseContract!) ||
-    receipt.logs.some((log) => normalize(log.address) === normalize(purchaseContract!));
+    receipt.logs.some((log: any) => normalize(log.address) === normalize(purchaseContract!));
   if (!touchesPurchaseContract) {
     return { status: "INVALID", reason: "Transaction does not interact with the configured ELS purchase contract." };
   }
