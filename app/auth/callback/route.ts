@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { upsertUserProfile } from "@/lib/auth/profile";
+import { activateReferral, REFERRAL_COOKIE_NAME } from "@/lib/referral";
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -27,7 +28,29 @@ export async function GET(request: NextRequest) {
 
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
       if (!error && data.user) {
+        // Section 16: referral must reward only on a genuine onboarding
+        // event, never merely because a referral URL was opened. Detect
+        // "genuinely new user" by checking for an existing `users` row
+        // BEFORE upsertUserProfile creates/refreshes it — this is the one
+        // place in the whole app where that distinction is unambiguous
+        // (every account, wallet-linked or not, is created here — see the
+        // note in app/api/wallet/session/route.ts).
+        const { data: existingUserRow } = await supabase.from("users").select("id").eq("id", data.user.id).maybeSingle();
+        const isNewUser = !existingUserRow;
+
         await upsertUserProfile(supabase, data.user);
+
+        if (isNewUser) {
+          const referralCode = cookieStore.get(REFERRAL_COOKIE_NAME)?.value ?? null;
+          try {
+            await activateReferral({ referredUserId: data.user.id, referralCode });
+          } catch (err) {
+            // Best-effort: a referral-system hiccup must never block sign-in.
+            console.error("[auth/callback] activateReferral failed:", err instanceof Error ? err.message : err);
+          }
+          cookieStore.delete(REFERRAL_COOKIE_NAME);
+        }
+
         return NextResponse.redirect(`${origin}${next}`);
       }
 
