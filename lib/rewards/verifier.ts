@@ -1,6 +1,6 @@
-import { isAddress, isHash, decodeEventLog, parseAbiItem, type Hash } from "viem";
+import { isAddress, isHash, decodeEventLog, parseAbiItem, encodeAbiParameters, keccak256, type Hash } from "viem";
 import { getRewardChainClient } from "./chainClient";
-import { LIQUIDITY_QUEST_CHAIN_CONFIG, LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIG, BUY_ELS_QUEST_CONFIGURED, MINIMUM_USD_VALUE } from "./config";
+import { LIQUIDITY_QUEST_CHAIN_CONFIG, LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIG, BUY_ELS_QUEST_CONFIGURED, ELS_BNB_POOL_KEY, MINIMUM_USD_VALUE } from "./config";
 import { getHistoricalNativeUsdPrice, weiToUsd } from "./pricing";
 
 // ---------------------------------------------------------------------------
@@ -22,6 +22,29 @@ const ERC20_TRANSFER = parseAbiItem("event Transfer(address indexed from, addres
 const V4_MODIFY_LIQUIDITY = parseAbiItem(
   "event ModifyLiquidity(bytes32 indexed id, address indexed sender, int24 tickLower, int24 tickUpper, int256 liquidityDelta, bytes32 salt)"
 );
+/** Uniswap v4 PoolManager's core.Swap event — https://docs.uniswap.org/contracts/v4/reference/core/interfaces/IPoolManager#swap-event. amount0/amount1 are signed deltas to the POOL's balance: positive = pool received (swapper paid in), negative = pool paid out (swapper received). */
+const V4_SWAP = parseAbiItem(
+  "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)"
+);
+
+/**
+ * Computes a Uniswap V4 PoolId exactly as v4-core's PoolIdLibrary does on
+ * -chain: `keccak256(abi.encode(poolKey))`, where poolKey is the tuple
+ * (currency0, currency1, fee, tickSpacing, hooks) in that order — abi.encode
+ * of a struct is equivalent to abi.encode of its fields as a plain tuple.
+ * This lets the verifier prove a Swap event's `id` belongs to the specific
+ * ELS/native pool configured in ELS_BNB_POOL_KEY, rather than trusting that
+ * "any Swap event on the PoolManager, in a tx that also happens to move
+ * ELS to the wallet" is good enough — two independent V4 pools could
+ * otherwise coincidentally satisfy that weaker check in one crafted tx.
+ */
+function computePoolId(poolKey: typeof ELS_BNB_POOL_KEY): `0x${string}` {
+  const encoded = encodeAbiParameters(
+    [{ type: "address" }, { type: "address" }, { type: "uint24" }, { type: "int24" }, { type: "address" }],
+    [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
+  );
+  return keccak256(encoded);
+}
 
 function normalize(address: string): string {
   return address.toLowerCase();
@@ -263,15 +286,20 @@ export async function verifyAddLiquidityTransaction(txHash: string, walletAddres
 }
 
 /**
- * Buy ELS quest verifier — brief Section 5. Structurally identical shape to
- * Add Liquidity (fetch → chain/status/sender checks → contract check →
- * activity check → amount check), but against a purchase
- * router/contract/pool instead of the V4 PoolManager, and checking that ELS
- * moved TO the buyer rather than into a pool.
+ * Buy ELS quest verifier — reuses the same Uniswap V4 ELS/native pool as
+ * Add Liquidity (operator decision: no new purchase/presale contract, no
+ * new deployment). "Buying ELS" = swapping native BNB for ELS in that
+ * pool. Structurally: fetch → chain/status/sender checks → PoolManager
+ * contact check → pool-specific Swap event with the correct direction →
+ * ELS actually received → USD floor. The Swap event's `id` is checked
+ * against the ELS/native pool's own computed PoolId (not just "some Swap
+ * happened on the PoolManager") so an unrelated pool's swap combined with
+ * an incidental ELS transfer in the same tx cannot be mistaken for a
+ * genuine purchase.
  */
 export async function verifyBuyElsTransaction(txHash: string, walletAddress: string): Promise<VerificationOutcome> {
   if (!BUY_ELS_QUEST_CONFIGURED) {
-    return { status: "SYSTEM_ERROR", reason: "Buy ELS verification is not configured on this deployment yet (no purchase contract deployed)." };
+    return { status: "SYSTEM_ERROR", reason: "Buy ELS verification is not configured on this deployment yet." };
   }
 
   const { chainId, elsTokenAddress, purchaseContract, minimumElsAmountRaw } = BUY_ELS_QUEST_CONFIG;
@@ -283,34 +311,64 @@ export async function verifyBuyElsTransaction(txHash: string, walletAddress: str
     return { status: "INVALID", reason: `Transaction is on chain ${tx.chainId}, expected ${chainId}.` };
   }
 
-  // Rule 6: correct contract/pool/router is involved.
+  // Rule 6: correct contract/pool/router is involved — same PoolManager
+  // singleton the Add Liquidity quest verifies against (see config.ts).
   const touchesPurchaseContract =
-    normalize(tx.to ?? "") === normalize(purchaseContract!) ||
-    receipt.logs.some((log: any) => normalize(log.address) === normalize(purchaseContract!));
+    normalize(tx.to ?? "") === normalize(purchaseContract) || receipt.logs.some((log: any) => normalize(log.address) === normalize(purchaseContract));
   if (!touchesPurchaseContract) {
-    return { status: "INVALID", reason: "Transaction does not interact with the configured ELS purchase contract." };
+    return { status: "INVALID", reason: "Transaction does not interact with the configured ELS purchase infrastructure." };
   }
 
-  // Rule 7/8: actual purchase/swap activity occurred and the user RECEIVED
-  // the required ELS — an ERC20 Transfer of the ELS token with `to ==
-  // walletAddress`, originating from the purchase contract's flow within
-  // this same transaction.
-  let elsReceived = BigInt(0);
+  // Rule 7/8/9: an actual Swap occurred, in the specific ELS/native pool
+  // (not just any V4 pool), in the BNB→ELS direction — currency0 is the
+  // native sentinel (always the lower address), so a genuine BNB-in/ELS-out
+  // swap must show amount0 > 0 (pool received native BNB) and amount1 < 0
+  // (pool paid out ELS to the swapper).
+  const expectedPoolId = computePoolId(ELS_BNB_POOL_KEY);
+  let sawCorrectDirectionSwap = false;
+  let elsOutFromSwap = BigInt(0);
+  for (const log of receipt.logs) {
+    if (normalize(log.address) !== normalize(purchaseContract)) continue;
+    try {
+      const decoded = decodeEventLog({ abi: [V4_SWAP], data: log.data, topics: log.topics });
+      if (decoded.eventName !== "Swap") continue;
+      const args = decoded.args as any;
+      if (normalize(args.id as string) !== normalize(expectedPoolId)) continue; // a different pool's swap — not this quest's pool
+      const amount0 = args.amount0 as bigint;
+      const amount1 = args.amount1 as bigint;
+      if (amount0 > BigInt(0) && amount1 < BigInt(0)) {
+        sawCorrectDirectionSwap = true;
+        elsOutFromSwap += -amount1;
+      }
+    } catch {
+      // Not a Swap log (could be ModifyLiquidity/Donate/Initialize/etc.) — ignore and keep scanning.
+    }
+  }
+  if (!sawCorrectDirectionSwap) {
+    return { status: "INVALID", reason: "Transaction does not contain a valid BNB → ELS swap in the configured ELS/BNB pool." };
+  }
+
+  // Cross-check against the ERC20 side: ELS must actually land in the
+  // connected wallet (defense in depth — the Swap event proves the POOL's
+  // side of the trade; this proves the SWAPPER actually received it,
+  // guarding against exotic routing where the pool-level swap succeeds but
+  // the output is redirected elsewhere instead of to the buyer).
+  let elsReceivedByWallet = BigInt(0);
   for (const log of receipt.logs) {
     if (normalize(log.address) !== elsTokenAddress) continue;
     try {
       const decoded = decodeEventLog({ abi: [ERC20_TRANSFER], data: log.data, topics: log.topics });
       if (decoded.eventName === "Transfer" && normalize((decoded.args as any).to) === normalize(walletAddress)) {
-        elsReceived += (decoded.args as any).value as bigint;
+        elsReceivedByWallet += (decoded.args as any).value as bigint;
       }
     } catch {
       // ignore non-Transfer logs on the token contract
     }
   }
-  if (elsReceived === BigInt(0)) {
+  if (elsReceivedByWallet === BigInt(0)) {
     return { status: "INVALID", reason: "No ELS was received by the connected wallet in this transaction." };
   }
-  if (minimumElsAmountRaw > BigInt(0) && elsReceived < minimumElsAmountRaw) {
+  if (minimumElsAmountRaw > BigInt(0) && elsReceivedByWallet < minimumElsAmountRaw) {
     return { status: "INVALID", reason: "ELS amount purchased is below the configured minimum." };
   }
 
@@ -320,6 +378,12 @@ export async function verifyBuyElsTransaction(txHash: string, walletAddress: str
   return {
     status: "VALID",
     blockNumber: receipt.blockNumber,
-    data: { elsReceived: elsReceived.toString(), to: tx.to, ...usdCheck.data },
+    data: {
+      poolId: expectedPoolId,
+      elsOutFromSwap: elsOutFromSwap.toString(),
+      elsReceivedByWallet: elsReceivedByWallet.toString(),
+      to: tx.to,
+      ...usdCheck.data,
+    },
   };
 }

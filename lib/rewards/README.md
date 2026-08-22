@@ -38,3 +38,12 @@ history — never anything that decides `VALID`/`INVALID` itself.
   match the pre-existing `/wallet` dashboard's BSC-testnet-only config —
   intentional (Section 4 requires mainnet), but worth knowing if you're
   cross-referencing the two features.
+- **Buy ELS has no dedicated purchase contract** (by explicit operator
+  decision — no new deployment). It reuses the same Uniswap V4 ELS/native
+  pool as Add Liquidity: "buying" = swapping native BNB for ELS in that
+  pool. The verifier checks the `Swap` event's pool id against
+  `config.ts`'s `ELS_BNB_POOL_KEY` (computed the same way v4-core computes
+  it on-chain) and requires the BNB→ELS direction specifically, not just
+  "any Swap happened." If a second ELS pool with different parameters is
+  ever created, `ELS_BNB_POOL_KEY`'s env overrides must be repointed or
+  Buy ELS will reject genuine swaps in the new pool.

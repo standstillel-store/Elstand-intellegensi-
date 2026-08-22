@@ -72,35 +72,61 @@ export const LIQUIDITY_QUEST_CHAIN_CONFIG = {
 export const LIQUIDITY_QUEST_CONFIGURED = Boolean(LIQUIDITY_QUEST_CHAIN_CONFIG.poolManager);
 
 /**
- * Buy ELS — unlike Add Liquidity, the brief gives no destination URL and no
- * router/contract address, and the existing codebase has NO deployed ELS
- * purchase contract anywhere (lib/web3/config.ts's
- * PREMIUM_PURCHASE_CONTRACT / AI_ENERGY_PURCHASE_CONTRACT are both `null`
- * for the exact same reason — "Coming Soon" until deployed). Per Section 20
- * ("do not overengineer" / do not fabricate infrastructure that doesn't
- * exist), this stays unconfigured: the quest card renders but its verify
- * button is disabled with "Coming Soon" until these are filled in.
+ * Shared Uniswap V4 pool identity for the ELS/native pool — used by BOTH
+ * quests (Add Liquidity provisions it, Buy ELS swaps against it), so this
+ * lives once here rather than duplicated.
+ *
+ * Values are NOT invented: they're read from the exact same pool the app
+ * already sends users to for Add Liquidity — see
+ * components/earn/EarnView.tsx's ADD_LIQUIDITY_URL, whose `fee` param
+ * decodes to {"feeAmount":375,"tickSpacing":4,"isDynamic":false} and whose
+ * `hook` param is `undefined` (no hook contract). V4's PoolKey is
+ * {currency0, currency1, fee, tickSpacing, hooks}, sorted so the lower
+ * address is currency0 — the native-currency sentinel (0x0) is always the
+ * lowest possible address, so it is currency0 here regardless of what the
+ * ELS address happens to be.
+ *
+ * If a second ELS pool with different parameters is ever created, this
+ * must be repointed (via the env vars below) or Buy ELS will verify
+ * against the wrong pool and reject genuine swaps in the new one — this
+ * is a real limitation, not a hidden assumption; noted in the final report.
+ */
+export const ELS_BNB_POOL_KEY = {
+  currency0: "0x0000000000000000000000000000000000000000" as `0x${string}`, // native BNB sentinel
+  currency1: LIQUIDITY_QUEST_CHAIN_CONFIG.elsTokenAddress as `0x${string}`,
+  fee: Number(process.env.EARN_ELS_BNB_POOL_FEE ?? 375),
+  tickSpacing: Number(process.env.EARN_ELS_BNB_POOL_TICK_SPACING ?? 4),
+  hooks: (process.env.EARN_ELS_BNB_POOL_HOOKS ?? "0x0000000000000000000000000000000000000000").toLowerCase() as `0x${string}`,
+} as const;
+
+/**
+ * Buy ELS — per explicit operator decision (no new purchase/presale
+ * contract, no new deployment): reuses the SAME already-verified Uniswap
+ * V4 infrastructure as Add Liquidity. "Buying ELS" here means "swapping
+ * native BNB for ELS in the existing ELS/BNB V4 pool" — the PoolManager
+ * singleton is the contract this actually touches, exactly like Add
+ * Liquidity. `EARN_BUY_ELS_CONTRACT` is kept as an optional override (for
+ * a future dedicated purchase/router contract, if one is ever deployed)
+ * but now defaults to the PoolManager rather than defaulting to `null`,
+ * since there genuinely is verifiable purchase infrastructure today.
  */
 export const BUY_ELS_QUEST_CONFIG = {
-  /**
-   * FIX (Phase 6.5 audit): this previously defaulted to 97 (BSC testnet,
-   * reusing the pre-existing /wallet dashboard's chain) — but Section 5's
-   * verification checklist is explicit ("chainId == 56", "correct ELS
-   * Mainnet token"), and Section 2's flow diagram agrees: "BUY ELS -> BNB
-   * Mainnet 56 -> ELS Mainnet -> verified transaction -> reward ELS
-   * Testnet + AI Energy". The MAINNET purchase is what gets
-   * eligibility-checked; ELS Testnet is only the reward, same shape as Add
-   * Liquidity below. Defaulting to testnet here would have verified the
-   * wrong chain entirely once a purchase contract is deployed. Still
-   * overridable via env; the default now matches the brief's explicit rule.
-   */
   chainId: Number(process.env.EARN_BUY_ELS_CHAIN_ID ?? 56),
   elsTokenAddress: (process.env.EARN_BUY_ELS_ELS_ADDRESS ?? "0x3a0664300EA06Ba7c01EDC9951c1b04BE9101C82").toLowerCase(),
-  /** Router/pair/pool contract ELS is actually bought through. Null = not deployed yet. */
-  purchaseContract: (process.env.EARN_BUY_ELS_CONTRACT as `0x${string}` | undefined) ?? null,
+  /** Contract a Buy ELS transaction must touch. Defaults to the same verified V4 PoolManager Add Liquidity uses (see LIQUIDITY_QUEST_CHAIN_CONFIG.poolManager's source note) — override only if a dedicated purchase/router contract is deployed later. */
+  purchaseContract: ((process.env.EARN_BUY_ELS_CONTRACT as `0x${string}` | undefined) ?? LIQUIDITY_QUEST_CHAIN_CONFIG.poolManager) as `0x${string}`,
   minimumElsAmountRaw: process.env.EARN_BUY_ELS_MIN_ELS_RAW ? BigInt(process.env.EARN_BUY_ELS_MIN_ELS_RAW) : BigInt(0),
 } as const;
 
+/**
+ * Always true now that purchaseContract defaults to the verified
+ * PoolManager rather than null — Buy ELS no longer waits on a
+ * never-deployed presale contract. Kept as a named export (rather than
+ * inlining `true`) so the verifier/status route/UI all read the same
+ * single source of truth, and so a future operator who explicitly wants
+ * to force this back to "Coming Soon" only has to null out
+ * EARN_BUY_ELS_CONTRACT's fallback here, not hunt through call sites.
+ */
 export const BUY_ELS_QUEST_CONFIGURED = Boolean(BUY_ELS_QUEST_CONFIG.purchaseContract);
 
 /**

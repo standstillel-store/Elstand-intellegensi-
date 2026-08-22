@@ -45,6 +45,17 @@ const REASON_LABEL: Record<string, string> = {
 const ADD_LIQUIDITY_URL =
   "https://app.uniswap.org/positions/create/v4?currencyA=NATIVE&currencyB=0x3a0664300EA06Ba7c01EDC9951c1b04BE9101C82&chain=bnb&fee=%7B%22feeAmount%22%3A375%2C%22tickSpacing%22%3A4%2C%22isDynamic%22%3Afalse%7D&hook=undefined&priceRangeState=%7B%22priceInverted%22%3Afalse%2C%22fullRange%22%3Afalse%2C%22minTick%22%3A108188%2C%22maxTick%22%3A108212%2C%22initialPrice%22%3A%22%22%2C%22inputMode%22%3A%22price%22%7D&depositState=%7B%22exactField%22%3A%22TOKEN0%22%2C%22exactAmounts%22%3A%7B%7D%7D&step=1";
 
+/**
+ * Buy ELS reuses the same ELS/native Uniswap V4 pool as Add Liquidity — no
+ * dedicated purchase contract exists or is being deployed. This sends the
+ * user to Uniswap's own swap UI for the pair; Uniswap's router picks the
+ * best/only available ELS pool for that pair automatically. If a second
+ * ELS pool with a different fee tier is ever created, this URL doesn't
+ * force this specific one — noted as a limitation, not silently assumed
+ * away.
+ */
+const BUY_ELS_SWAP_URL = "https://app.uniswap.org/swap?chain=bnb&inputCurrency=NATIVE&outputCurrency=0x3a0664300EA06Ba7c01EDC9951c1b04BE9101C82";
+
 interface QuestStatus {
   slug: string;
   name: string;
@@ -204,9 +215,11 @@ export function EarnView() {
                 icon={<ShoppingCart size={16} />}
                 title="Buy ELS"
                 rewardLabel="+25 ELS TESTNET · +35 AI ENERGY"
-                description={buyElsQuest?.configured ? undefined : "Coming soon — purchase contract not yet deployed."}
+                description={buyElsQuest?.configured ? undefined : "Coming soon — purchase infrastructure not yet configured."}
                 state={(buyElsQuest?.state as QuestState) ?? "COMING_SOON"}
                 lastErrorMessage={buyElsQuest?.submission?.lastErrorMessage}
+                actionLabel="Buy ELS"
+                actionHref={buyElsQuest?.state === "AVAILABLE" || !buyElsQuest?.submission ? BUY_ELS_SWAP_URL : undefined}
                 walletConnected={Boolean(connectedWallet)}
                 onConnectWallet={() => openWalletConnect()}
                 onVerify={(txHash) => verifyQuest("buy_els", txHash)}
