@@ -82,14 +82,51 @@ export const LIQUIDITY_QUEST_CONFIGURED = Boolean(LIQUIDITY_QUEST_CHAIN_CONFIG.p
  * button is disabled with "Coming Soon" until these are filled in.
  */
 export const BUY_ELS_QUEST_CONFIG = {
-  chainId: Number(process.env.EARN_BUY_ELS_CHAIN_ID ?? 97), // reuses the existing BSC-testnet wallet chain
-  elsTokenAddress: (process.env.NEXT_PUBLIC_ELS_TESTNET_ADDRESS ?? "0x4AeA3938eb5c5A594410Bf67c2F2107970901a4D").toLowerCase(),
+  /**
+   * FIX (Phase 6.5 audit): this previously defaulted to 97 (BSC testnet,
+   * reusing the pre-existing /wallet dashboard's chain) — but Section 5's
+   * verification checklist is explicit ("chainId == 56", "correct ELS
+   * Mainnet token"), and Section 2's flow diagram agrees: "BUY ELS -> BNB
+   * Mainnet 56 -> ELS Mainnet -> verified transaction -> reward ELS
+   * Testnet + AI Energy". The MAINNET purchase is what gets
+   * eligibility-checked; ELS Testnet is only the reward, same shape as Add
+   * Liquidity below. Defaulting to testnet here would have verified the
+   * wrong chain entirely once a purchase contract is deployed. Still
+   * overridable via env; the default now matches the brief's explicit rule.
+   */
+  chainId: Number(process.env.EARN_BUY_ELS_CHAIN_ID ?? 56),
+  elsTokenAddress: (process.env.EARN_BUY_ELS_ELS_ADDRESS ?? "0x3a0664300EA06Ba7c01EDC9951c1b04BE9101C82").toLowerCase(),
   /** Router/pair/pool contract ELS is actually bought through. Null = not deployed yet. */
   purchaseContract: (process.env.EARN_BUY_ELS_CONTRACT as `0x${string}` | undefined) ?? null,
   minimumElsAmountRaw: process.env.EARN_BUY_ELS_MIN_ELS_RAW ? BigInt(process.env.EARN_BUY_ELS_MIN_ELS_RAW) : BigInt(0),
 } as const;
 
 export const BUY_ELS_QUEST_CONFIGURED = Boolean(BUY_ELS_QUEST_CONFIG.purchaseContract);
+
+/**
+ * Section 6 — the actual "$10 USD equivalent" floor, enforced against a
+ * price-converted native-currency amount (lib/rewards/pricing.ts +
+ * verifier.ts), NOT the raw `minimumElsAmountRaw` fields above (those stay
+ * as an optional secondary/defense-in-depth floor on the ELS leg itself,
+ * off by default). Previously there was no USD conversion anywhere in this
+ * module — both quests only had the ELS-raw-amount floor, which defaults
+ * to 0, i.e. no minimum was actually enforced at all.
+ */
+export const MINIMUM_USD_VALUE = Number(process.env.EARN_MINIMUM_USD_VALUE ?? 10);
+
+/**
+ * Section 8 — Reward Distributor. Deployed SEPARATELY on BNB Testnet, not
+ * part of this codebase. Same "null until confirmed/deployed" rule as
+ * every other contract address in this file: until an operator supplies
+ * this, lib/rewards/distributor.ts refuses to attempt an on-chain
+ * transfer, and the UI must show "Testnet reward distribution is
+ * currently being configured" (Section 14) rather than implying a real
+ * token was sent — see REWARD_DISTRIBUTION_STATUS_MESSAGE in
+ * lib/rewards/distributor.ts, surfaced via GET /api/rewards/status's
+ * `distributorConfigured` field.
+ */
+export const REWARD_DISTRIBUTOR_ADDRESS = (process.env.EARN_REWARD_DISTRIBUTOR_ADDRESS as `0x${string}` | undefined) ?? null;
+export const REWARD_DISTRIBUTOR_CONFIGURED = Boolean(REWARD_DISTRIBUTOR_ADDRESS);
 
 /** How many times VERIFYING may be attempted before a SYSTEM_ERROR row stops offering "RETRY VERIFICATION" automatically in the UI (the backend itself never hard-caps retries — Section 8: "do not permanently reject a transaction merely because one attempt failed" — this is a UI nudge only, not enforced server-side). */
 export const MAX_SUGGESTED_VERIFY_RETRIES = 10;

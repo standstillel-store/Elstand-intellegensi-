@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useAccount } from "wagmi";
-import { Gift, Zap, ArrowUpRight, Loader2, Droplets, ShoppingCart, Wallet as WalletIcon } from "lucide-react";
+import { Gift, Zap, ArrowUpRight, Loader2, Droplets, ShoppingCart, Wallet as WalletIcon, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import { timeAgo, timeUntil } from "@/lib/format";
 import { QuestCard, type QuestState } from "./QuestCard";
@@ -64,6 +64,7 @@ interface RewardsStatus {
   completedQuestCount: number;
   quests: QuestStatus[];
   referral: { code: string; referralUrl: string; totalReferred: number; totalRewarded: number } | null;
+  distributorConfigured: boolean;
 }
 
 export function EarnView() {
@@ -156,6 +157,12 @@ export function EarnView() {
               <StatBlock icon={<WalletIcon size={13} className="text-signal-glow" />} label="Wallet" value={connectedWallet ? `${connectedWallet.slice(0, 6)}…${connectedWallet.slice(-4)}` : "Not connected"} mono={false} />
               <StatBlock icon={<Gift size={13} className="text-signal-glow" />} label="Completed" value={rewards?.completedQuestCount ?? 0} />
             </div>
+            {rewards && !rewards.distributorConfigured && (
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] text-ink-faint">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0 text-signal-glow" />
+                Testnet reward distribution is currently being configured. ELS Testnet amounts above are recorded and your eligibility is preserved, but haven&apos;t been sent on-chain yet.
+              </p>
+            )}
           </section>
 
           {/* Active quests */}

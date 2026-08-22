@@ -1,6 +1,7 @@
 import { isAddress, isHash, decodeEventLog, parseAbiItem, type Hash } from "viem";
 import { getRewardChainClient } from "./chainClient";
-import { LIQUIDITY_QUEST_CHAIN_CONFIG, LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIG, BUY_ELS_QUEST_CONFIGURED } from "./config";
+import { LIQUIDITY_QUEST_CHAIN_CONFIG, LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIG, BUY_ELS_QUEST_CONFIGURED, MINIMUM_USD_VALUE } from "./config";
+import { getHistoricalNativeUsdPrice, weiToUsd } from "./pricing";
 
 // ---------------------------------------------------------------------------
 // Brief Section 2 / 4 / 5: "Do NOT trust the frontend ... blockchain is
@@ -85,6 +86,78 @@ async function fetchAndCheckBasics(
   }
 
   return { ok: true, tx, receipt };
+}
+
+/**
+ * Section 6 — "$10 is USD value, not 10 ELS/10 BNB/10 wei." Converts the
+ * transaction's native-currency leg (tx.value) into a real USD figure
+ * using the price AT THE TRANSACTION'S OWN BLOCK (never "now" — Section 6:
+ * "do not silently use an arbitrary current price if that makes historical
+ * verification inconsistent"), and checks it against MINIMUM_USD_VALUE.
+ *
+ * Prices tx.value specifically because both quests' UI flows send the
+ * native-currency leg directly as msg.value (Section 4/5's "currencyA=
+ * NATIVE" Add Liquidity URL; a direct BNB-in purchase for Buy ELS) — see
+ * lib/rewards/pricing.ts's header for why the ELS leg itself isn't priced.
+ * If a future routing shape moves native currency some other way (e.g. via
+ * wrapped BNB as an ERC20 instead of msg.value), this check would
+ * under-count it — flagged in the final report's BLOCKERS, not silently
+ * assumed away.
+ *
+ * Returns either the priced metadata to merge into a VALID outcome's
+ * `data` (block number, tx hash's own amount, price source, price used,
+ * calculated USD value, verification timestamp — exactly what Section 6
+ * asks to be stored), or a terminal SYSTEM_ERROR/INVALID outcome for the
+ * caller to return as-is.
+ */
+async function verifyUsdValue(
+  chainId: number,
+  tx: any,
+  receipt: any
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; outcome: VerificationOutcome }> {
+  const nativeAmountWei = (tx.value ?? BigInt(0)) as bigint;
+
+  let block;
+  try {
+    const client = getRewardChainClient(chainId);
+    block = await client.getBlock({ blockNumber: receipt.blockNumber });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, outcome: { status: "SYSTEM_ERROR", reason: `Unable to fetch block for USD valuation: ${message}` } };
+  }
+
+  const priceResult = await getHistoricalNativeUsdPrice(chainId, Number(block.timestamp));
+  if (!priceResult) {
+    // Section 6: a missing price provider must fail closed as a retryable
+    // system state, never silently pass the $10 check.
+    return {
+      ok: false,
+      outcome: { status: "SYSTEM_ERROR", reason: "USD price verification is temporarily unavailable. This transaction was not rejected — retry shortly." },
+    };
+  }
+
+  const usdValue = weiToUsd(nativeAmountWei, priceResult.price);
+  if (usdValue < MINIMUM_USD_VALUE) {
+    return {
+      ok: false,
+      outcome: {
+        status: "INVALID",
+        reason: `Transaction value (~$${usdValue.toFixed(2)}) is below the required minimum ($${MINIMUM_USD_VALUE.toFixed(2)}).`,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      nativeAmountWei: nativeAmountWei.toString(),
+      priceSource: priceResult.source,
+      priceUsed: priceResult.price,
+      usdValue,
+      priceTimestamp: priceResult.priceTimestamp,
+      verifiedAt: new Date().toISOString(),
+    },
+  };
 }
 
 /**
@@ -174,6 +247,9 @@ export async function verifyAddLiquidityTransaction(txHash: string, walletAddres
     return { status: "INVALID", reason: "ELS liquidity amount is below the configured minimum." };
   }
 
+  const usdCheck = await verifyUsdValue(chainId, tx, receipt);
+  if (!usdCheck.ok) return usdCheck.outcome;
+
   return {
     status: "VALID",
     blockNumber: receipt.blockNumber,
@@ -181,6 +257,7 @@ export async function verifyAddLiquidityTransaction(txHash: string, walletAddres
       poolId: liquidityPoolId,
       elsAmountIn: elsAmountIn.toString(),
       to: tx.to,
+      ...usdCheck.data,
     },
   };
 }
@@ -237,9 +314,12 @@ export async function verifyBuyElsTransaction(txHash: string, walletAddress: str
     return { status: "INVALID", reason: "ELS amount purchased is below the configured minimum." };
   }
 
+  const usdCheck = await verifyUsdValue(chainId, tx, receipt);
+  if (!usdCheck.ok) return usdCheck.outcome;
+
   return {
     status: "VALID",
     blockNumber: receipt.blockNumber,
-    data: { elsReceived: elsReceived.toString(), to: tx.to },
+    data: { elsReceived: elsReceived.toString(), to: tx.to, ...usdCheck.data },
   };
 }

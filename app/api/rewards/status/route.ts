@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/auth/server";
 import { getEnergyBalance } from "@/lib/energy";
 import { listQuests, listUserSubmissions, getWalletElsTestnetBalance } from "@/lib/rewards/store";
 import { getReferralSummary } from "@/lib/referral";
-import { LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED } from "@/lib/rewards/config";
+import { LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED, REWARD_DISTRIBUTOR_CONFIGURED } from "@/lib/rewards/config";
 
 // GET /api/rewards/status — powers the Earn & Rewards header (Section 3):
 // current AI Energy, ELS Testnet balance if available, connected wallet,
@@ -82,5 +82,13 @@ export async function GET() {
     completedQuestCount: questStates.filter((q) => q.state === "CLAIMED").length,
     quests: questStates,
     referral,
+    // Section 14 — "If distributor address is missing" state. AI Energy
+    // above is always a real, immediate balance; ELS Testnet is credited
+    // to an internal ledger the moment a quest is CLAIMED either way (see
+    // lib/rewards/store.ts), but real on-chain delivery only happens once
+    // this is true (lib/rewards/distributor.ts). The frontend uses this to
+    // show an honest "still being configured" note instead of implying
+    // ELS Testnet already left the distributor's wallet.
+    distributorConfigured: REWARD_DISTRIBUTOR_CONFIGURED,
   });
 }

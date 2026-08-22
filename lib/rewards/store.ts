@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import { refundEnergy } from "@/lib/energy";
 import { verifyAddLiquidityTransaction, verifyBuyElsTransaction, type VerificationOutcome } from "./verifier";
+import { attemptDistributorTransfer } from "./distributor";
 import type { QuestSlug } from "./config";
 
 // ---------------------------------------------------------------------------
@@ -320,6 +321,21 @@ export async function claimReward(submission: RewardSubmissionRow, quest: Reward
           { wallet_address: submission.wallet_address, amount: quest.reward_els, type: "els_testnet", reference_id: claim.id, description: `${quest.name} reward` },
           { onConflict: "reference_id,type" }
         );
+      // Section 8 — attempt real on-chain distribution if/when a
+      // distributor is configured. Currently always returns
+      // not_configured/not_implemented (lib/rewards/distributor.ts), so
+      // this is a no-op today. Best-effort and non-fatal on purpose: a
+      // distributor hiccup must never turn an already-recorded ledger
+      // credit into a CLAIM_ERROR — same "metering must never block the
+      // underlying feature" principle lib/energyGate.ts already uses.
+      try {
+        const distribution = await attemptDistributorTransfer({ walletAddress: submission.wallet_address, amountElsTestnet: quest.reward_els });
+        if (distribution.ok) {
+          await db().from("reward_claims").update({ claim_tx_hash: distribution.txHash }).eq("id", claim.id);
+        }
+      } catch (err) {
+        console.error("[claimReward] attemptDistributorTransfer failed (non-fatal):", err instanceof Error ? err.message : err);
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       case "NOT_CLAIMABLE":
         return NextResponse.json({ status: result.submission.status, eligible: false, retryable: false, message: "This submission is not currently claimable." }, { status: 409 });
       case "CLAIM_ERROR":
-        return NextResponse.json({ status: "CLAIM_ERROR", eligible: true, retryable: true, message: "Reward verification succeeded, but claiming failed. Your eligibility is preserved." }, { status: 500 });
+        return NextResponse.json({ status: "CLAIM_ERROR", eligible: true, retryable: true, message: "Your transaction was verified, but the reward transfer failed. Your eligibility is preserved. Retry claim." }, { status: 500 });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error.";

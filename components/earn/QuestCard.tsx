@@ -109,7 +109,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
           )}
           {state === "SYSTEM_ERROR" && (
             <p className="flex items-start gap-1.5 text-[11px] text-ink-faint">
-              <AlertTriangle size={12} className="mt-0.5 shrink-0 text-signal-glow" /> Verification temporarily failed. You can retry with the same transaction hash.
+              <AlertTriangle size={12} className="mt-0.5 shrink-0 text-signal-glow" /> Verification temporarily failed. Your transaction was not rejected. You can retry using the same TX hash.
             </p>
           )}
           {state !== "SYSTEM_ERROR" && state !== "INVALID" && (
@@ -176,7 +176,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
       {showRetryClaim && (
         <div className="mt-3 space-y-2">
           <p className="flex items-start gap-1.5 text-[11px] text-ink-faint">
-            <AlertTriangle size={12} className="mt-0.5 shrink-0 text-signal-glow" /> Reward verification succeeded, but claiming failed. Your eligibility is preserved.
+            <AlertTriangle size={12} className="mt-0.5 shrink-0 text-signal-glow" /> Your transaction was verified, but the reward transfer failed. Your eligibility is preserved.
           </p>
           <button
             onClick={handleClaim}
@@ -191,7 +191,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
 
       {state === "CLAIMED" && (
         <div className="mt-3 flex items-center justify-center gap-1.5 rounded-md border border-up/30 bg-up/5 px-3 py-1.5 text-xs font-semibold text-up">
-          <CheckCircle2 size={12} /> Reward Claimed
+          <CheckCircle2 size={12} /> Reward claimed successfully.
         </div>
       )}
     </div>
