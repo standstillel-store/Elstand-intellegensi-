@@ -28,7 +28,7 @@ export async function GET() {
 
   const wallet = wallets?.[0] ?? null;
   const elsTestnetBalance = wallet ? await getWalletElsTestnetBalance(wallet.wallet_address).catch(() => 0) : 0;
-  const referral = await getReferralSummary(user.id, new URL("/", process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").origin).catch(() => null);
+  const referral = await getReferralSummary(user.id, new URL("/", process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.elstand-intellegence.my.id").origin).catch(() => null);
 
   // Latest submission per quest — what each quest card renders its state
   // machine from. A quest can have many historical submissions (retries,
