@@ -38,11 +38,29 @@ interface QuestCardProps {
   onAction?: () => void;
   onVerify: (txHash: string) => Promise<void>;
   onClaim: () => Promise<void>;
+  /**
+   * Whether a wallet is currently connected. Section 6 of the brief:
+   * "COMING SOON" must never depend on wallet-connection state — a quest
+   * that's genuinely live/configured stays ACTIVE (its real backend
+   * `state`) whether or not a wallet happens to be connected right now.
+   * This prop only gates the INTERACTIVE part of the card (the tx-hash
+   * form / claim button / external action link) behind a "Connect
+   * Wallet" prompt — it never downgrades the badge/state itself.
+   */
+  walletConnected: boolean;
+  onConnectWallet?: () => void;
 }
 
-export function QuestCard({ icon, title, rewardLabel, description, state, lastErrorMessage, actionLabel, actionHref, onAction, onVerify, onClaim }: QuestCardProps) {
+export function QuestCard({ icon, title, rewardLabel, description, state, lastErrorMessage, actionLabel, actionHref, onAction, onVerify, onClaim, walletConnected, onConnectWallet }: QuestCardProps) {
   const [txHash, setTxHash] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // A quest that's actually live/configured but has no wallet connected
+  // yet needs the wallet before any of its interactive states (AVAILABLE
+  // / tx submission / claim) can proceed — but COMING_SOON (genuinely not
+  // configured) and CLAIMED (already-settled history) render exactly the
+  // same regardless of wallet connection.
+  const needsWalletFirst = !walletConnected && state !== "COMING_SOON" && state !== "CLAIMED";
 
   async function handleVerify() {
     if (!txHash.trim()) return;
@@ -88,7 +106,16 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
         <p className="mt-3 text-[11px] text-ink-faint">This quest isn't live on this deployment yet.</p>
       )}
 
-      {state === "AVAILABLE" && actionHref && (
+      {needsWalletFirst && (
+        <button
+          onClick={onConnectWallet}
+          className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
+        >
+          Connect Wallet
+        </button>
+      )}
+
+      {!needsWalletFirst && state === "AVAILABLE" && actionHref && (
         <a
           href={actionHref}
           target="_blank"
@@ -100,7 +127,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
         </a>
       )}
 
-      {(isTxStage) && (
+      {!needsWalletFirst && isTxStage && (
         <div className="mt-3 space-y-2">
           {state === "INVALID" && (
             <p className="flex items-start gap-1.5 text-[11px] text-down">
@@ -156,7 +183,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
         </div>
       )}
 
-      {showClaim && (
+      {!needsWalletFirst && showClaim && (
         <button
           onClick={handleClaim}
           disabled={busy}
@@ -167,13 +194,13 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
         </button>
       )}
 
-      {state === "CLAIMING" && (
+      {!needsWalletFirst && state === "CLAIMING" && (
         <div className="mt-3 flex items-center justify-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-xs text-ink-faint">
           <Loader2 size={12} className="animate-spin" /> Claiming…
         </div>
       )}
 
-      {showRetryClaim && (
+      {!needsWalletFirst && showRetryClaim && (
         <div className="mt-3 space-y-2">
           <p className="flex items-start gap-1.5 text-[11px] text-ink-faint">
             <AlertTriangle size={12} className="mt-0.5 shrink-0 text-signal-glow" /> Your transaction was verified, but the reward transfer failed. Your eligibility is preserved.

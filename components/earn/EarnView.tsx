@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useAccount } from "wagmi";
+import { useAppKit } from "@reown/appkit/react";
 import { Gift, Zap, ArrowUpRight, Loader2, Droplets, ShoppingCart, Wallet as WalletIcon, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import { timeAgo, timeUntil } from "@/lib/format";
@@ -69,6 +70,7 @@ interface RewardsStatus {
 
 export function EarnView() {
   const { address: connectedWallet } = useAccount();
+  const { open: openWalletConnect } = useAppKit();
   const [data, setData] = useState<EnergyData | null | "unauth">(null);
   const [claiming, setClaiming] = useState(false);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
@@ -188,11 +190,12 @@ export function EarnView() {
                 icon={<Droplets size={16} />}
                 title="Provide ELS Liquidity"
                 rewardLabel="+15 ELS TESTNET · +35 AI ENERGY"
-                description={connectedWallet ? undefined : "Connect your wallet first."}
-                state={!connectedWallet ? "COMING_SOON" : (liquidityQuest?.state as QuestState) ?? "AVAILABLE"}
+                state={(liquidityQuest?.state as QuestState) ?? "AVAILABLE"}
                 lastErrorMessage={liquidityQuest?.submission?.lastErrorMessage}
                 actionLabel="Add Liquidity"
                 actionHref={liquidityQuest?.state === "AVAILABLE" || !liquidityQuest?.submission ? ADD_LIQUIDITY_URL : undefined}
+                walletConnected={Boolean(connectedWallet)}
+                onConnectWallet={() => openWalletConnect()}
                 onVerify={(txHash) => verifyQuest("add_liquidity", txHash)}
                 onClaim={() => claimQuest("add_liquidity", liquidityQuest?.submission?.txHash ?? "")}
               />
@@ -202,8 +205,10 @@ export function EarnView() {
                 title="Buy ELS"
                 rewardLabel="+25 ELS TESTNET · +35 AI ENERGY"
                 description={buyElsQuest?.configured ? undefined : "Coming soon — purchase contract not yet deployed."}
-                state={!connectedWallet ? "COMING_SOON" : (buyElsQuest?.state as QuestState) ?? "COMING_SOON"}
+                state={(buyElsQuest?.state as QuestState) ?? "COMING_SOON"}
                 lastErrorMessage={buyElsQuest?.submission?.lastErrorMessage}
+                walletConnected={Boolean(connectedWallet)}
+                onConnectWallet={() => openWalletConnect()}
                 onVerify={(txHash) => verifyQuest("buy_els", txHash)}
                 onClaim={() => claimQuest("buy_els", buyElsQuest?.submission?.txHash ?? "")}
               />
