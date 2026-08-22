@@ -1,0 +1,542 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  /* Accent color — default "Violet" preset (#6D5DF6 / #A78BFA / #443A99).
+     Settings → Appearance → Accent Color rewrites these three at runtime
+     via ThemePreferenceProvider; every bg-signal/text-signal-glow/etc.
+     class across the app reads from these three variables. */
+  --signal-rgb: 109 93 246;
+  --signal-glow-rgb: 167 139 250;
+  --signal-dim-rgb: 68 58 153;
+
+  /* Phase 5 REBOOT — landing-only light/dark toggle. Separate name (--landing-*)
+     and separate attribute (data-landing-theme, set on .landing-root — never on
+     <html>) from the dashboard's own --signal-* / data-theme-mode system above,
+     so the two can never collide. Values below are the dark defaults and match
+     the hex already in tailwind.config.ts's `landing` object exactly — dark
+     mode is pixel-identical to before this change, just re-expressed as
+     variables so a toggle can override it. landing-ink is new (not the shared
+     `ink` token dashboard uses) for the same isolation reason. */
+  --landing-bg-rgb: 9 9 11;
+  --landing-surface-rgb: 17 24 39;
+  --landing-card-rgb: 21 24 35;
+  --landing-line-rgb: 255 255 255;
+  --landing-line-alpha: 0.08;
+  --landing-violet-rgb: 124 106 246;
+  --landing-violet-dim-rgb: 59 52 128;
+  --landing-violet-glow-rgb: 167 155 255;
+  --landing-blue-rgb: 62 123 250;
+  --landing-blue-dim-rgb: 30 59 128;
+  --landing-blue-glow-rgb: 127 168 255;
+  --landing-cyan-rgb: 34 211 238;
+  --landing-cyan-dim-rgb: 14 107 122;
+  --landing-cyan-glow-rgb: 126 235 251;
+  --landing-gold-rgb: 212 175 55;
+  --landing-gold-dim-rgb: 122 98 32;
+  --landing-gold-glow-rgb: 240 213 132;
+  --landing-ink-rgb: 230 232 238;
+  --landing-ink-muted-rgb: 138 143 152;
+  --landing-ink-faint-rgb: 86 90 100;
+}
+
+/* Light mode — only takes effect inside .landing-root (set on <main> in
+   app/page.tsx), and only once ThemeToggle sets data-landing-theme="light"
+   on that same element. Never on <html>, so it cannot survive a client-side
+   navigation to a dashboard route the way a root-level attribute could. */
+.landing-root[data-landing-theme="light"] {
+  color-scheme: light;
+  --landing-bg-rgb: 250 249 246;
+  --landing-surface-rgb: 240 237 230;
+  --landing-card-rgb: 255 255 255;
+  --landing-line-rgb: 20 18 14;
+  --landing-line-alpha: 0.1;
+  --landing-violet-rgb: 88 66 214;
+  --landing-violet-dim-rgb: 210 202 250;
+  --landing-violet-glow-rgb: 58 40 168;
+  --landing-blue-rgb: 28 88 208;
+  --landing-blue-dim-rgb: 198 216 250;
+  --landing-blue-glow-rgb: 14 64 164;
+  --landing-cyan-rgb: 7 128 148;
+  --landing-cyan-dim-rgb: 188 233 238;
+  --landing-cyan-glow-rgb: 4 98 113;
+  --landing-gold-rgb: 150 108 10;
+  --landing-gold-dim-rgb: 235 215 165;
+  --landing-gold-glow-rgb: 118 84 4;
+  --landing-ink-rgb: 22 20 15;
+  --landing-ink-muted-rgb: 99 94 84;
+  --landing-ink-faint-rgb: 152 147 137;
+}
+
+/* Hero (Void Core) and Terminal Preview are meant to stay dark regardless of
+   site theme — the same way a real trading terminal reads dark whether it's
+   day or night outside, not because they're unfinished. Re-declaring the
+   variables here shadows the light-mode override above for anything nested
+   inside, via normal CSS custom-property scoping (no !important needed). */
+.theme-invariant {
+  --landing-bg-rgb: 9 9 11;
+  --landing-surface-rgb: 17 24 39;
+  --landing-card-rgb: 21 24 35;
+  --landing-line-rgb: 255 255 255;
+  --landing-line-alpha: 0.08;
+  --landing-violet-rgb: 124 106 246;
+  --landing-violet-dim-rgb: 59 52 128;
+  --landing-violet-glow-rgb: 167 155 255;
+  --landing-blue-rgb: 62 123 250;
+  --landing-blue-dim-rgb: 30 59 128;
+  --landing-blue-glow-rgb: 127 168 255;
+  --landing-cyan-rgb: 34 211 238;
+  --landing-cyan-dim-rgb: 14 107 122;
+  --landing-cyan-glow-rgb: 126 235 251;
+  --landing-gold-rgb: 212 175 55;
+  --landing-gold-dim-rgb: 122 98 32;
+  --landing-gold-glow-rgb: 240 213 132;
+  --landing-ink-rgb: 230 232 238;
+  --landing-ink-muted-rgb: 138 143 152;
+  --landing-ink-faint-rgb: 86 90 100;
+}
+
+/* Compact Mode (Settings → Appearance) — tightens the rhythm app-wide
+   without hand-editing padding on every card. Opt-in via [data-density="compact"]
+   on <html>, set by ThemePreferenceProvider from the saved preference. */
+html[data-density="compact"] .panel,
+html[data-density="compact"] .glow-card {
+  padding: 0.75rem !important;
+}
+html[data-density="compact"] main {
+  padding-top: 0.75rem !important;
+  padding-bottom: 0.75rem !important;
+}
+html[data-density="compact"] .space-y-5 > * + * {
+  margin-top: 0.875rem !important;
+}
+
+/* Animations toggle (Settings → Appearance) — a stronger, explicit opt-out
+   layered on top of (not replacing) the OS-level prefers-reduced-motion
+   handled further down. */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-image: radial-gradient(circle at 20% -10%, rgba(110, 91, 255, 0.1), transparent 40%),
+    radial-gradient(circle at 90% 10%, rgba(255, 176, 32, 0.05), transparent 35%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(110, 91, 255, 0.35);
+}
+
+/* thin, terminal-appropriate scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #23262f transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #23262f;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.panel {
+  @apply bg-bg-surface border border-line rounded-lg;
+}
+
+.mono-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+/* ---- Terminal-grade motion & surface primitives -------------------- */
+
+.glow-card {
+  @apply relative bg-bg-surface border border-line rounded-xl shadow-card transition-all duration-300;
+}
+.glow-card:hover {
+  @apply border-signal/40;
+  /* Was border-only — adding the actual glow the class is named for, plus
+     a bit more lift shadow. Tone stays purple/signal (unchanged default),
+     so this is a pure elevation upgrade everywhere .glow-card is used. */
+  box-shadow:
+    0 0 0 1px rgb(var(--signal-rgb) / 0.28),
+    0 0 22px rgb(var(--signal-glow-rgb) / 0.16),
+    0 10px 28px -14px rgba(0, 0, 0, 0.65);
+  transform: translateY(-1px);
+}
+
+/* Opt-in modifier — add alongside .glow-card to swap its hover from the
+   default purple/AI tone to the dashboard's gold primary accent. Kept
+   separate (not a change to .glow-card itself) so every other page that
+   already relies on the purple hover keeps behaving exactly as before. */
+.glow-card-gold:hover {
+  border-color: rgba(212, 175, 55, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(212, 175, 55, 0.4),
+    0 0 22px rgba(240, 213, 132, 0.2),
+    0 10px 28px -14px rgba(0, 0, 0, 0.65);
+}
+
+/* Faint dot-grid backdrop for zoom/pan canvases (Global Intelligence Map,
+   and any future map-like panel) — signals "this area is a pannable
+   canvas" the way Figma/Arkham-style graph explorers do, before the user
+   even touches it. Sits behind the transformed content, so it stays put
+   while the map itself pans/zooms over it. */
+.map-canvas-grid {
+  @apply bg-bg;
+  background-image: radial-gradient(rgba(139, 123, 255, 0.16) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #181b24;
+  border-radius: 6px;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(230, 232, 238, 0.06), transparent);
+  background-size: 400px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  background: inherit;
+  opacity: 0.35;
+  animation: pulseGlow 1.8s ease-in-out infinite;
+}
+
+.heat-cell {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, z-index 0.18s ease;
+}
+.heat-cell:hover {
+  transform: scale(1.04);
+  z-index: 10;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.text-gradient-signal {
+  background: linear-gradient(90deg, rgb(var(--signal-glow-rgb)), rgb(var(--signal-rgb)) 60%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- Phase 2 — UI/UX optimization primitives ----------------------- */
+
+/* Faint structural grid for "premium terminal" surfaces (dashboard hero,
+   Settings background). Deliberately subtle — a texture, not a pattern. */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(230, 232, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(230, 232, 238, 0.035) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+/* Bloomberg-style section separator: a hairline with a mono eyebrow label
+   breaking it, instead of a plain <hr>. */
+.terminal-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  color: theme("colors.ink.faint");
+}
+.terminal-divider::before,
+.terminal-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, theme("colors.line"), transparent);
+}
+
+/* Generic hover-glow lift for interactive rows/cards that aren't full GlowCards. */
+.hover-glow {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.hover-glow:hover {
+  border-color: rgb(var(--signal-rgb) / 0.4);
+  box-shadow: 0 0 0 1px rgb(var(--signal-rgb) / 0.25), 0 0 18px rgb(var(--signal-glow-rgb) / 0.16);
+  transform: translateY(-1px);
+}
+
+.card-float {
+  animation: cardFloat 4.5s ease-in-out infinite;
+}
+
+/* Circular gauge ring (AI Score / Confidence Meter / Fear&Greed compact).
+   Draw the track in one color and layer an animated arc on top via
+   stroke-dasharray/offset set inline per-instance. */
+.gauge-ring-track {
+  stroke: theme("colors.line");
+  fill: none;
+}
+.gauge-ring-value {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Three-dot "AI is thinking" typing indicator. */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.typing-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: typingDot 1.2s ease-in-out infinite;
+}
+.typing-dots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Tag for any panel showing placeholder/preview data because its real feed
+   isn't connected yet — keeps the "feels alive" panels honest about which
+   numbers are live vs. illustrative, the same way a real trading terminal
+   marks delayed/simulated data instead of quietly showing it as live. */
+.simulated-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 4px;
+  border: 1px solid theme("colors.amber.DEFAULT" / 30%);
+  background: theme("colors.amber.DEFAULT" / 10%);
+  color: theme("colors.amber.DEFAULT");
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+}
+
+/* Thin animated scanline sweep for "Scanning…" states. */
+.scan-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.scan-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, rgb(var(--signal-rgb) / 0.12), transparent);
+  animation: scanline 2.4s linear infinite;
+}
+
+/* ---- Terminal Visual Overhaul — dashboard-only primitives ----------
+   Everything below is additive and only used by dashboard components
+   (app/dashboard/page.tsx and components/intelligence, /dashboard,
+   /right-rail). Nothing here is reachable from the landing page or any
+   other route, so it can't drift the two designs together by accident. */
+
+/* Soft ambient glow sitting behind an "important" card — a blurred,
+   low-opacity wash that breathes slowly (ambientBreathe, tailwind.config.ts).
+   Sits at negative z-index behind the card's own background so it never
+   intercepts clicks, and `isolation: isolate` keeps that negative z-index
+   from leaking through to page-level stacking. Pair with exactly one
+   `.ambient-glow-*` tone class — `.ambient-glow` alone renders nothing.
+
+   DISABLED per Zhwan's request: the animated background bloom (gold/blue/
+   etc.) read as too much ambient color across the dashboard. Cards using
+   these classes are now flat — `.ambient-glow` still sets `isolation`
+   (harmless, no visual effect on its own) but `::before` no longer paints
+   anything, so every `ambient-glow-gold` / `ambient-glow-ai` / etc.
+   classname already in every component's JSX becomes an inert no-op
+   rather than needing to be removed file-by-file. Color stays on live
+   text/indicators (up/down/gold values, live dots, flash-on-update
+   accents) — those are untouched by this change. Delete this comment
+   block and the two lines below it to bring the glow back if wanted. */
+.ambient-glow {
+  position: relative;
+  isolation: isolate;
+}
+.ambient-glow::before {
+  content: none;
+}
+
+/* Animated twin of the existing static .bg-grid texture (unchanged, still
+   used as-is elsewhere) — same look, slow diagonal drift so a large mostly
+   empty canvas (map background, page backdrop) reads as alive rather than
+   a flat printed grid. */
+.bg-grid-animated {
+  background-image:
+    linear-gradient(rgba(230, 232, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(230, 232, 238, 0.035) 1px, transparent 1px);
+  background-size: 34px 34px;
+  animation: gridPan 22s linear infinite;
+}
+
+/* Ambient background particles (components/dashboard/AmbientBackground.tsx).
+   Position/size/delay come in per-instance as inline custom properties so
+   the component can stay a plain static array — no Math.random() at
+   render, which would mismatch between server and client. */
+.bg-particle {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: particleFloat var(--particle-duration, 9s) ease-in-out infinite;
+  animation-delay: var(--particle-delay, 0s);
+}
+
+/* Market Pulse gauge needle — a thin line pivoting from the gauge center,
+   rotated per-reading via inline `transform: rotate()`. The transition
+   lives on the class (not inline) so every gauge animates identically. */
+.gauge-needle {
+  transform-origin: 50% 50%;
+  transition: transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+/* Soft pulsing halo for "this is live/connected" — reuses the existing
+   pulseGlow keyframe (same one .live-dot already uses) so the two motions
+   read as the same visual language. Reserved for connected/active state
+   only — never applied to a waiting/disconnected element. */
+.pulse-ring {
+  position: relative;
+}
+.pulse-ring::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 1px solid currentColor;
+  opacity: 0.3;
+  animation: pulseGlow 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* AI Core orb (Global Intelligence Map) — purple/AI-dominant sphere fill.
+   Rotation/breathing reuse Phase 5's coreBreathe/orbitSlow/orbitSlowReverse
+   (tailwind.config.ts), the same primitives already proven on the landing
+   hero rather than a new mechanism. */
+.ai-orb-core {
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgb(var(--signal-glow-rgb) / 0.95),
+    rgb(var(--signal-rgb) / 0.65) 55%,
+    rgb(var(--signal-dim-rgb) / 0.55) 100%
+  );
+}
+
+/* ---- Phase 5 — Landing page tokens (isolated from dashboard) ------- */
+
+/* Frosted glass surface for landing sections (hero cards, feature tiles,
+   terminal preview panels). Deliberately separate from .panel/.glow-card
+   above — those are opaque by design for dense dashboard data; landing
+   sections are atmospheric marketing surfaces and can afford translucency. */
+.landing-glass {
+  background: rgb(var(--landing-card-rgb) / 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgb(var(--landing-line-rgb) / var(--landing-line-alpha));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 20px 60px -20px rgba(0, 0, 0, 0.6);
+}
+
+/* Slow-drifting ambient wash for the hero background — violet/blue/cyan
+   dominant, with one thin gold thread (confirmed Phase 5 decision: an
+   accent, not a wash — kept at the lowest opacity of the four here).
+   Large background-size + the auroraDrift keyframe (tailwind.config.ts)
+   shifts backgroundPosition slowly so it reads as atmosphere, not a pan.
+   Covered by the existing prefers-reduced-motion / [data-motion="reduced"]
+   rules above automatically — no extra motion-safety code needed. */
+/* Hand-written on purpose, duplicating the theme entry in tailwind.config.ts:
+   this keyframe is only ever reached from custom CSS (.landing-aurora below)
+   and arbitrary `[animation:auroraDrift_Ns_...]` values in HeroSignature.tsx
+   — never through the generated `animate-auroraDrift` utility class itself —
+   so it needs to exist here unconditionally rather than depend on Tailwind's
+   content scanner noticing a utility class that's never actually used. */
+@keyframes auroraDrift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.landing-aurora {
+  background-image:
+    radial-gradient(circle at 15% 20%, rgba(124, 106, 246, 0.16), transparent 45%),
+    radial-gradient(circle at 85% 15%, rgba(34, 211, 238, 0.12), transparent 40%),
+    radial-gradient(circle at 75% 75%, rgba(62, 123, 250, 0.1), transparent 45%),
+    radial-gradient(circle at 50% 95%, rgba(212, 175, 55, 0.06), transparent 50%);
+  background-size: 200% 200%;
+  animation: auroraDrift 26s ease-in-out infinite;
+}
+
+/* Phase 5.2 — cinematic grain. A single inline SVG feTurbulence filter as a
+   data-URI background — no image asset, no dependency. Kept far too subtle
+   to notice as "texture" on its own; it just stops large flat gradient
+   areas (the aurora, the sphere) from looking like a flat digital wash. */
+.landing-noise {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
