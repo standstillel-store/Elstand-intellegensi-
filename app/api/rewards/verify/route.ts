@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAddress, isHash } from "viem";
 import { createSupabaseServerClient } from "@/lib/auth/server";
-import { getQuestBySlug, getOrCreateSubmission, runVerification, normalizeWallet } from "@/lib/rewards/store";
+import { getQuestBySlug, getOrCreateSubmission, runVerification, normalizeWallet, SubmissionOwnershipError } from "@/lib/rewards/store";
 import { LIQUIDITY_QUEST_CHAIN_CONFIG, BUY_ELS_QUEST_CONFIG, LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED } from "@/lib/rewards/config";
 
 // POST /api/rewards/verify — brief Section 7. The ONLY thing the frontend
@@ -75,6 +75,11 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ status: updated.status, eligible: false, retryable: false });
   } catch (err) {
+    if (err instanceof SubmissionOwnershipError) {
+      // Section 3 — reject, non-retryable: this hash belongs to a
+      // different account's submission for this quest.
+      return NextResponse.json({ status: "INVALID", eligible: false, retryable: false, reason: err.message }, { status: 409 });
+    }
     const message = err instanceof Error ? err.message : "Unknown error.";
     console.error("[api/rewards/verify]", message);
     return NextResponse.json({ status: "SYSTEM_ERROR", eligible: false, retryable: true, reason: "Verification service temporarily unavailable." }, { status: 500 });

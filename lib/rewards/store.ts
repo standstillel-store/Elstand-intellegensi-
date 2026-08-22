@@ -66,6 +66,9 @@ export function normalizeWallet(address: string): string {
   return address.toLowerCase();
 }
 
+/** Thrown by getOrCreateSubmission when a tx hash is already tied to a different account for this quest — a non-retryable rejection, not a system error, so the API layer must surface it as INVALID rather than "temporarily unavailable." */
+export class SubmissionOwnershipError extends Error {}
+
 export async function getQuestBySlug(slug: string): Promise<RewardQuestRow | null> {
   const { data, error } = await db().from("reward_quests").select("*").eq("slug", slug).eq("active", true).maybeSingle();
   if (error) throw new Error(`getQuestBySlug: ${error.message}`);
@@ -102,7 +105,23 @@ export async function getOrCreateSubmission(params: {
     .eq("tx_hash", txHash)
     .eq("quest_id", params.questId)
     .maybeSingle();
-  if (existing) return existing as RewardSubmissionRow;
+  if (existing) {
+    const existingRow = existing as RewardSubmissionRow;
+    // Section 3 — "the same TX hash must NOT allow Wallet A -> claim,
+    // Wallet B -> claim, Wallet C -> claim" for the same quest. Without
+    // this check, a second user submitting a hash someone else already
+    // used here would silently receive and poll/claim-attempt against the
+    // FIRST user's row (cross-account leak of their wallet, verification
+    // state, and reward eligibility), even though the claim route's
+    // separate user_id filter already stops them from actually claiming
+    // it. Fail closed here too, before that row is ever handed back.
+    if (existingRow.user_id !== params.userId) {
+      throw new SubmissionOwnershipError(
+        "This transaction hash has already been submitted by a different account for this quest."
+      );
+    }
+    return existingRow;
+  }
 
   const { data: created, error } = await db()
     .from("reward_submissions")
