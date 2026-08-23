@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
 import { Droplets, Loader2 } from "lucide-react";
 import clsx from "clsx";
 
@@ -29,10 +29,13 @@ function formatCooldown(seconds: number): string {
  * itself sourced from TESTNET_FAUCET_CONFIG — chain 97, never guessed).
  */
 export function FaucetClaimCard({ address, chainId }: { address: `0x${string}`; chainId: number }) {
-  const { address: wallet, isConnected } = useAccount();
+  const { address: wallet, isConnected, chainId: walletChainId } = useAccount();
   const { writeContractAsync, isPending: isSubmitting } = useWriteContract();
+  const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
   const [error, setError] = useState<string | null>(null);
+
+  const wrongChain = isConnected && walletChainId !== chainId;
 
   const { data: cooldownSeconds, refetch: refetchCooldown } = useReadContract({
     address,
@@ -54,10 +57,19 @@ export function FaucetClaimCard({ address, chainId }: { address: `0x${string}`; 
     if (!wallet) return;
     setError(null);
     try {
+      // Wagmi refuses to send a tx whose target chainId doesn't match the
+      // wallet's currently-connected chain (exactly the "current chain ...
+      // does not match target chain" error) — switch first, explicitly,
+      // rather than letting that call fail and confusing the user with a
+      // wagmi-internal error message.
+      if (walletChainId !== chainId) {
+        await switchChainAsync({ chainId });
+      }
       const hash = await writeContractAsync({ address, abi: FAUCET_ABI, functionName: "claim", chainId });
       setTxHash(hash);
     } catch (err) {
-      // Most common case: rejected in wallet, or cooldown not elapsed (reverted).
+      // Most common cases: rejected in wallet, cooldown not elapsed
+      // (reverted), or user rejected the chain-switch prompt.
       setError(err instanceof Error ? err.message.split("\n")[0] : "Claim failed.");
     }
   }
@@ -79,6 +91,8 @@ export function FaucetClaimCard({ address, chainId }: { address: `0x${string}`; 
             <p className="text-xs text-ink-faint">
               {!isConnected
                 ? "Connect a wallet to claim."
+                : wrongChain
+                ? "Wrong network — switch to BNB Smart Chain Testnet to claim."
                 : onCooldown
                 ? `Available again in ${formatCooldown(Number(cooldownSeconds))}.`
                 : `Claim ${amountLabel} on BNB Smart Chain Testnet.`}
@@ -87,18 +101,24 @@ export function FaucetClaimCard({ address, chainId }: { address: `0x${string}`; 
         </div>
         <button
           onClick={handleClaim}
-          disabled={!isConnected || onCooldown || isSubmitting || isConfirming}
+          disabled={!isConnected || (onCooldown && !wrongChain) || isSubmitting || isConfirming || isSwitching}
           className={clsx(
             "shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors",
-            isConnected && !onCooldown && !isSubmitting && !isConfirming
+            isConnected && (wrongChain || !onCooldown) && !isSubmitting && !isConfirming && !isSwitching
               ? "border-signal/40 bg-signal/10 text-signal-glow hover:bg-signal/20"
               : "cursor-not-allowed border-line text-ink-faint"
           )}
         >
-          {isSubmitting || isConfirming ? (
+          {isSwitching ? (
+            <span className="flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" /> Switching network…
+            </span>
+          ) : isSubmitting || isConfirming ? (
             <span className="flex items-center gap-1.5">
               <Loader2 size={12} className="animate-spin" /> {isSubmitting ? "Confirm in wallet…" : "Claiming…"}
             </span>
+          ) : wrongChain ? (
+            "Switch to BSC Testnet"
           ) : (
             "Claim tBNB"
           )}
