@@ -4,7 +4,13 @@ import { getEnergyBalance } from "@/lib/energy";
 import { listQuests, listUserSubmissions, getWalletElsTestnetBalance } from "@/lib/rewards/store";
 import { getReferralSummary } from "@/lib/referral";
 import { getPrimaryVerifiedWallet } from "@/lib/wallet/primary";
-import { LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED, BUY_ELS_TESTNET_QUEST_CONFIGURED, REWARD_DISTRIBUTOR_CONFIGURED } from "@/lib/rewards/config";
+import {
+  LIQUIDITY_QUEST_CONFIGURED,
+  BUY_ELS_QUEST_CONFIGURED,
+  BUY_ELS_TESTNET_QUEST_CONFIGURED,
+  REWARD_DISTRIBUTOR_CONFIGURED,
+  TESTNET_FAUCET_CONFIG,
+} from "@/lib/rewards/config";
 
 // GET /api/rewards/status — powers the Earn & Rewards header (Section 3):
 // current AI Energy, ELS Testnet balance if available, connected wallet,
@@ -93,6 +99,13 @@ export async function GET() {
     completedQuestCount: questStates.filter((q) => q.state === "CLAIMED").length,
     quests: questStates,
     referral,
+    // Not a quest — the deployed TestnetFaucet's address/chain, so the
+    // client can call claim() directly (a normal wallet tx, not something
+    // the backend verifies/rewards — free tBNB, not a reward). Exposed
+    // here rather than a new NEXT_PUBLIC_ env var: this address isn't
+    // secret, and EarnView already fetches this endpoint on load — no
+    // duplicate client-side config source needed.
+    faucet: { configured: Boolean(TESTNET_FAUCET_CONFIG.address), address: TESTNET_FAUCET_CONFIG.address, chainId: TESTNET_FAUCET_CONFIG.chainId },
     // Section 14 — "If distributor address is missing" state. AI Energy
     // above is always a real, immediate balance; ELS Testnet is credited
     // to an internal ledger the moment a quest is CLAIMED either way (see

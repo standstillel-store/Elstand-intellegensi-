@@ -7,6 +7,7 @@ import clsx from "clsx";
 import { timeAgo, timeUntil } from "@/lib/format";
 import { QuestCard, type QuestState } from "./QuestCard";
 import { ReferralCard } from "./ReferralCard";
+import { FaucetClaimCard } from "./FaucetClaimCard";
 
 interface EnergyTransaction {
   id: string;
@@ -77,6 +78,7 @@ interface RewardsStatus {
   quests: QuestStatus[];
   referral: { code: string; referralUrl: string; totalReferred: number; totalRewarded: number } | null;
   distributorConfigured: boolean;
+  faucet: { configured: boolean; address: `0x${string}` | null; chainId: number };
 }
 
 export function EarnView() {
@@ -300,6 +302,14 @@ export function EarnView() {
               </div>
             )}
           </section>
+
+          {/* Faucet — direct wallet tx, not a quest (no reward, not backend-verified). Bottom of the page, per request. */}
+          {rewards?.faucet?.configured && rewards.faucet.address && (
+            <section className="rounded-md border border-line bg-bg-surface p-4">
+              <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Testnet Faucet</p>
+              <FaucetClaimCard address={rewards.faucet.address} chainId={rewards.faucet.chainId} />
+            </section>
+          )}
         </>
       )}
     </div>
