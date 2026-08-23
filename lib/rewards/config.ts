@@ -182,9 +182,24 @@ export const BUY_ELS_TESTNET_QUEST_CONFIG = {
 
 export const BUY_ELS_TESTNET_QUEST_CONFIGURED = Boolean(BUY_ELS_TESTNET_QUEST_CONFIG.swapContract);
 
-/** contracts/TestnetFaucet.sol — not tied to a quest/reward, just the deployed address the /wallet or /earn UI needs to point the "Claim tBNB" button at. Same null-until-configured rule. */
-export const TESTNET_FAUCET_ADDRESS = (process.env.TESTNET_FAUCET_ADDRESS as `0x${string}` | undefined) ?? null;
-export const TESTNET_FAUCET_CONFIGURED = Boolean(TESTNET_FAUCET_ADDRESS);
+/**
+ * contracts/TestnetFaucet.sol — not tied to a quest/reward, just the
+ * deployed address the /wallet or /earn UI will point the "Claim tBNB"
+ * button at once that UI exists. Same null-until-configured rule as every
+ * other contract in this file — set via env, never hardcoded/guessed.
+ *
+ * chainId is explicit (not just inherited from BSC_TESTNET_RPC_URL) so any
+ * future frontend/backend code reading this config has an unambiguous,
+ * self-contained answer to "what chain is this faucet on" without having
+ * to cross-reference chainClient.ts.
+ */
+export const TESTNET_FAUCET_CONFIG = {
+  chainId: 97,
+  address: (process.env.TESTNET_FAUCET_ADDRESS as `0x${string}` | undefined) ?? null,
+} as const;
+
+export const TESTNET_FAUCET_ADDRESS = TESTNET_FAUCET_CONFIG.address;
+export const TESTNET_FAUCET_CONFIGURED = Boolean(TESTNET_FAUCET_CONFIG.address);
 
 /** How many times VERIFYING may be attempted before a SYSTEM_ERROR row stops offering "RETRY VERIFICATION" automatically in the UI (the backend itself never hard-caps retries — Section 8: "do not permanently reject a transaction merely because one attempt failed" — this is a UI nudge only, not enforced server-side). */
 export const MAX_SUGGESTED_VERIFY_RETRIES = 10;
