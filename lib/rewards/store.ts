@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import { refundEnergy } from "@/lib/energy";
-import { verifyAddLiquidityTransaction, verifyBuyElsTransaction, type VerificationOutcome } from "./verifier";
+import { verifyAddLiquidityTransaction, verifyBuyElsTransaction, verifyBuyElsTestnetTransaction, type VerificationOutcome } from "./verifier";
 import { attemptDistributorTransfer } from "./distributor";
 import type { QuestSlug } from "./config";
 
@@ -229,6 +229,8 @@ async function runQuestVerifier(slug: QuestSlug, txHash: string, walletAddress: 
       return verifyAddLiquidityTransaction(txHash, walletAddress);
     case "buy_els":
       return verifyBuyElsTransaction(txHash, walletAddress);
+    case "buy_els_testnet":
+      return verifyBuyElsTestnetTransaction(txHash, walletAddress);
     default:
       return { status: "SYSTEM_ERROR", reason: `No verifier implemented for quest "${slug}".` };
   }
@@ -341,19 +343,30 @@ export async function claimReward(submission: RewardSubmissionRow, quest: Reward
           { onConflict: "reference_id,type" }
         );
       // Section 8 — attempt real on-chain distribution if/when a
-      // distributor is configured. Currently always returns
-      // not_configured/not_implemented (lib/rewards/distributor.ts), so
-      // this is a no-op today. Best-effort and non-fatal on purpose: a
-      // distributor hiccup must never turn an already-recorded ledger
-      // credit into a CLAIM_ERROR — same "metering must never block the
-      // underlying feature" principle lib/energyGate.ts already uses.
-      try {
-        const distribution = await attemptDistributorTransfer({ walletAddress: submission.wallet_address, amountElsTestnet: quest.reward_els });
-        if (distribution.ok) {
-          await db().from("reward_claims").update({ claim_tx_hash: distribution.txHash }).eq("id", claim.id);
+      // distributor is configured. Gated to testnet quest slugs only:
+      // EARN_REWARD_DISTRIBUTOR_ADDRESS points at
+      // contracts/ELSTestnetRewardDistributor.sol (BSC Testnet, ELS
+      // Testnet token) — if a mainnet quest (`add_liquidity`/`buy_els`)
+      // ever goes live while this is configured, it must NOT also trigger
+      // a testnet-token transfer for a mainnet reward; that would credit
+      // the wrong token on the wrong chain. Best-effort and non-fatal on
+      // purpose: a distributor hiccup must never turn an already-recorded
+      // ledger credit into a CLAIM_ERROR — same "metering must never
+      // block the underlying feature" principle lib/energyGate.ts already
+      // uses.
+      if (quest.slug === "buy_els_testnet") {
+        try {
+          const distribution = await attemptDistributorTransfer({
+            walletAddress: submission.wallet_address,
+            amountElsTestnet: quest.reward_els,
+            submissionId: submission.id,
+          });
+          if (distribution.ok) {
+            await db().from("reward_claims").update({ claim_tx_hash: distribution.txHash }).eq("id", claim.id);
+          }
+        } catch (err) {
+          console.error("[claimReward] attemptDistributorTransfer failed (non-fatal):", err instanceof Error ? err.message : err);
         }
-      } catch (err) {
-        console.error("[claimReward] attemptDistributorTransfer failed (non-fatal):", err instanceof Error ? err.message : err);
       }
     }
   } catch (err) {

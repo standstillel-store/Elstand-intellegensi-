@@ -4,7 +4,7 @@ import { getEnergyBalance } from "@/lib/energy";
 import { listQuests, listUserSubmissions, getWalletElsTestnetBalance } from "@/lib/rewards/store";
 import { getReferralSummary } from "@/lib/referral";
 import { getPrimaryVerifiedWallet } from "@/lib/wallet/primary";
-import { LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED, REWARD_DISTRIBUTOR_CONFIGURED } from "@/lib/rewards/config";
+import { LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED, BUY_ELS_TESTNET_QUEST_CONFIGURED, REWARD_DISTRIBUTOR_CONFIGURED } from "@/lib/rewards/config";
 
 // GET /api/rewards/status — powers the Earn & Rewards header (Section 3):
 // current AI Energy, ELS Testnet balance if available, connected wallet,
@@ -46,7 +46,14 @@ export async function GET() {
 
   const questStates = quests.map((q) => {
     const latest = latestByQuest.get(q.id);
-    const configured = q.slug === "add_liquidity" ? LIQUIDITY_QUEST_CONFIGURED : q.slug === "buy_els" ? BUY_ELS_QUEST_CONFIGURED : true;
+    const configured =
+      q.slug === "add_liquidity"
+        ? LIQUIDITY_QUEST_CONFIGURED
+        : q.slug === "buy_els"
+        ? BUY_ELS_QUEST_CONFIGURED
+        : q.slug === "buy_els_testnet"
+        ? BUY_ELS_TESTNET_QUEST_CONFIGURED
+        : true;
     return {
       slug: q.slug,
       name: q.name,

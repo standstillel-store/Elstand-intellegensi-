@@ -14,12 +14,13 @@
 // silently accept an unverified transaction.
 // ---------------------------------------------------------------------------
 
-export type QuestSlug = "referral" | "add_liquidity" | "buy_els";
+export type QuestSlug = "referral" | "add_liquidity" | "buy_els" | "buy_els_testnet";
 
 export const QUEST_REWARDS: Record<QuestSlug, { els: number; aiEnergy: number; oneTime: boolean }> = {
   referral: { els: 0, aiEnergy: 15, oneTime: false }, // one-time is enforced per referred wallet, not per quest
   add_liquidity: { els: 15, aiEnergy: 35, oneTime: true },
   buy_els: { els: 25, aiEnergy: 35, oneTime: true },
+  buy_els_testnet: { els: 25, aiEnergy: 35, oneTime: true },
 };
 
 /**
@@ -153,6 +154,37 @@ export const MINIMUM_USD_VALUE = Number(process.env.EARN_MINIMUM_USD_VALUE ?? 10
  */
 export const REWARD_DISTRIBUTOR_ADDRESS = (process.env.EARN_REWARD_DISTRIBUTOR_ADDRESS as `0x${string}` | undefined) ?? null;
 export const REWARD_DISTRIBUTOR_CONFIGURED = Boolean(REWARD_DISTRIBUTOR_ADDRESS);
+
+/**
+ * Testnet-only "Buy ELS" — separate quest slug from `buy_els` (mainnet V4),
+ * per explicit operator decision: mainnet quest config/behavior is left
+ * completely untouched, this is new/additive infrastructure sitting
+ * alongside it. Verifies against ELSTestnetSwap.sol's `SwapExecuted` event
+ * (contracts/ELSTestnetSwap.sol) — a fixed-rate vending contract, not an
+ * AMM, since Uniswap V4 has no verified deployment on BSC Testnet (chain
+ * 97) as of this writing (checked docs.uniswap.org/contracts/v4/deployments
+ * — only Sepolia listed — and found no verified PoolManager on
+ * testnet.bscscan.com). "Provide Liquidity" has no testnet equivalent by
+ * explicit operator decision (a fixed-rate vending contract has no real
+ * user-facing liquidity-provision action) and is intentionally NOT ported
+ * here — testnet only ever has Buy ELS + the Faucet (which isn't an Earn
+ * quest, it's a direct claim — see contracts/TestnetFaucet.sol).
+ *
+ * Same "null until an operator supplies the deployed address, never
+ * fabricate one" rule as every other contract config in this file.
+ */
+export const BUY_ELS_TESTNET_QUEST_CONFIG = {
+  chainId: 97,
+  elsTokenAddress: "0x4aea3938eb5c5a594410bf67c2f2107970901a4d" as `0x${string}`, // WALLET_NETWORK_CONFIG.ELS_CONTRACT, lowercased
+  swapContract: (process.env.SWAP_CONTRACT_ADDRESS as `0x${string}` | undefined) ?? null,
+  minimumElsAmountRaw: process.env.EARN_BUY_ELS_TESTNET_MIN_ELS_RAW ? BigInt(process.env.EARN_BUY_ELS_TESTNET_MIN_ELS_RAW) : BigInt(0),
+} as const;
+
+export const BUY_ELS_TESTNET_QUEST_CONFIGURED = Boolean(BUY_ELS_TESTNET_QUEST_CONFIG.swapContract);
+
+/** contracts/TestnetFaucet.sol — not tied to a quest/reward, just the deployed address the /wallet or /earn UI needs to point the "Claim tBNB" button at. Same null-until-configured rule. */
+export const TESTNET_FAUCET_ADDRESS = (process.env.TESTNET_FAUCET_ADDRESS as `0x${string}` | undefined) ?? null;
+export const TESTNET_FAUCET_CONFIGURED = Boolean(TESTNET_FAUCET_ADDRESS);
 
 /** How many times VERIFYING may be attempted before a SYSTEM_ERROR row stops offering "RETRY VERIFICATION" automatically in the UI (the backend itself never hard-caps retries — Section 8: "do not permanently reject a transaction merely because one attempt failed" — this is a UI nudge only, not enforced server-side). */
 export const MAX_SUGGESTED_VERIFY_RETRIES = 10;

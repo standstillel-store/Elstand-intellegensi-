@@ -1,6 +1,15 @@
 import { isAddress, isHash, decodeEventLog, parseAbiItem, encodeAbiParameters, keccak256, type Hash } from "viem";
 import { getRewardChainClient } from "./chainClient";
-import { LIQUIDITY_QUEST_CHAIN_CONFIG, LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIG, BUY_ELS_QUEST_CONFIGURED, ELS_BNB_POOL_KEY, MINIMUM_USD_VALUE } from "./config";
+import {
+  LIQUIDITY_QUEST_CHAIN_CONFIG,
+  LIQUIDITY_QUEST_CONFIGURED,
+  BUY_ELS_QUEST_CONFIG,
+  BUY_ELS_QUEST_CONFIGURED,
+  BUY_ELS_TESTNET_QUEST_CONFIG,
+  BUY_ELS_TESTNET_QUEST_CONFIGURED,
+  ELS_BNB_POOL_KEY,
+  MINIMUM_USD_VALUE,
+} from "./config";
 import { getHistoricalNativeUsdPrice, weiToUsd } from "./pricing";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +34,10 @@ const V4_MODIFY_LIQUIDITY = parseAbiItem(
 /** Uniswap v4 PoolManager's core.Swap event — https://docs.uniswap.org/contracts/v4/reference/core/interfaces/IPoolManager#swap-event. amount0/amount1 are signed deltas to the POOL's balance: positive = pool received (swapper paid in), negative = pool paid out (swapper received). */
 const V4_SWAP = parseAbiItem(
   "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)"
+);
+/** contracts/ELSTestnetSwap.sol's own event — the whole point of this custom event (vs. just reading the ERC20 Transfer) is it's an explicit, unambiguous "a purchase happened" signal, self-contained to one contract instead of requiring PoolManager-style pool-id math. */
+const TESTNET_SWAP_EXECUTED = parseAbiItem(
+  "event SwapExecuted(address indexed user, address tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 timestamp)"
 );
 
 /**
@@ -384,6 +397,74 @@ export async function verifyBuyElsTransaction(txHash: string, walletAddress: str
       elsReceivedByWallet: elsReceivedByWallet.toString(),
       to: tx.to,
       ...usdCheck.data,
+    },
+  };
+}
+
+/**
+ * Testnet-only "Buy ELS" — verifies against contracts/ELSTestnetSwap.sol
+ * (a fixed-rate vending contract, chain 97), NOT the mainnet V4 pool
+ * `verifyBuyElsTransaction` above checks. Deliberately much simpler than
+ * that function: one contract, one custom event, no pool-id math, no USD
+ * price-feed dependency (testnet has no meaningful USD price and the brief
+ * doesn't ask for one here — only "jumlah token sesuai minimum", covered by
+ * `minimumElsAmountRaw` below).
+ */
+export async function verifyBuyElsTestnetTransaction(txHash: string, walletAddress: string): Promise<VerificationOutcome> {
+  if (!BUY_ELS_TESTNET_QUEST_CONFIGURED) {
+    return { status: "SYSTEM_ERROR", reason: "Testnet Buy ELS verification is not configured on this deployment yet." };
+  }
+
+  const { chainId, swapContract, elsTokenAddress, minimumElsAmountRaw } = BUY_ELS_TESTNET_QUEST_CONFIG;
+  const basics = await fetchAndCheckBasics(chainId, txHash, walletAddress);
+  if (!basics.ok) return basics.outcome;
+  const { tx, receipt } = basics;
+
+  if (tx.chainId != null && tx.chainId !== chainId) {
+    return { status: "INVALID", reason: `Transaction is on chain ${tx.chainId}, expected ${chainId}.` };
+  }
+
+  // Contract destination must be the deployed swap contract exactly — no
+  // "touches somewhere" leniency here, unlike the V4 case, because this
+  // contract's whole surface IS the swap; there's no legitimate router
+  // that would call into it on the user's behalf.
+  if (normalize(tx.to ?? "") !== normalize(swapContract as string)) {
+    return { status: "INVALID", reason: "Transaction was not sent to the configured testnet swap contract." };
+  }
+
+  let matchedAmountOut: bigint | null = null;
+  for (const log of receipt.logs) {
+    if (normalize(log.address) !== normalize(swapContract as string)) continue;
+    try {
+      const decoded = decodeEventLog({ abi: [TESTNET_SWAP_EXECUTED], data: log.data, topics: log.topics });
+      if (decoded.eventName !== "SwapExecuted") continue;
+      const args = decoded.args as any;
+      if (
+        normalize(args.user) === normalize(walletAddress) &&
+        normalize(args.tokenOut) === normalize(elsTokenAddress) &&
+        args.tokenIn === "0x0000000000000000000000000000000000000000" // sentinel for native tBNB, per the contract
+      ) {
+        matchedAmountOut = args.amountOut as bigint;
+      }
+    } catch {
+      // Not a SwapExecuted log — ignore.
+    }
+  }
+
+  if (matchedAmountOut === null) {
+    return { status: "INVALID", reason: "No matching SwapExecuted(user, tBNB->ELS) event found for this wallet." };
+  }
+  if (minimumElsAmountRaw > BigInt(0) && matchedAmountOut < minimumElsAmountRaw) {
+    return { status: "INVALID", reason: "ELS amount purchased is below the configured minimum." };
+  }
+
+  return {
+    status: "VALID",
+    blockNumber: receipt.blockNumber,
+    data: {
+      chainId,
+      swapContract,
+      elsAmountOut: matchedAmountOut.toString(),
     },
   };
 }
