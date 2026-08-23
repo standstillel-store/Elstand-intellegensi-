@@ -33,6 +33,16 @@ interface QuestCardProps {
   description?: string;
   state: QuestState;
   lastErrorMessage?: string | null;
+  /**
+   * Phase 6.6 — a rejection that happened BEFORE a submission row was
+   * created (no linked wallet, or connected wallet ≠ verified linked
+   * wallet — see app/api/rewards/verify/route.ts). Distinct from
+   * `lastErrorMessage` (which comes from a submission row's own INVALID
+   * state) because this case never gets one. Shown above the tx-hash
+   * input regardless of `state`; cleared by the parent on the next
+   * verify attempt.
+   */
+  blockingError?: string | null;
   actionLabel?: string;
   actionHref?: string;
   onAction?: () => void;
@@ -51,7 +61,7 @@ interface QuestCardProps {
   onConnectWallet?: () => void;
 }
 
-export function QuestCard({ icon, title, rewardLabel, description, state, lastErrorMessage, actionLabel, actionHref, onAction, onVerify, onClaim, walletConnected, onConnectWallet }: QuestCardProps) {
+export function QuestCard({ icon, title, rewardLabel, description, state, lastErrorMessage, blockingError, actionLabel, actionHref, onAction, onVerify, onClaim, walletConnected, onConnectWallet }: QuestCardProps) {
   const [txHash, setTxHash] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -104,6 +114,12 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
 
       {state === "COMING_SOON" && (
         <p className="mt-3 text-[11px] text-ink-faint">This quest isn't live on this deployment yet.</p>
+      )}
+
+      {!needsWalletFirst && blockingError && (
+        <p className="mt-3 flex items-start gap-1.5 rounded-md border border-down/30 bg-down/5 px-2.5 py-2 text-[11px] text-down">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {blockingError}
+        </p>
       )}
 
       {needsWalletFirst && (

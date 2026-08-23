@@ -2,12 +2,20 @@ import { NextResponse } from "next/server";
 import { isAddress, isHash } from "viem";
 import { createSupabaseServerClient } from "@/lib/auth/server";
 import { getQuestBySlug, getOrCreateSubmission, runVerification, normalizeWallet, SubmissionOwnershipError } from "@/lib/rewards/store";
+import { getPrimaryVerifiedWallet } from "@/lib/wallet/primary";
 import { LIQUIDITY_QUEST_CHAIN_CONFIG, BUY_ELS_QUEST_CONFIG, LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED } from "@/lib/rewards/config";
 
-// POST /api/rewards/verify — brief Section 7. The ONLY thing the frontend
-// contributes is { quest, txHash, walletAddress } (Section 2); everything
-// else is re-derived server-side and independently checked against chain
-// data (lib/rewards/verifier.ts) before any status is returned.
+// POST /api/rewards/verify — brief Section 7 + Phase 6.6 Section 11. The
+// frontend sends { quest, txHash, walletAddress }, but walletAddress is
+// UX-only from here on — a hint for a fast client-side mismatch message,
+// never itself a source of identity. The wallet actually used for
+// verification, storage, and reward eligibility is always re-derived
+// server-side from the caller's linked-and-VERIFIED primary wallet
+// (lib/wallet/primary.ts). A request whose walletAddress doesn't match
+// that wallet is rejected before any submission row is created — otherwise
+// a signed-in user could submit an address they never proved ownership of
+// (any address that happens to have a qualifying on-chain tx) and collect
+// a reward for it.
 export async function POST(req: Request) {
   const supabase = createSupabaseServerClient();
   if (!supabase) return NextResponse.json({ error: "auth_not_configured" }, { status: 503 });
@@ -24,12 +32,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
 
-  const { quest: questSlug, txHash, walletAddress } = body;
-  if (!questSlug || !txHash || !walletAddress) {
-    return NextResponse.json({ error: "missing_fields", message: "quest, txHash, and walletAddress are required." }, { status: 400 });
+  const { quest: questSlug, txHash, walletAddress: claimedWalletAddress } = body;
+  if (!questSlug || !txHash) {
+    return NextResponse.json({ error: "missing_fields", message: "quest and txHash are required." }, { status: 400 });
   }
   if (!isHash(txHash)) return NextResponse.json({ status: "INVALID", eligible: false, retryable: false, reason: "Malformed transaction hash." }, { status: 400 });
-  if (!isAddress(walletAddress)) return NextResponse.json({ status: "INVALID", eligible: false, retryable: false, reason: "Malformed wallet address." }, { status: 400 });
+  if (claimedWalletAddress !== undefined && !isAddress(claimedWalletAddress)) {
+    return NextResponse.json({ status: "INVALID", eligible: false, retryable: false, reason: "Malformed wallet address." }, { status: 400 });
+  }
+
+  // Section 11 — the ONLY wallet identity this route trusts. Must be
+  // linked to this authenticated user AND signature-verified; an
+  // unverified `wallets` row (address merely seen, ownership never
+  // signed) does not count.
+  const linkedWallet = await getPrimaryVerifiedWallet(supabase, user.id);
+  if (!linkedWallet) {
+    return NextResponse.json(
+      {
+        status: "INVALID",
+        eligible: false,
+        retryable: false,
+        reason: "No verified wallet is linked to your account. Connect and verify a wallet in Settings before submitting a quest.",
+      },
+      { status: 409 }
+    );
+  }
+  if (claimedWalletAddress && normalizeWallet(claimedWalletAddress) !== normalizeWallet(linkedWallet.wallet_address)) {
+    return NextResponse.json(
+      {
+        status: "INVALID",
+        eligible: false,
+        retryable: false,
+        reason: "Your connected wallet doesn't match your verified linked wallet. Switch wallets, or update your primary wallet in Settings.",
+      },
+      { status: 409 }
+    );
+  }
+  const walletAddress = linkedWallet.wallet_address;
 
   const quest = await getQuestBySlug(questSlug).catch(() => null);
   if (!quest) return NextResponse.json({ error: "unknown_quest" }, { status: 404 });

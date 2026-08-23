@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/auth/server";
 import { verifyWalletSignature, checkWalletConflict } from "@/lib/wallet/verify";
 import { connectorNameToWalletType } from "@/lib/wallet/connectors";
+import { ensurePrimaryWallet } from "@/lib/wallet/primary";
 import { logActivity } from "@/lib/activityLog";
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,8 @@ export async function POST(request: Request) {
     console.error("[api/wallet/session] upsert failed:", error.message);
     return NextResponse.json({ error: "Could not save wallet." }, { status: 500 });
   }
+
+  await ensurePrimaryWallet(supabase, user.id);
 
   await logActivity(supabase, user.id, "wallet_connected", { address: normalizedAddress, walletType, chainId, via: "login" });
 

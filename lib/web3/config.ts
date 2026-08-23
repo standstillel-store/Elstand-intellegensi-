@@ -70,7 +70,7 @@ export const WALLET_NETWORK_CONFIG = {
   chainShortLabel: "BNB TESTNET",
   rpcUrl: "https://data-seed-prebsc-1-s1.binance.org:8545",
   explorerUrl: "https://testnet.bscscan.com",
-  nativeSymbol: "BNB",
+  nativeSymbol: "tBNB",
   /** ELS testnet token (BEP-20). Real deployed contract. */
   ELS_CONTRACT: "0x4AeA3938eb5c5A594410Bf67c2F2107970901a4D" as `0x${string}`,
   ELS_NAME: "ELSTAND",
@@ -79,6 +79,26 @@ export const WALLET_NETWORK_CONFIG = {
   PREMIUM_PURCHASE_CONTRACT: null as `0x${string}` | null,
   /** AI Energy purchase contract. Null until deployed — purchase stays disabled/"Coming Soon". */
   AI_ENERGY_PURCHASE_CONTRACT: null as `0x${string}` | null,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Phase 6.6, Section 8/9 — the wallet dashboard must display BOTH BSC
+// Mainnet and BSC Testnet ELS/BNB balances, clearly separated, never
+// summed/mixed. This is the same real mainnet ELS token already used by
+// lib/rewards/config.ts's Add Liquidity / Buy ELS quests
+// (0x3a0664...C82) — kept here too so /wallet doesn't need its own copy.
+// `bsc` (chain 56) is already in `networks` above, so no separate RPC
+// client is needed — wagmi/AppKit's existing transport covers it.
+// ---------------------------------------------------------------------------
+export const WALLET_MAINNET_CONFIG = {
+  chainId: 56,
+  chainName: "BNB Smart Chain",
+  chainShortLabel: "BNB MAINNET",
+  explorerUrl: "https://bscscan.com",
+  nativeSymbol: "BNB",
+  ELS_CONTRACT: "0x3a0664300EA06Ba7c01EDC9951c1b04BE9101C82" as `0x${string}`,
+  ELS_NAME: "ELSTAND",
+  ELS_SYMBOL: "ELS",
 } as const;
 
 export const wagmiAdapter = new WagmiAdapter({

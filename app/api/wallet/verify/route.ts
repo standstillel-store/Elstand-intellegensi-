@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/auth/server";
 import { verifyWalletSignature, checkWalletConflict } from "@/lib/wallet/verify";
 import { connectorNameToWalletType } from "@/lib/wallet/connectors";
+import { ensurePrimaryWallet } from "@/lib/wallet/primary";
 import { logActivity } from "@/lib/activityLog";
 
 // Google → Wallet linking: called from Settings > Wallet, always requires an
@@ -58,6 +59,10 @@ export async function POST(request: Request) {
     console.error("[api/wallet/verify] upsert failed:", error.message);
     return NextResponse.json({ error: "Could not save wallet." }, { status: 500 });
   }
+
+  // Phase 6.6 — guarantee a primary wallet exists once this one is
+  // verified. No-ops (never demotes) if the user already has one.
+  await ensurePrimaryWallet(supabase, user.id);
 
   await logActivity(supabase, user.id, "wallet_connected", { address: address.toLowerCase(), walletType, chainId });
 

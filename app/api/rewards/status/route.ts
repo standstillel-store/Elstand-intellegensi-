@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/auth/server";
 import { getEnergyBalance } from "@/lib/energy";
 import { listQuests, listUserSubmissions, getWalletElsTestnetBalance } from "@/lib/rewards/store";
 import { getReferralSummary } from "@/lib/referral";
+import { getPrimaryVerifiedWallet } from "@/lib/wallet/primary";
 import { LIQUIDITY_QUEST_CONFIGURED, BUY_ELS_QUEST_CONFIGURED, REWARD_DISTRIBUTOR_CONFIGURED } from "@/lib/rewards/config";
 
 // GET /api/rewards/status — powers the Earn & Rewards header (Section 3):
@@ -19,14 +20,17 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ signedIn: false });
 
-  const [energy, quests, submissions, { data: wallets }] = await Promise.all([
+  // Phase 6.6 — "the" wallet for Earn is now the same primary/verified
+  // wallet app/api/rewards/verify enforces, not merely "whichever wallet
+  // connected most recently" (those could previously disagree, since only
+  // the frontend's live wagmi state gated verify at all).
+  const [energy, quests, submissions, wallet] = await Promise.all([
     getEnergyBalance(supabase, user.id),
     listQuests(),
     listUserSubmissions(user.id),
-    supabase.from("wallets").select("wallet_address, wallet_type, chain_id").eq("user_id", user.id).order("last_connected_at", { ascending: false }).limit(1),
+    getPrimaryVerifiedWallet(supabase, user.id),
   ]);
 
-  const wallet = wallets?.[0] ?? null;
   const elsTestnetBalance = wallet ? await getWalletElsTestnetBalance(wallet.wallet_address).catch(() => 0) : 0;
   const referral = await getReferralSummary(user.id, new URL("/", process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.elstand-intellegence.my.id").origin).catch(() => null);
 

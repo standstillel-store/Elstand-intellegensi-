@@ -86,6 +86,12 @@ export function EarnView() {
   const [claiming, setClaiming] = useState(false);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
   const [rewards, setRewards] = useState<RewardsStatus | null>(null);
+  // Phase 6.6 — a wallet-mismatch/no-linked-wallet rejection from
+  // /api/rewards/verify happens BEFORE a submission row exists, so it
+  // can't be read back from rewards.quests[].submission on the next poll
+  // like every other error state can. Tracked separately per quest slug so
+  // the message isn't lost the moment loadRewards() re-runs.
+  const [submitErrors, setSubmitErrors] = useState<Record<string, string>>({});
 
   const loadEnergy = useCallback(() => {
     return fetch("/api/ai-energy")
@@ -123,11 +129,24 @@ export function EarnView() {
 
   async function verifyQuest(slug: string, txHash: string) {
     if (!connectedWallet) return;
-    await fetch("/api/rewards/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ quest: slug, txHash, walletAddress: connectedWallet }),
-    }).catch(() => undefined);
+    setSubmitErrors((prev) => ({ ...prev, [slug]: "" }));
+    try {
+      const res = await fetch("/api/rewards/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quest: slug, txHash, walletAddress: connectedWallet }),
+      });
+      const json = await res.json().catch(() => null);
+      // A rejection before any submission row exists (no linked wallet /
+      // wallet mismatch) has no `submission` for the quest-state poll
+      // below to surface — show it directly from this response instead.
+      if (json?.status === "INVALID" && res.status === 409) {
+        setSubmitErrors((prev) => ({ ...prev, [slug]: json.reason ?? "This wallet cannot be used for this quest." }));
+      }
+    } catch {
+      // Network failure — loadRewards() below will just show the quest's
+      // last known state; no need for a separate message here.
+    }
     await Promise.all([loadRewards(), loadEnergy()]);
   }
 
@@ -203,6 +222,7 @@ export function EarnView() {
                 rewardLabel="+15 ELS TESTNET · +35 AI ENERGY"
                 state={(liquidityQuest?.state as QuestState) ?? "AVAILABLE"}
                 lastErrorMessage={liquidityQuest?.submission?.lastErrorMessage}
+                blockingError={submitErrors.add_liquidity || null}
                 actionLabel="Add Liquidity"
                 actionHref={liquidityQuest?.state === "AVAILABLE" || !liquidityQuest?.submission ? ADD_LIQUIDITY_URL : undefined}
                 walletConnected={Boolean(connectedWallet)}
@@ -218,6 +238,7 @@ export function EarnView() {
                 description={buyElsQuest?.configured ? undefined : "Coming soon — purchase infrastructure not yet configured."}
                 state={(buyElsQuest?.state as QuestState) ?? "COMING_SOON"}
                 lastErrorMessage={buyElsQuest?.submission?.lastErrorMessage}
+                blockingError={submitErrors.buy_els || null}
                 actionLabel="Buy ELS"
                 actionHref={buyElsQuest?.state === "AVAILABLE" || !buyElsQuest?.submission ? BUY_ELS_SWAP_URL : undefined}
                 walletConnected={Boolean(connectedWallet)}

@@ -81,11 +81,15 @@ export function WalletHeader({
       </div>
 
       <div className="mt-6">
-        <p className="text-xs text-ink-muted">Total ELS Balance</p>
+        {/* Section 8 — this headline number is the TESTNET balance only
+            (this dashboard's payment/quest actions are testnet-scoped).
+            Mainnet ELS is shown separately, never summed in here, in the
+            Wallet Assets section below. */}
+        <p className="text-xs text-ink-muted">ELS Testnet Balance</p>
         <p className="mt-1 text-4xl font-bold tracking-tight text-ink">
           {elsBalance} <span className="text-lg font-medium text-ink-faint">ELS</span>
         </p>
-        <p className="mt-1 text-[11px] text-ink-faint">Testnet Asset — No market value</p>
+        <p className="mt-1 text-[11px] text-ink-faint">Testnet Asset — No market value · Mainnet balance shown below</p>
       </div>
 
       <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">

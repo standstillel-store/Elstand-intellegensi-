@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAccount, useSignMessage, useDisconnect } from "wagmi";
 import { useAppKit } from "@reown/appkit/react";
-import { Wallet as WalletIcon, Plug, Unplug, Loader2, ShieldCheck, X } from "lucide-react";
+import { Wallet as WalletIcon, Plug, Unplug, Loader2, ShieldCheck, Star, X } from "lucide-react";
 import { SettingsCard, SettingsRow } from "../SettingsCard";
 import { isWalletConnectConfigured, CHAIN_NAMES } from "@/lib/web3/config";
 import { buildVerificationMessage, generateNonce } from "@/lib/wallet/message";
@@ -15,6 +15,7 @@ interface WalletRow {
   wallet_type: WalletType;
   chain_id: number;
   verified: boolean;
+  is_primary: boolean;
   first_connected_at: string;
   last_connected_at: string;
 }
@@ -42,6 +43,7 @@ export function WalletSection() {
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [attemptedAddress, setAttemptedAddress] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null);
 
   const { address, isConnected, chainId, connector } = useAccount();
   const { signMessageAsync } = useSignMessage();
@@ -100,6 +102,20 @@ export function WalletSection() {
     runVerification(address, chainId);
   }, [isConnected, address, chainId, wallets, attemptedAddress, verifying, runVerification]);
 
+  async function handleSetPrimary(id: string) {
+    setSettingPrimaryId(id);
+    try {
+      await fetch("/api/wallet/set-primary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletId: id }),
+      });
+      await loadWallets();
+    } finally {
+      setSettingPrimaryId(null);
+    }
+  }
+
   async function handleRemove(id: string, walletAddress: string) {
     setRemovingId(id);
     try {
@@ -142,20 +158,37 @@ export function WalletSection() {
                   <ShieldCheck size={13} className="shrink-0 text-up" />
                   {WALLET_TYPE_LABEL[w.wallet_type]}
                   <span className="mono-num text-ink-muted">{shortAddr(w.wallet_address)}</span>
+                  {w.is_primary && (
+                    <span className="flex items-center gap-0.5 rounded-full border border-signal/30 bg-signal/10 px-1.5 py-0.5 text-[10px] font-medium text-signal-glow">
+                      <Star size={9} className="fill-current" /> Primary
+                    </span>
+                  )}
                 </div>
                 <p className="mt-0.5 text-[11px] text-ink-faint">
                   {CHAIN_NAMES[w.chain_id] ?? `Chain ${w.chain_id}`} · Terhubung {timeAgo(w.last_connected_at)}
                 </p>
               </div>
-              <button
-                onClick={() => handleRemove(w.id, w.wallet_address)}
-                disabled={removingId === w.id}
-                aria-label="Disconnect wallet"
-                className="flex shrink-0 items-center gap-1 rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-muted hover:border-down/40 hover:text-down disabled:opacity-50"
-              >
-                {removingId === w.id ? <Loader2 size={12} className="animate-spin" /> : <Unplug size={12} />}
-                Disconnect
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                {!w.is_primary && w.verified && (
+                  <button
+                    onClick={() => handleSetPrimary(w.id)}
+                    disabled={settingPrimaryId === w.id}
+                    className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-muted hover:border-signal/40 hover:text-signal-glow disabled:opacity-50"
+                  >
+                    {settingPrimaryId === w.id ? <Loader2 size={12} className="animate-spin" /> : <Star size={12} />}
+                    Make Primary
+                  </button>
+                )}
+                <button
+                  onClick={() => handleRemove(w.id, w.wallet_address)}
+                  disabled={removingId === w.id}
+                  aria-label="Disconnect wallet"
+                  className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-muted hover:border-down/40 hover:text-down disabled:opacity-50"
+                >
+                  {removingId === w.id ? <Loader2 size={12} className="animate-spin" /> : <Unplug size={12} />}
+                  Disconnect
+                </button>
+              </div>
             </div>
           ))}
         </div>
