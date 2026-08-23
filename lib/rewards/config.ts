@@ -201,5 +201,23 @@ export const TESTNET_FAUCET_CONFIG = {
 export const TESTNET_FAUCET_ADDRESS = TESTNET_FAUCET_CONFIG.address;
 export const TESTNET_FAUCET_CONFIGURED = Boolean(TESTNET_FAUCET_CONFIG.address);
 
+/**
+ * TEMPORARY dev/test-only switch — lets a signed-in user trigger a tiny,
+ * fixed-amount ELSTestnetRewardDistributor.distribute() call directly from
+ * the web UI, bypassing the real "Buy ELS (Testnet)" quest's swap-tx
+ * verification entirely (see app/api/rewards/test-distribute/route.ts).
+ * This exists ONLY because ELSTestnetSwap isn't deployed yet, so there's
+ * currently no real user action that can exercise the distributor —
+ * without this, the only way to test it is manually in Remix.
+ *
+ * Explicit opt-in, defaults OFF. Do NOT leave this on in a real production
+ * deploy once ELSTestnetSwap exists — at that point the real quest flow is
+ * the only path that should ever call distribute(), and this becomes an
+ * unverified reward-printing button. Unset ENABLE_TEST_DISTRIBUTE (or set
+ * it to anything other than "true") to fully remove it from the UI/API.
+ */
+export const TEST_DISTRIBUTE_ENABLED = process.env.ENABLE_TEST_DISTRIBUTE === "true";
+export const TEST_DISTRIBUTE_AMOUNT_ELS = 1;
+
 /** How many times VERIFYING may be attempted before a SYSTEM_ERROR row stops offering "RETRY VERIFICATION" automatically in the UI (the backend itself never hard-caps retries — Section 8: "do not permanently reject a transaction merely because one attempt failed" — this is a UI nudge only, not enforced server-side). */
 export const MAX_SUGGESTED_VERIFY_RETRIES = 10;

@@ -8,6 +8,7 @@ import { timeAgo, timeUntil } from "@/lib/format";
 import { QuestCard, type QuestState } from "./QuestCard";
 import { ReferralCard } from "./ReferralCard";
 import { FaucetClaimCard } from "./FaucetClaimCard";
+import { TestDistributeButton } from "./TestDistributeButton";
 
 interface EnergyTransaction {
   id: string;
@@ -79,6 +80,7 @@ interface RewardsStatus {
   referral: { code: string; referralUrl: string; totalReferred: number; totalRewarded: number } | null;
   distributorConfigured: boolean;
   faucet: { configured: boolean; address: `0x${string}` | null; chainId: number };
+  testDistributeEnabled: boolean;
 }
 
 export function EarnView() {
@@ -310,6 +312,9 @@ export function EarnView() {
               <FaucetClaimCard address={rewards.faucet.address} chainId={rewards.faucet.chainId} />
             </section>
           )}
+
+          {/* TEMPORARY — see components/earn/TestDistributeButton.tsx. Only renders when ENABLE_TEST_DISTRIBUTE=true server-side; remove once ELSTestnetSwap exists. */}
+          {rewards?.testDistributeEnabled && <TestDistributeButton />}
         </>
       )}
     </div>

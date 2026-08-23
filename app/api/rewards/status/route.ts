@@ -10,6 +10,7 @@ import {
   BUY_ELS_TESTNET_QUEST_CONFIGURED,
   REWARD_DISTRIBUTOR_CONFIGURED,
   TESTNET_FAUCET_CONFIG,
+  TEST_DISTRIBUTE_ENABLED,
 } from "@/lib/rewards/config";
 
 // GET /api/rewards/status — powers the Earn & Rewards header (Section 3):
@@ -106,6 +107,7 @@ export async function GET() {
     // secret, and EarnView already fetches this endpoint on load — no
     // duplicate client-side config source needed.
     faucet: { configured: Boolean(TESTNET_FAUCET_CONFIG.address), address: TESTNET_FAUCET_CONFIG.address, chainId: TESTNET_FAUCET_CONFIG.chainId },
+    testDistributeEnabled: TEST_DISTRIBUTE_ENABLED && REWARD_DISTRIBUTOR_CONFIGURED,
     // Section 14 — "If distributor address is missing" state. AI Energy
     // above is always a real, immediate balance; ELS Testnet is credited
     // to an internal ledger the moment a quest is CLAIMED either way (see
