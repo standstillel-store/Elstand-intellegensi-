@@ -1,28 +1,51 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useReadContract } from "wagmi";
+import { formatUnits } from "viem";
 import { CircleUser, Zap, Coins } from "lucide-react";
 import type { AppUser, AppProfile } from "@/lib/auth/profile";
 import { shortAddr } from "@/lib/format";
+import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
 
 interface AccountMeResponse {
   signedIn: boolean;
   user: AppUser | null;
   profile: AppProfile | null;
   energy: { balance: number; nextResetAt: string } | null;
+  wallet: { wallet_address: string; wallet_type: string | null; chain_id: number | null } | null;
 }
 
-interface WalletRow {
-  wallet_address: string;
+const ERC20_BALANCE_ABI = [
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+] as const;
+
+/**
+ * ELS balance for whichever address the sidebar is showing. Deliberately
+ * reads on-chain via the PRIMARY VERIFIED wallet address (not a connected
+ * wagmi session) — useReadContract just makes an RPC call, it doesn't
+ * require an active wallet connection, so this renders a real balance even
+ * when the user hasn't opened /wallet or connected in this browser tab.
+ * Testnet only, matching the existing "primary ELS surface is testnet"
+ * design (see lib/web3/config.ts WALLET_NETWORK_CONFIG). Never hardcoded.
+ */
+function ElsBalance({ address }: { address: `0x${string}` }) {
+  const { ELS_CONTRACT, chainId } = WALLET_NETWORK_CONFIG;
+  const balance = useReadContract({ address: ELS_CONTRACT, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address], chainId });
+  const decimals = useReadContract({ address: ELS_CONTRACT, abi: ERC20_BALANCE_ABI, functionName: "decimals", chainId });
+
+  if (balance.data !== undefined && decimals.data !== undefined) {
+    return <>{Number(formatUnits(balance.data as bigint, decimals.data as number)).toLocaleString("en-US", { maximumFractionDigits: 2 })}</>;
+  }
+  return <>{balance.isLoading ? "…" : "N/A"}</>;
 }
 
-// Reuses the exact same /api/account/me source ProfileMenu.tsx already uses
-// for nickname + AI Energy, plus /api/wallet for a connected address (both
-// pre-existing endpoints — no new state introduced). ELS has no real
-// contract/balance source anywhere in the codebase yet, so it always shows
-// N/A here rather than a fabricated number.
+// Single source of truth: /api/account/me now resolves the PRIMARY VERIFIED
+// wallet server-side (lib/wallet/primary.ts — the same helper Earn/Rewards
+// trusts), so this component no longer makes its own /api/wallet call that
+// could surface an unverified or merely-most-recent address instead.
 export function SidebarProfile() {
   const [me, setMe] = useState<AccountMeResponse | null>(null);
-  const [walletAddr, setWalletAddr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,14 +55,6 @@ export function SidebarProfile() {
         if (!cancelled && data) setMe(data);
       })
       .catch(() => {});
-    fetch("/api/wallet")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled && data?.wallets?.[0]?.wallet_address) {
-          setWalletAddr(data.wallets[0].wallet_address);
-        }
-      })
-      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -47,6 +62,7 @@ export function SidebarProfile() {
 
   const nickname = me?.profile?.username || "Trader";
   const energyBalance = me?.energy?.balance;
+  const walletAddr = me?.wallet?.wallet_address ?? null;
 
   return (
     <div className="space-y-2.5 rounded-md border border-line bg-bg-raised/60 p-3">
@@ -81,7 +97,9 @@ export function SidebarProfile() {
         <span className="flex items-center gap-1.5 text-ink-muted">
           <Coins size={12} className="text-ink-faint" /> ELS
         </span>
-        <span className="mono-num font-semibold text-ink-faint">N/A</span>
+        <span className="mono-num font-semibold text-ink-faint">
+          {walletAddr ? <ElsBalance address={walletAddr as `0x${string}`} /> : "N/A"}
+        </span>
       </div>
     </div>
   );

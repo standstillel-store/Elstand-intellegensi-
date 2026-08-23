@@ -14,10 +14,25 @@ function scrollTo(ref: React.RefObject<HTMLDivElement>) {
 }
 
 export function WalletView() {
-  const { address, isConnected } = useAccount();
+  // `status` distinguishes a real disconnect from wagmi's transient
+  // "reconnecting" phase (fired on tab focus / visibility regain while it
+  // re-establishes the AppKit/WalletConnect session from cookieStorage).
+  // Gating on `!isConnected` alone flashes the "Connect Wallet" gate every
+  // time the user switches back to this tab, even though the session is
+  // still valid and about to resolve — that's the perceived
+  // disconnect-on-tab-switch bug, not an actual session loss.
+  const { address, isConnected, status } = useAccount();
   const proRef = useRef<HTMLDivElement>(null);
   const energyRef = useRef<HTMLDivElement>(null);
   const activityRef = useRef<HTMLDivElement>(null);
+
+  if (status === "reconnecting" || status === "connecting") {
+    return (
+      <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-lg border border-line bg-bg-surface/60 px-6 py-14 text-center text-xs text-ink-faint">
+        Restoring wallet session…
+      </div>
+    );
+  }
 
   if (!isConnected || !address) {
     return <WalletConnectGate />;
