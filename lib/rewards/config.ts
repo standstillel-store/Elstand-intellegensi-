@@ -216,7 +216,7 @@ export const TESTNET_FAUCET_CONFIGURED = Boolean(TESTNET_FAUCET_CONFIG.address);
  * unverified reward-printing button. Unset ENABLE_TEST_DISTRIBUTE (or set
  * it to anything other than "true") to fully remove it from the UI/API.
  */
-export const TEST_DISTRIBUTE_ENABLED = process.env.ENABLE_TEST_DISTRIBUTE === "true";
+export const TEST_DISTRIBUTE_ENABLED = (process.env.ENABLE_TEST_DISTRIBUTE ?? "").trim().toLowerCase() === "true";
 export const TEST_DISTRIBUTE_AMOUNT_ELS = 1;
 
 /** How many times VERIFYING may be attempted before a SYSTEM_ERROR row stops offering "RETRY VERIFICATION" automatically in the UI (the backend itself never hard-caps retries — Section 8: "do not permanently reject a transaction merely because one attempt failed" — this is a UI nudge only, not enforced server-side). */
