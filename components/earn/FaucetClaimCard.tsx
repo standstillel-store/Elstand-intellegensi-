@@ -47,7 +47,7 @@ export function FaucetClaimCard({ address, chainId }: { address: `0x${string}`; 
 
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
-  const onCooldown = Boolean(cooldownSeconds && cooldownSeconds > 0n);
+  const onCooldown = Boolean(cooldownSeconds && cooldownSeconds > BigInt(0));
   const amountLabel = claimAmount ? `${Number(claimAmount) / 1e18} tBNB` : "tBNB";
 
   async function handleClaim() {
