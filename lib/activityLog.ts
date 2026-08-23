@@ -10,6 +10,7 @@ export async function logActivity(
     | "logout_all"
     | "wallet_connected"
     | "wallet_disconnected"
+    | "wallet_set_primary"
     | "energy_spent"
     | "energy_reset"
     | "settings_changed"
