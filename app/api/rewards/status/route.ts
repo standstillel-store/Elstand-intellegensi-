@@ -8,6 +8,7 @@ import {
   LIQUIDITY_QUEST_CONFIGURED,
   BUY_ELS_QUEST_CONFIGURED,
   BUY_ELS_TESTNET_QUEST_CONFIGURED,
+  BUY_ELS_TESTNET_QUEST_CONFIG,
   REWARD_DISTRIBUTOR_CONFIGURED,
   TESTNET_FAUCET_CONFIG,
   TEST_DISTRIBUTE_ENABLED,
@@ -108,6 +109,11 @@ export async function GET() {
     // duplicate client-side config source needed.
     faucet: { configured: Boolean(TESTNET_FAUCET_CONFIG.address), address: TESTNET_FAUCET_CONFIG.address, chainId: TESTNET_FAUCET_CONFIG.chainId },
     testDistributeEnabled: TEST_DISTRIBUTE_ENABLED && REWARD_DISTRIBUTOR_CONFIGURED,
+    // Same reasoning as `faucet` above — this address isn't secret, and
+    // the client needs it to call swap()/quote() directly (no external DEX
+    // exists for this custom contract). Reusing this endpoint rather than
+    // a new NEXT_PUBLIC_ var, same "don't duplicate config" rule as faucet.
+    buyElsTestnet: { configured: BUY_ELS_TESTNET_QUEST_CONFIGURED, address: BUY_ELS_TESTNET_QUEST_CONFIG.swapContract, chainId: BUY_ELS_TESTNET_QUEST_CONFIG.chainId },
     // Section 14 — "If distributor address is missing" state. AI Energy
     // above is always a real, immediate balance; ELS Testnet is credited
     // to an internal ledger the moment a quest is CLAIMED either way (see

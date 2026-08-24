@@ -8,6 +8,7 @@ import { timeAgo, timeUntil } from "@/lib/format";
 import { QuestCard, type QuestState } from "./QuestCard";
 import { ReferralCard } from "./ReferralCard";
 import { FaucetClaimCard } from "./FaucetClaimCard";
+import { BuyElsTestnetCard } from "./BuyElsTestnetCard";
 import { TestDistributeButton } from "./TestDistributeButton";
 
 interface EnergyTransaction {
@@ -81,6 +82,7 @@ interface RewardsStatus {
   distributorConfigured: boolean;
   faucet: { configured: boolean; address: `0x${string}` | null; chainId: number };
   testDistributeEnabled: boolean;
+  buyElsTestnet: { configured: boolean; address: `0x${string}` | null; chainId: number };
 }
 
 export function EarnView() {
@@ -250,6 +252,20 @@ export function EarnView() {
                 onVerify={(txHash) => verifyQuest("buy_els", txHash)}
                 onClaim={() => claimQuest("buy_els", buyElsQuest?.submission?.txHash ?? "")}
               />
+
+              {/* No external DEX exists for our custom testnet Swap contract, so this is a
+                  self-contained in-app card (not QuestCard) — see BuyElsTestnetCard.tsx. */}
+              {rewards?.buyElsTestnet?.configured && rewards.buyElsTestnet.address && (
+                <BuyElsTestnetCard
+                  swapAddress={rewards.buyElsTestnet.address}
+                  chainId={rewards.buyElsTestnet.chainId}
+                  rewardEls={25}
+                  rewardAiEnergy={35}
+                  walletConnected={Boolean(connectedWallet)}
+                  onConnectWallet={() => openWalletConnect()}
+                  onSettled={loadRewards}
+                />
+              )}
             </div>
           </section>
 
