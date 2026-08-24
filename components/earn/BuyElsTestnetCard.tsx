@@ -12,7 +12,7 @@ const SWAP_ABI = [
   { type: "function", name: "minSwapAmount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
 ] as const;
 
-type Step = "idle" | "swapping" | "verifying" | "claiming" | "done" | "error";
+type Step = "idle" | "swapping" | "verifying" | "claimable" | "claiming" | "done" | "error";
 
 /**
  * No external DEX exists for contracts/ELSTestnetSwap.sol (it's a custom
@@ -86,10 +86,9 @@ export function BuyElsTestnetCard({
       });
       setResultTxHash(hash);
 
-      // Chain straight into the same verify → claim flow every other
-      // quest uses (app/api/rewards/verify + /claim) — the backend
-      // verifier (verifyBuyElsTestnetTransaction) independently re-checks
-      // this tx on-chain regardless of what the frontend claims happened.
+      // Verify only — claim is a separate manual step below, so the user
+      // sees "verified, ready to claim" before anything gets granted,
+      // instead of everything happening invisibly in one chained call.
       setStep("verifying");
       const verifyRes = await fetch("/api/rewards/verify", {
         method: "POST",
@@ -98,11 +97,22 @@ export function BuyElsTestnetCard({
       }).then((r) => r.json());
       if (verifyRes.error) throw new Error(verifyRes.error);
 
-      setStep("claiming");
+      setStep("claimable");
+    } catch (err) {
+      setStep("error");
+      setError(err instanceof Error ? err.message.split("\n")[0] : "Swap failed.");
+    }
+  }
+
+  async function handleClaim() {
+    if (!resultTxHash) return;
+    setError(null);
+    setStep("claiming");
+    try {
       const claimRes = await fetch("/api/rewards/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quest: "buy_els_testnet", txHash: hash }),
+        body: JSON.stringify({ quest: "buy_els_testnet", txHash: resultTxHash }),
       }).then((r) => r.json());
       if (claimRes.error) throw new Error(claimRes.error);
 
@@ -110,7 +120,7 @@ export function BuyElsTestnetCard({
       onSettled();
     } catch (err) {
       setStep("error");
-      setError(err instanceof Error ? err.message.split("\n")[0] : "Swap failed.");
+      setError(err instanceof Error ? err.message.split("\n")[0] : "Claim failed.");
     }
   }
 
@@ -134,6 +144,16 @@ export function BuyElsTestnetCard({
             <p className="mt-2 flex items-center gap-1.5 text-xs text-up">
               <CheckCircle2 size={13} /> Reward claimed.
             </p>
+          ) : step === "claimable" ? (
+            <div className="mt-2 flex items-center gap-2">
+              <p className="text-[11px] text-ink-faint">Verified — ready to claim.</p>
+              <button
+                onClick={handleClaim}
+                className="rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow hover:bg-signal/20"
+              >
+                Claim reward
+              </button>
+            </div>
           ) : (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <input
