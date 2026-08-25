@@ -8,7 +8,6 @@ import { timeAgo, timeUntil } from "@/lib/format";
 import { QuestCard, type QuestState } from "./QuestCard";
 import { ReferralCard } from "./ReferralCard";
 import { FaucetClaimCard } from "./FaucetClaimCard";
-import { BuyElsTestnetCard } from "./BuyElsTestnetCard";
 import { TestDistributeButton } from "./TestDistributeButton";
 
 interface EnergyTransaction {
@@ -253,18 +252,28 @@ export function EarnView() {
                 onClaim={() => claimQuest("buy_els", buyElsQuest?.submission?.txHash ?? "")}
               />
 
-              {/* No external DEX exists for our custom testnet Swap contract, so this is a
-                  self-contained in-app card (not QuestCard) — see BuyElsTestnetCard.tsx. */}
+              {/* No external DEX exists for our custom testnet Swap contract. Phase
+                  6.6.2: instead of doing the swap inline in a compact widget, this
+                  now leads into the full Elstand DEX page (app/earn/dex/page.tsx +
+                  ElstandDexView.tsx), which does the actual swap/verify/claim. */}
               {rewards?.buyElsTestnet?.configured && rewards.buyElsTestnet.address && (
-                <BuyElsTestnetCard
-                  swapAddress={rewards.buyElsTestnet.address}
-                  chainId={rewards.buyElsTestnet.chainId}
-                  rewardEls={25}
-                  rewardAiEnergy={35}
-                  walletConnected={Boolean(connectedWallet)}
-                  onConnectWallet={() => openWalletConnect()}
-                  onSettled={loadRewards}
-                />
+                <div className="rounded-md border border-line bg-bg-raised/40 p-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                      <ShoppingCart size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-ink">Buy ELS (Testnet)</p>
+                      <p className="text-xs text-ink-muted">+25 ELS TESTNET · +35 AI ENERGY</p>
+                      <a
+                        href="/earn/dex"
+                        className="mt-2 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow hover:bg-signal/20"
+                      >
+                        Open Elstand DEX
+                      </a>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </section>
