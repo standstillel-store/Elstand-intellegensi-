@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAccount } from "wagmi";
 import { useAppKit } from "@reown/appkit/react";
-import { Gift, Zap, ArrowUpRight, Loader2, Droplets, ShoppingCart, Wallet as WalletIcon, AlertTriangle } from "lucide-react";
+import { Gift, Zap, ArrowUpRight, Loader2, Droplets, ShoppingCart, Wallet as WalletIcon, AlertTriangle, Bug } from "lucide-react";
 import clsx from "clsx";
 import { timeAgo, timeUntil } from "@/lib/format";
 import { QuestCard, type QuestState } from "./QuestCard";
@@ -266,6 +266,26 @@ export function EarnView() {
                   onSettled={loadRewards}
                 />
               )}
+            </div>
+          </section>
+
+          {/* Phase 6.6.1 — Bug Hunter entry point. Additive, self-contained;
+              does not touch quest state/logic above. */}
+          <section className="rounded-md border border-line bg-bg-surface p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                <Bug size={16} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-ink">Report a Bug</p>
+                <p className="mt-0.5 text-xs text-ink-muted">Temukan bug di ELSTAND Intelligence? Laporkan dan dapatkan reward ELS.</p>
+                <a
+                  href="/earn/bug-hunter"
+                  className="mt-2 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow hover:bg-signal/20"
+                >
+                  Lapor Bug
+                </a>
+              </div>
             </div>
           </section>
 

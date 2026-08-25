@@ -16,13 +16,13 @@ import { LayoutDashboard, Bug, Gift, Users, ScrollText, LogOut, Loader2 } from "
 
 const NAV_ITEMS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "dashboard" as const, comingSoon: false },
-  { key: "bug-hunter", label: "Bug Hunter", icon: Bug, href: null, comingSoon: true },
+  { key: "bug-hunter", label: "Bug Hunter", icon: Bug, href: "bug-hunter" as const, comingSoon: false },
   { key: "rewards", label: "Rewards", icon: Gift, href: null, comingSoon: true },
   { key: "users", label: "Users", icon: Users, href: null, comingSoon: true },
   { key: "logs", label: "System Logs", icon: ScrollText, href: "logs" as const, comingSoon: false },
 ];
 
-export function AdminDashboardShell({ adminEntry, active, children }: { adminEntry: string; active: "dashboard" | "logs"; children: ReactNode }) {
+export function AdminDashboardShell({ adminEntry, active, children }: { adminEntry: string; active: "dashboard" | "logs" | "bug-hunter"; children: ReactNode }) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 

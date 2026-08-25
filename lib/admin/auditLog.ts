@@ -14,7 +14,18 @@ import { getSupabase } from "@/lib/supabase";
 // path was hit), not request bodies.
 // ---------------------------------------------------------------------------
 
-export type AdminAuditAction = "ADMIN_LOGIN_SUCCESS" | "ADMIN_LOGIN_FAILED" | "ADMIN_LOGIN_RATE_LIMITED" | "ADMIN_LOGOUT";
+export type AdminAuditAction =
+  | "ADMIN_LOGIN_SUCCESS"
+  | "ADMIN_LOGIN_FAILED"
+  | "ADMIN_LOGIN_RATE_LIMITED"
+  | "ADMIN_LOGOUT"
+  // Phase 6.6.1 — Bug Hunter admin actions (Section 19).
+  | "BUG_REPORT_VIEWED"
+  | "BUG_REPORT_APPROVED"
+  | "BUG_REPORT_REJECTED"
+  | "BUG_CLAIM_INITIATED"
+  | "BUG_CLAIM_COMPLETED"
+  | "BUG_CLAIM_FAILED";
 
 // Single shared admin identity for this phase — there is no per-admin
 // username/account concept yet (one password, see spec section 3), so this
