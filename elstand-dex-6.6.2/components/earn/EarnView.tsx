@@ -1,0 +1,378 @@
+"use client";
+import { useEffect, useState, useCallback } from "react";
+import { useAccount } from "wagmi";
+import { useAppKit } from "@reown/appkit/react";
+import { Gift, Zap, ArrowUpRight, Loader2, Droplets, ShoppingCart, Wallet as WalletIcon, AlertTriangle, Bug } from "lucide-react";
+import clsx from "clsx";
+import { timeAgo, timeUntil } from "@/lib/format";
+import { QuestCard, type QuestState } from "./QuestCard";
+import { ReferralCard } from "./ReferralCard";
+import { FaucetClaimCard } from "./FaucetClaimCard";
+import { TestDistributeButton } from "./TestDistributeButton";
+
+interface EnergyTransaction {
+  id: string;
+  delta: number;
+  reason: string;
+  balance_after: number;
+  created_at: string;
+}
+
+interface EnergyData {
+  balance: number;
+  nextClaimAt: string;
+  canClaim: boolean;
+  transactions: EnergyTransaction[];
+}
+
+const REASON_LABEL: Record<string, string> = {
+  analyze_coin: "Analyze Coin",
+  generate_signal: "Generate AI Signal",
+  ai_chat: "AI Agent Chat",
+  daily_claim: "Daily Reward",
+  analyze_coin_refund: "Refund — Analyze Coin gagal",
+  generate_signal_refund: "Refund — Signal gagal",
+  ai_chat_refund: "Refund — AI Chat gagal",
+  chat: "AI Chat",
+  ai_signal_generate: "AI Signal (single)",
+  ai_signal_scan: "AI Signal (full scan)",
+  chart_analysis: "Chart Analysis",
+  token_analysis: "Token Analyzer",
+  daily_reset: "Daily reset",
+  "reward:referral": "Referral Reward",
+  "reward:add_liquidity": "Add Liquidity Reward",
+  "reward:buy_els": "Buy ELS Reward",
+};
+
+const ADD_LIQUIDITY_URL =
+  "https://app.uniswap.org/positions/create/v4?currencyA=NATIVE&currencyB=0x3a0664300EA06Ba7c01EDC9951c1b04BE9101C82&chain=bnb&fee=%7B%22feeAmount%22%3A375%2C%22tickSpacing%22%3A4%2C%22isDynamic%22%3Afalse%7D&hook=undefined&priceRangeState=%7B%22priceInverted%22%3Afalse%2C%22fullRange%22%3Afalse%2C%22minTick%22%3A108188%2C%22maxTick%22%3A108212%2C%22initialPrice%22%3A%22%22%2C%22inputMode%22%3A%22price%22%7D&depositState=%7B%22exactField%22%3A%22TOKEN0%22%2C%22exactAmounts%22%3A%7B%7D%7D&step=1";
+
+/**
+ * Buy ELS reuses the same ELS/native Uniswap V4 pool as Add Liquidity — no
+ * dedicated purchase contract exists or is being deployed. This sends the
+ * user to Uniswap's own swap UI for the pair; Uniswap's router picks the
+ * best/only available ELS pool for that pair automatically. If a second
+ * ELS pool with a different fee tier is ever created, this URL doesn't
+ * force this specific one — noted as a limitation, not silently assumed
+ * away.
+ */
+const BUY_ELS_SWAP_URL = "https://app.uniswap.org/swap?chain=bnb&inputCurrency=NATIVE&outputCurrency=0x3a0664300EA06Ba7c01EDC9951c1b04BE9101C82";
+
+interface QuestStatus {
+  slug: string;
+  name: string;
+  description: string | null;
+  rewardEls: number;
+  rewardAiEnergy: number;
+  oneTime: boolean;
+  configured: boolean;
+  state: QuestState;
+  submission: { txHash: string; lastErrorMessage: string | null } | null;
+}
+
+interface RewardsStatus {
+  wallet: { wallet_address: string } | null;
+  aiEnergyBalance: number;
+  elsTestnetBalance: number;
+  totalEarned: { aiEnergy: number; els: number };
+  completedQuestCount: number;
+  quests: QuestStatus[];
+  referral: { code: string; referralUrl: string; totalReferred: number; totalRewarded: number } | null;
+  distributorConfigured: boolean;
+  faucet: { configured: boolean; address: `0x${string}` | null; chainId: number };
+  testDistributeEnabled: boolean;
+  buyElsTestnet: { configured: boolean; address: `0x${string}` | null; chainId: number };
+}
+
+export function EarnView() {
+  const { address: connectedWallet } = useAccount();
+  const { open: openWalletConnect } = useAppKit();
+  const [data, setData] = useState<EnergyData | null | "unauth">(null);
+  const [claiming, setClaiming] = useState(false);
+  const [claimNotice, setClaimNotice] = useState<string | null>(null);
+  const [rewards, setRewards] = useState<RewardsStatus | null>(null);
+  // Phase 6.6 — a wallet-mismatch/no-linked-wallet rejection from
+  // /api/rewards/verify happens BEFORE a submission row exists, so it
+  // can't be read back from rewards.quests[].submission on the next poll
+  // like every other error state can. Tracked separately per quest slug so
+  // the message isn't lost the moment loadRewards() re-runs.
+  const [submitErrors, setSubmitErrors] = useState<Record<string, string>>({});
+
+  const loadEnergy = useCallback(() => {
+    return fetch("/api/ai-energy")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setData)
+      .catch(() => setData("unauth"));
+  }, []);
+
+  const loadRewards = useCallback(() => {
+    return fetch("/api/rewards/status")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        if (json.signedIn) setRewards(json);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    loadEnergy();
+    loadRewards();
+  }, [loadEnergy, loadRewards]);
+
+  async function handleClaim() {
+    setClaiming(true);
+    setClaimNotice(null);
+    try {
+      await fetch("/api/ai-energy/claim", { method: "POST" });
+      await loadEnergy();
+    } catch {
+      setClaimNotice("Gagal klaim — coba lagi sebentar.");
+    } finally {
+      setClaiming(false);
+    }
+  }
+
+  async function verifyQuest(slug: string, txHash: string) {
+    if (!connectedWallet) return;
+    setSubmitErrors((prev) => ({ ...prev, [slug]: "" }));
+    try {
+      const res = await fetch("/api/rewards/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quest: slug, txHash, walletAddress: connectedWallet }),
+      });
+      const json = await res.json().catch(() => null);
+      // A rejection before any submission row exists (no linked wallet /
+      // wallet mismatch) has no `submission` for the quest-state poll
+      // below to surface — show it directly from this response instead.
+      if (json?.status === "INVALID" && res.status === 409) {
+        setSubmitErrors((prev) => ({ ...prev, [slug]: json.reason ?? "This wallet cannot be used for this quest." }));
+      }
+    } catch {
+      // Network failure — loadRewards() below will just show the quest's
+      // last known state; no need for a separate message here.
+    }
+    await Promise.all([loadRewards(), loadEnergy()]);
+  }
+
+  async function claimQuest(slug: string, txHash: string) {
+    await fetch("/api/rewards/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quest: slug, txHash }),
+    }).catch(() => undefined);
+    await Promise.all([loadRewards(), loadEnergy()]);
+  }
+
+  const rewardHistory = data && data !== "unauth" ? data.transactions.filter((tx) => tx.delta > 0) : [];
+
+  const liquidityQuest = rewards?.quests.find((q) => q.slug === "add_liquidity");
+  const buyElsQuest = rewards?.quests.find((q) => q.slug === "buy_els");
+
+  return (
+    <div className="space-y-6">
+      {data === null && (
+        <div className="flex items-center gap-2 rounded-md border border-line bg-bg-surface p-4 text-xs text-ink-faint">
+          <Loader2 size={14} className="animate-spin" /> Memuat…
+        </div>
+      )}
+
+      {data === "unauth" && (
+        <div className="rounded-md border border-line bg-bg-surface p-4 text-xs text-ink-faint">
+          Sign in untuk melihat Earn kamu.
+        </div>
+      )}
+
+      {data && data !== "unauth" && (
+        <>
+          {/* Header — brief Section 3: AI Energy, ELS Testnet balance, wallet, total earned, completed quests. */}
+          <section className="rounded-md border border-line bg-bg-surface p-4">
+            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Earn &amp; Rewards</p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatBlock icon={<Zap size={13} className="text-signal-glow" />} label="AI Energy" value={rewards?.aiEnergyBalance ?? data.balance} />
+              <StatBlock icon={<Droplets size={13} className="text-signal-glow" />} label="ELS Testnet" value={rewards?.elsTestnetBalance ?? 0} />
+              <StatBlock icon={<WalletIcon size={13} className="text-signal-glow" />} label="Wallet" value={connectedWallet ? `${connectedWallet.slice(0, 6)}…${connectedWallet.slice(-4)}` : "Not connected"} mono={false} />
+              <StatBlock icon={<Gift size={13} className="text-signal-glow" />} label="Completed" value={rewards?.completedQuestCount ?? 0} />
+            </div>
+            {rewards && !rewards.distributorConfigured && (
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] text-ink-faint">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0 text-signal-glow" />
+                Testnet reward distribution is currently being configured. ELS Testnet amounts above are recorded and your eligibility is preserved, but haven&apos;t been sent on-chain yet.
+              </p>
+            )}
+          </section>
+
+          {/* Active quests */}
+          <section className="rounded-md border border-line bg-bg-surface p-4">
+            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Active Quests</p>
+            <div className="space-y-3">
+              {rewards?.referral && (
+                <ReferralCard
+                  referralUrl={rewards.referral.referralUrl}
+                  referralCode={rewards.referral.code}
+                  totalReferred={rewards.referral.totalReferred}
+                  totalRewarded={rewards.referral.totalRewarded}
+                />
+              )}
+
+              {!connectedWallet && (
+                <div className="rounded-md border border-line bg-bg-raised/40 p-3 text-[11px] text-ink-faint">
+                  Connect a wallet to submit and verify on-chain quests below.
+                </div>
+              )}
+
+              <QuestCard
+                icon={<Droplets size={16} />}
+                title="Provide ELS Liquidity"
+                rewardLabel="+15 ELS TESTNET · +35 AI ENERGY"
+                state={(liquidityQuest?.state as QuestState) ?? "AVAILABLE"}
+                lastErrorMessage={liquidityQuest?.submission?.lastErrorMessage}
+                blockingError={submitErrors.add_liquidity || null}
+                actionLabel="Add Liquidity"
+                actionHref={liquidityQuest?.state === "AVAILABLE" || !liquidityQuest?.submission ? ADD_LIQUIDITY_URL : undefined}
+                walletConnected={Boolean(connectedWallet)}
+                onConnectWallet={() => openWalletConnect()}
+                onVerify={(txHash) => verifyQuest("add_liquidity", txHash)}
+                onClaim={() => claimQuest("add_liquidity", liquidityQuest?.submission?.txHash ?? "")}
+              />
+
+              <QuestCard
+                icon={<ShoppingCart size={16} />}
+                title="Buy ELS"
+                rewardLabel="+25 ELS TESTNET · +35 AI ENERGY"
+                description={buyElsQuest?.configured ? undefined : "Coming soon — purchase infrastructure not yet configured."}
+                state={(buyElsQuest?.state as QuestState) ?? "COMING_SOON"}
+                lastErrorMessage={buyElsQuest?.submission?.lastErrorMessage}
+                blockingError={submitErrors.buy_els || null}
+                actionLabel="Buy ELS"
+                actionHref={buyElsQuest?.state === "AVAILABLE" || !buyElsQuest?.submission ? BUY_ELS_SWAP_URL : undefined}
+                walletConnected={Boolean(connectedWallet)}
+                onConnectWallet={() => openWalletConnect()}
+                onVerify={(txHash) => verifyQuest("buy_els", txHash)}
+                onClaim={() => claimQuest("buy_els", buyElsQuest?.submission?.txHash ?? "")}
+              />
+
+              {/* No external DEX exists for our custom testnet Swap contract. Phase
+                  6.6.2: instead of doing the swap inline in a compact widget, this
+                  now leads into the full Elstand DEX page (app/earn/dex/page.tsx +
+                  ElstandDexView.tsx), which does the actual swap/verify/claim. */}
+              {rewards?.buyElsTestnet?.configured && rewards.buyElsTestnet.address && (
+                <div className="rounded-md border border-line bg-bg-raised/40 p-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                      <ShoppingCart size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-ink">Buy ELS (Testnet)</p>
+                      <p className="text-xs text-ink-muted">+25 ELS TESTNET · +35 AI ENERGY</p>
+                      <a
+                        href="/earn/dex"
+                        className="mt-2 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow hover:bg-signal/20"
+                      >
+                        Open Elstand DEX
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Phase 6.6.1 — Bug Hunter entry point. Additive, self-contained;
+              does not touch quest state/logic above. */}
+          <section className="rounded-md border border-line bg-bg-surface p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                <Bug size={16} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-ink">Report a Bug</p>
+                <p className="mt-0.5 text-xs text-ink-muted">Temukan bug di ELSTAND Intelligence? Laporkan dan dapatkan reward ELS.</p>
+                <a
+                  href="/earn/bug-hunter"
+                  className="mt-2 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow hover:bg-signal/20"
+                >
+                  Lapor Bug
+                </a>
+              </div>
+            </div>
+          </section>
+
+          {/* Daily Reward claim — pre-existing mechanic, unchanged. */}
+          <section className="rounded-md border border-line bg-bg-surface p-4">
+            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Daily Reward</p>
+            <div className="flex items-center justify-between gap-3 rounded-md border border-line bg-bg-raised/60 p-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                  <Gift size={16} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-ink">Daily Reward</p>
+                  <p className="text-xs text-ink-faint">
+                    {claimNotice ??
+                      (data.canClaim ? "+10 AI Energy siap diklaim sekarang." : `Tersedia lagi ${timeUntil(data.nextClaimAt)}.`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleClaim}
+                disabled={!data.canClaim || claiming}
+                className={clsx(
+                  "shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors",
+                  data.canClaim && !claiming
+                    ? "border-signal/40 bg-signal/10 text-signal-glow hover:bg-signal/20"
+                    : "cursor-not-allowed border-line text-ink-faint"
+                )}
+              >
+                {claiming ? "Mengklaim…" : "Klaim +10"}
+              </button>
+            </div>
+          </section>
+
+          {/* Completed — reward transactions only (positive deltas). */}
+          <section className="rounded-md border border-line bg-bg-surface p-4">
+            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Completed</p>
+            {rewardHistory.length === 0 && <p className="text-xs text-ink-faint">Belum ada reward yang diklaim.</p>}
+            {rewardHistory.length > 0 && (
+              <div className="space-y-1.5">
+                {rewardHistory.map((tx) => (
+                  <div key={tx.id} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-ink-muted">
+                      <ArrowUpRight size={12} className="text-up" />
+                      {REASON_LABEL[tx.reason] ?? tx.reason}
+                    </span>
+                    <span className="mono-num text-ink-faint">
+                      +{tx.delta} · {timeAgo(tx.created_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Faucet — direct wallet tx, not a quest (no reward, not backend-verified). Bottom of the page, per request. */}
+          {rewards?.faucet?.configured && rewards.faucet.address && (
+            <section className="rounded-md border border-line bg-bg-surface p-4">
+              <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Testnet Faucet</p>
+              <FaucetClaimCard address={rewards.faucet.address} chainId={rewards.faucet.chainId} />
+            </section>
+          )}
+
+          {/* TEMPORARY — see components/earn/TestDistributeButton.tsx. Only renders when ENABLE_TEST_DISTRIBUTE=true server-side; remove once ELSTestnetSwap exists. */}
+          {rewards?.testDistributeEnabled && <TestDistributeButton />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function StatBlock({ icon, label, value, mono = true }: { icon: React.ReactNode; label: string; value: string | number; mono?: boolean }) {
+  return (
+    <div className="rounded-md border border-line bg-bg-raised/40 p-2.5">
+      <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-ink-faint">
+        {icon} {label}
+      </p>
+      <p className={clsx("mt-1 text-sm font-semibold text-ink", mono && "mono-num")}>{value}</p>
+    </div>
+  );
+}
