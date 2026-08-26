@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount, useReadContract, useWriteContract, useSwitchChain } from "wagmi";
 import { Loader2, Lock, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
@@ -19,6 +19,17 @@ const PAYMENT_ABI = [
 type Step = "idle" | "approving" | "purchasing" | "verifying" | "done" | "error";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
+
+/** localStorage key holding a purchase tx hash that reached the chain but
+ * hasn't been confirmed GRANTED by the backend yet (e.g. the verify call
+ * failed for a backend-side reason after the on-chain tx already
+ * succeeded). Keyed per productId+wallet so it never bleeds across
+ * products or accounts. Checked on mount so a page refresh / retry never
+ * re-submits purchase() for ELS that's already been spent — it always
+ * tries to verify the existing tx first. */
+function pendingKey(productId: PaymentProductId, wallet?: string) {
+  return `elstand:pending_purchase:${productId}:${(wallet ?? "").toLowerCase()}`;
+}
 
 /**
  * "Buy with ELS" execution — approve() only if current allowance is
@@ -42,6 +53,30 @@ export function BuyWithElsButton({
   const { switchChainAsync } = useSwitchChain();
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [pendingTxHash, setPendingTxHash] = useState<Hash | null>(null);
+
+  useEffect(() => {
+    if (!wallet) return;
+    const stored = localStorage.getItem(pendingKey(productId, wallet));
+    if (stored) setPendingTxHash(stored as Hash);
+  }, [wallet, productId]);
+
+  async function verifyTx(txHash: Hash) {
+    setStep("verifying");
+    localStorage.setItem(pendingKey(productId, wallet), txHash);
+    const verifyRes = await fetch("/api/payments/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, txHash, walletAddress: wallet }),
+    }).then((r) => r.json());
+    if (verifyRes.status !== "GRANTED" && verifyRes.status !== "ALREADY_GRANTED") {
+      throw new Error(verifyRes.reason || "Verification failed.");
+    }
+    localStorage.removeItem(pendingKey(productId, wallet));
+    setPendingTxHash(null);
+    setStep("done");
+    onGranted();
+  }
 
   const paymentContract = WALLET_NETWORK_CONFIG.PREMIUM_PURCHASE_CONTRACT ?? WALLET_NETWORK_CONFIG.AI_ENERGY_PURCHASE_CONTRACT;
   const chainId = WALLET_NETWORK_CONFIG.chainId;
@@ -96,21 +131,25 @@ export function BuyWithElsButton({
         args: [paymentId, productIdHash, priceElsRaw],
       });
 
-      setStep("verifying");
-      const verifyRes = await fetch("/api/payments/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId, txHash: purchaseHash, walletAddress: wallet }),
-      }).then((r) => r.json());
-      if (verifyRes.status !== "GRANTED" && verifyRes.status !== "ALREADY_GRANTED") {
-        throw new Error(verifyRes.reason || "Verification failed.");
-      }
-
-      setStep("done");
-      onGranted();
+      // Persisted BEFORE calling verify — if verify throws for any
+      // backend-side reason (DB down, migration not applied, etc.) the ELS
+      // has already left the wallet on-chain regardless, so the retry path
+      // below must re-verify this exact tx, never submit purchase() again.
+      await verifyTx(purchaseHash);
     } catch (err) {
       setStep("error");
       setError(err instanceof Error ? err.message.split("\n")[0] : "Purchase failed.");
+    }
+  }
+
+  async function handleRetryVerify() {
+    if (!pendingTxHash) return;
+    setError(null);
+    try {
+      await verifyTx(pendingTxHash);
+    } catch (err) {
+      setStep("error");
+      setError(err instanceof Error ? err.message.split("\n")[0] : "Verification failed.");
     }
   }
 
@@ -132,8 +171,13 @@ export function BuyWithElsButton({
 
   return (
     <div className="w-full">
+      {pendingTxHash && step !== "verifying" && step !== "done" && (
+        <p className="mb-1.5 text-[10px] text-amber">
+          Payment already sent on-chain but not yet confirmed by our server. Click below to finish — this will NOT charge you again.
+        </p>
+      )}
       <button
-        onClick={isConnected ? handleBuy : undefined}
+        onClick={isConnected ? (pendingTxHash ? handleRetryVerify : handleBuy) : undefined}
         disabled={busy || !isConnected}
         className={clsx(
           "flex w-full items-center justify-center gap-1.5 rounded-md border py-2 text-xs font-medium transition-colors",
@@ -146,6 +190,8 @@ export function BuyWithElsButton({
           <><Loader2 size={12} className="animate-spin" /> Confirm in wallet…</>
         ) : step === "verifying" ? (
           <><Loader2 size={12} className="animate-spin" /> Verifying…</>
+        ) : pendingTxHash ? (
+          "Finish verification"
         ) : (
           "Buy with ELS"
         )}
