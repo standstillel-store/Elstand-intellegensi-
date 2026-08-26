@@ -344,7 +344,7 @@ function ClaimedState({ totalReward, txHash, onClose }: { totalReward: number; t
   );
 }
 
-function claimErrorMessage(data: { status?: string; message?: string; reason?: string; reasons?: string[] }): string {
+function claimErrorMessage(data: { status?: string; message?: string; reason?: string; detail?: string; reasons?: string[] }): string {
   switch (data.status) {
     case "NOT_ELIGIBLE":
       return data.reasons?.join(" ") ?? "You are not eligible yet.";
@@ -357,12 +357,13 @@ function claimErrorMessage(data: { status?: string; message?: string; reason?: s
     case "wallet_mismatch":
       return data.message ?? "Wallet mismatch — refresh and try again.";
     case "CLAIM_ERROR":
-      // Surfaces the actual backend reason (e.g. a reverted-tx detail like
-      // "Distributor tx reverted: 0x..." or "insufficient_distributor_balance")
-      // instead of a generic message that hides what actually went wrong.
-      return data.reason ?? "Claim failed — please try again.";
+      // `detail` carries the actual on-chain/backend failure (e.g.
+      // "insufficient_distributor_balance: distributor holds 0 ELS, needs
+      // 200 ELS..." or a specific revert reason) — `reason` alone is just
+      // the generic bucket ("transfer_failed") and hides the real cause.
+      return data.detail ?? data.reason ?? "Claim failed — please try again.";
     default:
-      return data.message ?? data.reason ?? "Claim failed — please try again.";
+      return data.message ?? data.detail ?? data.reason ?? "Claim failed — please try again.";
   }
 }
 

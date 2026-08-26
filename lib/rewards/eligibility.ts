@@ -167,7 +167,7 @@ export type ClaimEligibleRewardResult =
   | { outcome: "ALREADY_CLAIMED" }
   | { outcome: "CLAIM_IN_PROGRESS" }
   | { outcome: "DISTRIBUTOR_NOT_CONFIGURED" }
-  | { outcome: "CLAIM_ERROR"; reason: string };
+  | { outcome: "CLAIM_ERROR"; reason: string; detail?: string };
 
 /**
  * Claim flow — Section 14/17. Recalculates eligibility itself (never
@@ -249,7 +249,7 @@ export async function claimEligibleReward(userId: string | null, walletAddress: 
 
     if (!result.ok) {
       await db().from("eligible_reward_claims").update({ status: "CLAIM_ERROR", last_error_message: `${result.reason}${result.detail ? `: ${result.detail}` : ""}` }).eq("id", row.id);
-      return { outcome: "CLAIM_ERROR", reason: result.reason };
+      return { outcome: "CLAIM_ERROR", reason: result.reason, detail: result.detail };
     }
 
     await db().from("eligible_reward_claims").update({ status: "CLAIMED", tx_hash: result.txHash }).eq("id", row.id);

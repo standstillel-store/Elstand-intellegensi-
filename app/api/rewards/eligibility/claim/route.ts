@@ -62,7 +62,7 @@ export async function POST(req: Request) {
       case "DISTRIBUTOR_NOT_CONFIGURED":
         return NextResponse.json({ status: "DISTRIBUTOR_NOT_CONFIGURED", message: "Reward distribution is currently being configured." }, { status: 503 });
       case "CLAIM_ERROR":
-        return NextResponse.json({ status: "CLAIM_ERROR", reason: result.reason }, { status: 500 });
+        return NextResponse.json({ status: "CLAIM_ERROR", reason: result.reason, detail: result.detail }, { status: 500 });
     }
   } catch (err) {
     console.error("[eligibility/claim] failed:", err instanceof Error ? err.message : err);
