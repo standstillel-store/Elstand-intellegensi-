@@ -1,23 +1,22 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Trophy, WalletMinimal, User } from "lucide-react";
+import { LayoutDashboard, Gift, WalletMinimal, Trophy } from "lucide-react";
 import clsx from "clsx";
 
-// Mobile-only bottom tab bar — Dashboard / Leaderboard / Wallet / Profile.
-// The "Earn" tab was replaced with "Leaderboard" per the leaderboard
-// feature request; /earn itself is untouched and still reachable (linked
-// from the leaderboard page's data-source doc and from Quick Actions
-// elsewhere) — only this nav entry changed. Purely a navigation shell: no
-// data of its own. Rendered from AppShell (lg:hidden), fixed to the
-// viewport bottom with safe-area padding for iOS home-indicator devices.
-// `main` in AppShell needs bottom padding on mobile so content never sits
-// underneath this bar.
+// Mobile-only bottom tab bar — Dashboard / Earn / Wallet / Leaderboard.
+// Correction from the previous pass: the original mobile reference had
+// Dashboard / Earn / Wallet / Profile — only the "Profile" slot is swapped
+// for "Leaderboard" here. Earn stays exactly where it was. Purely a
+// navigation shell: no data of its own. Rendered from AppShell
+// (lg:hidden), fixed to the viewport bottom with safe-area padding for iOS
+// home-indicator devices. `main` in AppShell needs bottom padding on
+// mobile so content never sits underneath this bar.
 const TABS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
+  { href: "/earn", label: "Earn", icon: Gift },
   { href: "/wallet", label: "Wallet", icon: WalletMinimal },
-  { href: "/settings", label: "Profile", icon: User },
+  { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
 ];
 
 export function BottomNav() {

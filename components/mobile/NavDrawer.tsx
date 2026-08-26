@@ -12,6 +12,7 @@ import {
   Settings,
   BookOpen,
   LineChart,
+  Gift,
   Trophy,
   WalletMinimal,
   Gauge,
@@ -54,6 +55,7 @@ const NAV_GROUPS = [
     label: "Ecosystem",
     items: [
       { href: "/elvoid-pro", label: "ELVOID PRO", icon: Gauge, badge: "PRO" },
+      { href: "/earn", label: "Earn", icon: Gift },
       { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
       { href: "/wallet", label: "Wallet", icon: WalletMinimal },
     ],
