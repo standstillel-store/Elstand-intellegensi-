@@ -58,6 +58,32 @@ export async function attemptDistributorTransfer(params: {
   submissionId: string;
   elsDecimals?: number;
 }): Promise<DistributorTransferResult> {
+  return distributeToWallet({
+    walletAddress: params.walletAddress,
+    amountElsTestnet: params.amountElsTestnet,
+    claimId: claimIdFromSubmissionId(params.submissionId),
+    elsDecimals: params.elsDecimals,
+  });
+}
+
+/**
+ * Phase 6.6.3.2 — Eligible Reward Center's distributor call. Same
+ * distribute() function, same operational signer, same on-chain replay
+ * guard as attemptDistributorTransfer() above (which now just delegates
+ * here with a submissionId-derived claimId) — the only difference is the
+ * CALLER supplies an already-computed claimId instead of one derived from
+ * reward_submissions.id, because Eligible Reward is not a
+ * reward_submissions row and its claimId must never collide with a Buy ELS
+ * quest payout's claimId space. See lib/rewards/eligibility.ts for how
+ * that claimId is derived (from eligible_reward_claims.id, a completely
+ * separate table/id-space).
+ */
+export async function distributeToWallet(params: {
+  walletAddress: string;
+  amountElsTestnet: number;
+  claimId: `0x${string}`;
+  elsDecimals?: number;
+}): Promise<DistributorTransferResult> {
   if (!REWARD_DISTRIBUTOR_CONFIGURED || !REWARD_DISTRIBUTOR_ADDRESS) {
     return { ok: false, reason: "not_configured" };
   }
@@ -83,19 +109,17 @@ export async function attemptDistributorTransfer(params: {
 
     const decimals = params.elsDecimals ?? 18;
     const amountRaw = BigInt(Math.round(params.amountElsTestnet * 10 ** decimals));
-    const claimId = claimIdFromSubmissionId(params.submissionId);
 
     const txHash = await walletClient.writeContract({
       address: REWARD_DISTRIBUTOR_ADDRESS,
       abi: DISTRIBUTE_ABI,
       functionName: "distribute",
-      args: [params.walletAddress as `0x${string}`, amountRaw, claimId],
+      args: [params.walletAddress as `0x${string}`, amountRaw, params.claimId],
     });
 
-    // Wait for confirmation so the caller (store.ts's claimReward) can
-    // record a txHash it KNOWS landed, not just one it submitted — a
-    // submitted-but-dropped/reverted tx must not be recorded as if the
-    // reward was actually delivered.
+    // Wait for confirmation so the caller can record a txHash it KNOWS
+    // landed, not just one it submitted — a submitted-but-dropped/reverted
+    // tx must not be recorded as if the reward was actually delivered.
     const publicClient = getRewardChainClient(97);
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
     if (receipt.status !== "success") {

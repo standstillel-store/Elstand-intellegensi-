@@ -22,6 +22,7 @@ import { QuestCard, type QuestState } from "./QuestCard";
 import { ReferralCard } from "./ReferralCard";
 import { FaucetClaimCard } from "./FaucetClaimCard";
 import { TestDistributeButton } from "./TestDistributeButton";
+import { EligibleRewardCard } from "./EligibleRewardCard";
 
 interface EnergyTransaction {
   id: string;
@@ -510,6 +511,14 @@ export function EarnView() {
               </section>
             )}
           </div>
+
+          {/* Phase 6.6.3.2 — Eligible Reward Center. Full-width on every
+              breakpoint, sitting below Bug Hunter + Faucet per spec — a
+              SEPARATE reward system from the quest cards above (never
+              touches reward_submissions or the Buy ELS +25 ELS payout).
+              Self-contained: reads its own /api/rewards/eligibility and
+              /api/rewards/eligibility/claim, no props needed from here. */}
+          <EligibleRewardCard />
 
           {/* TEMPORARY — see components/earn/TestDistributeButton.tsx. Only renders when ENABLE_TEST_DISTRIBUTE=true server-side; remove once ELSTestnetSwap exists. */}
           {rewards?.testDistributeEnabled && <TestDistributeButton />}
