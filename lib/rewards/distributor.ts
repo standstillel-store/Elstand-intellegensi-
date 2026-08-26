@@ -45,7 +45,31 @@ const DISTRIBUTE_ABI = [
     ],
     outputs: [],
   },
+  {
+    type: "function",
+    name: "distributorBalance",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
 ] as const;
+
+/**
+ * Read-only pre-check of the distributor's own ELS balance — lets a caller
+ * (e.g. an admin status endpoint) surface "distributor needs refunding" as
+ * an explicit, human-readable state instead of only ever discovering it via
+ * a vague reverted transaction after the fact.
+ */
+export async function getDistributorBalance(): Promise<{ ok: true; balanceRaw: bigint } | { ok: false; reason: "not_configured" }> {
+  if (!REWARD_DISTRIBUTOR_CONFIGURED || !REWARD_DISTRIBUTOR_ADDRESS) return { ok: false, reason: "not_configured" };
+  const publicClient = getRewardChainClient(97);
+  const balanceRaw = (await publicClient.readContract({
+    address: REWARD_DISTRIBUTOR_ADDRESS,
+    abi: DISTRIBUTE_ABI,
+    functionName: "distributorBalance",
+  })) as bigint;
+  return { ok: true, balanceRaw };
+}
 
 /** Derives the on-chain claimId from a reward_submissions row id — same id both the DB unique constraint and this contract call key off. */
 export function claimIdFromSubmissionId(submissionId: string): `0x${string}` {
@@ -110,6 +134,24 @@ export async function distributeToWallet(params: {
     const decimals = params.elsDecimals ?? 18;
     const amountRaw = BigInt(Math.round(params.amountElsTestnet * 10 ** decimals));
 
+    // Pre-flight balance check — turns a generic reverted-tx error into an
+    // explicit, actionable one ("distributor needs refunding with N ELS")
+    // instead of the caller having to guess why a tx bounced.
+    const publicClient = getRewardChainClient(97);
+    const currentBalance = (await publicClient.readContract({
+      address: REWARD_DISTRIBUTOR_ADDRESS,
+      abi: DISTRIBUTE_ABI,
+      functionName: "distributorBalance",
+    })) as bigint;
+    if (currentBalance < amountRaw) {
+      const shortfall = Number(amountRaw - currentBalance) / 10 ** decimals;
+      return {
+        ok: false,
+        reason: "transfer_failed",
+        detail: `insufficient_distributor_balance: distributor holds ${Number(currentBalance) / 10 ** decimals} ELS, needs ${params.amountElsTestnet} ELS (short by ${shortfall} ELS) — fund the distributor contract address with ELS Testnet tokens.`,
+      };
+    }
+
     const txHash = await walletClient.writeContract({
       address: REWARD_DISTRIBUTOR_ADDRESS,
       abi: DISTRIBUTE_ABI,
@@ -120,7 +162,6 @@ export async function distributeToWallet(params: {
     // Wait for confirmation so the caller can record a txHash it KNOWS
     // landed, not just one it submitted — a submitted-but-dropped/reverted
     // tx must not be recorded as if the reward was actually delivered.
-    const publicClient = getRewardChainClient(97);
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
     if (receipt.status !== "success") {
       return { ok: false, reason: "transfer_failed", detail: `Distributor tx reverted: ${txHash}` };

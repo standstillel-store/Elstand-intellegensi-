@@ -344,7 +344,7 @@ function ClaimedState({ totalReward, txHash, onClose }: { totalReward: number; t
   );
 }
 
-function claimErrorMessage(data: { status?: string; message?: string; reasons?: string[] }): string {
+function claimErrorMessage(data: { status?: string; message?: string; reason?: string; reasons?: string[] }): string {
   switch (data.status) {
     case "NOT_ELIGIBLE":
       return data.reasons?.join(" ") ?? "You are not eligible yet.";
@@ -356,8 +356,13 @@ function claimErrorMessage(data: { status?: string; message?: string; reasons?: 
       return data.message ?? "Reward distribution is currently being configured.";
     case "wallet_mismatch":
       return data.message ?? "Wallet mismatch — refresh and try again.";
+    case "CLAIM_ERROR":
+      // Surfaces the actual backend reason (e.g. a reverted-tx detail like
+      // "Distributor tx reverted: 0x..." or "insufficient_distributor_balance")
+      // instead of a generic message that hides what actually went wrong.
+      return data.reason ?? "Claim failed — please try again.";
     default:
-      return data.message ?? "Claim failed — please try again.";
+      return data.message ?? data.reason ?? "Claim failed — please try again.";
   }
 }
 
