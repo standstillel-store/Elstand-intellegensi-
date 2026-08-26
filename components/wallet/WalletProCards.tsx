@@ -1,18 +1,20 @@
 "use client";
-import { forwardRef } from "react";
-import { Crown, Lock, Check } from "lucide-react";
+import { forwardRef, useState } from "react";
+import { Crown, Check } from "lucide-react";
 import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
+import { PAYMENT_PRODUCTS, type PaymentProductId } from "@/lib/payments/config";
+import { BuyWithElsButton } from "./BuyWithElsButton";
 
-const PLANS = [
+const PLANS: { id: PaymentProductId; label: string; price: string; highlight: string | null; benefits: string[] }[] = [
   {
-    id: "1-week",
+    id: "ELVOID_PRO_WEEK",
     label: "ELVOID PRO — 1 WEEK",
     price: "1,500",
     highlight: "POPULAR",
     benefits: ["Unlock Elvoid Premium Dashboard", "AI Energy: 25/day", "AI Signal Grade A+", "50 AI Energy First Bonus"],
   },
   {
-    id: "1-month",
+    id: "ELVOID_PRO_MONTH",
     label: "ELVOID PRO — 1 MONTH",
     price: "15,000",
     highlight: null,
@@ -21,15 +23,16 @@ const PLANS = [
 ];
 
 /**
- * "Buy with ELS" execution is real-transaction-only per spec (section 9) —
- * connect → check network → check balance → wallet confirmation → real
- * testnet tx → receipt → refresh balance/entitlement. None of that is wired
- * because WALLET_NETWORK_CONFIG.PREMIUM_PURCHASE_CONTRACT is still null, so
- * the button stays disabled with the exact required copy instead of a fake
- * success. Wire the real flow here once that contract is deployed.
+ * Phase 6.6.4 — wired to contracts/ELSTestnetPayment.sol via
+ * BuyWithElsButton (approve -> purchase -> /api/payments/verify). The
+ * button still self-disables to "Coming Soon" if
+ * WALLET_NETWORK_CONFIG.PREMIUM_PURCHASE_CONTRACT is ever unset again
+ * (e.g. a future redeploy before the address is updated) — see that
+ * component's own configured check.
  */
 export const WalletProCards = forwardRef<HTMLDivElement>(function WalletProCards(_props, ref) {
   const configured = Boolean(WALLET_NETWORK_CONFIG.PREMIUM_PURCHASE_CONTRACT);
+  const [grantedPlan, setGrantedPlan] = useState<PaymentProductId | null>(null);
 
   return (
     <div ref={ref} className="rounded-lg border border-line bg-bg-surface/60 p-4">
@@ -61,14 +64,19 @@ export const WalletProCards = forwardRef<HTMLDivElement>(function WalletProCards
               ))}
             </ul>
 
-            <button
-              disabled
-              title={configured ? undefined : "Testnet purchase contract not configured"}
-              className="mt-3.5 flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-md border border-line bg-bg-raised py-2 text-xs font-medium text-ink-faint"
-            >
-              <Lock size={12} />
-              {configured ? "Buy with ELS" : "Coming Soon"}
-            </button>
+            <div className="mt-3.5">
+              {grantedPlan === plan.id ? (
+                <p className="flex items-center justify-center gap-1.5 rounded-md border border-up/30 bg-up/10 py-2 text-xs font-medium text-up">
+                  <Check size={13} /> Premium Active
+                </p>
+              ) : (
+                <BuyWithElsButton
+                  productId={plan.id}
+                  priceElsRaw={PAYMENT_PRODUCTS[plan.id].priceElsRaw}
+                  onGranted={() => setGrantedPlan(plan.id)}
+                />
+              )}
+            </div>
           </div>
         ))}
       </div>

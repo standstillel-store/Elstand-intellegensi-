@@ -83,10 +83,19 @@ export const WALLET_NETWORK_CONFIG = {
    * user's own wallet (no server-signed tx involved).
    */
   SELL_CONTRACT: "0x97A8EE8157C1fe62124c5fBD475b1282cB248D34" as `0x${string}`,
-  /** Premium (Elvoid Pro) purchase contract. Null until deployed — purchase stays disabled/"Coming Soon". */
-  PREMIUM_PURCHASE_CONTRACT: null as `0x${string}` | null,
-  /** AI Energy purchase contract. Null until deployed — purchase stays disabled/"Coming Soon". */
-  AI_ENERGY_PURCHASE_CONTRACT: null as `0x${string}` | null,
+  /**
+   * Phase 6.6.4 — ELSTestnetPayment.sol. Deployed on BSC Testnet (chain 97),
+   * tx 0x92ef00363b40601234e9f8f314ff494f1be04986a0bb4981699d59d85925ec7a.
+   * Single processor for BOTH Elvoid Pro membership and AI Energy purchases
+   * (see the contract's `purchase(paymentId, productId, amount)` and its
+   * three seeded productIds: ELVOID_PRO_WEEK, ELVOID_PRO_MONTH,
+   * AI_ENERGY_10). Owner/treasury: 0x1a4F964D13dFe8050d3eB5CE560c190E005FF49A.
+   * Same contract address for both constants below — there is only one
+   * payment contract, not two.
+   */
+  PREMIUM_PURCHASE_CONTRACT: "0x576bba3714983B59d5440C8f6Bb7Dd048cf9628b" as `0x${string}` | null,
+  /** Same ELSTestnetPayment.sol deployment as PREMIUM_PURCHASE_CONTRACT above — see that comment. */
+  AI_ENERGY_PURCHASE_CONTRACT: "0x576bba3714983B59d5440C8f6Bb7Dd048cf9628b" as `0x${string}` | null,
 } as const;
 
 // ---------------------------------------------------------------------------
