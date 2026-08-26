@@ -125,7 +125,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
       {needsWalletFirst && (
         <button
           onClick={onConnectWallet}
-          className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
+          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
         >
           Connect Wallet
         </button>
@@ -137,7 +137,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
           target="_blank"
           rel="noopener noreferrer"
           onClick={onAction}
-          className="mt-3 inline-flex items-center justify-center rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
+          className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
         >
           {actionLabel ?? "Get Started"}
         </a>

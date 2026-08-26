@@ -5,6 +5,7 @@ import { Sidebar } from "./Sidebar";
 import { TopNav } from "./layout/TopNav";
 import { ProfileMenu } from "./layout/ProfileMenu";
 import { NavDrawer } from "./mobile/NavDrawer";
+import { BottomNav } from "./mobile/BottomNav";
 import { Footer } from "./Footer";
 import { AIChatDock } from "./AIChatDock";
 import { AlertsBell } from "./alerts/AlertsBell";
@@ -61,13 +62,21 @@ export function AppShell({
           </div>
         </div>
 
-        <main className={clsx(fullBleed ? "px-3 py-4 lg:px-4 lg:py-4" : "mx-auto max-w-6xl px-4 py-5 lg:px-6 lg:py-6")}>
+        <main
+          className={clsx(
+            "pb-20 lg:pb-0", // clear the fixed BottomNav on mobile
+            fullBleed ? "px-3 py-4 lg:px-4 lg:py-4" : "mx-auto max-w-6xl px-4 py-5 lg:px-6 lg:py-6"
+          )}
+        >
           <div className={fullBleed ? "space-y-3" : "space-y-5"}>{children}</div>
         </main>
 
-        <Footer />
+        <div className="hidden lg:block">
+          <Footer />
+        </div>
       </div>
 
+      <BottomNav />
       <AIChatDock />
     </div>
   );

@@ -263,17 +263,17 @@ export function EarnView() {
                 primary
               />
               <StatBlock
+                icon={<CheckCircle2 size={14} />}
+                iconClassName="border-up/30 bg-up/10 text-up shadow-glow-up"
+                label="Completed"
+                value={rewards?.completedQuestCount ?? 0}
+              />
+              <StatBlock
                 icon={<WalletIcon size={14} />}
                 iconClassName="border-smartmoney/30 bg-smartmoney/10 text-smartmoney-glow shadow-glow-smartmoney"
                 label="Wallet"
                 value={connectedWallet ? `${connectedWallet.slice(0, 6)}…${connectedWallet.slice(-4)}` : "Not connected"}
                 mono={false}
-              />
-              <StatBlock
-                icon={<CheckCircle2 size={14} />}
-                iconClassName="border-up/30 bg-up/10 text-up shadow-glow-up"
-                label="Completed"
-                value={rewards?.completedQuestCount ?? 0}
               />
             </div>
             {rewards && !rewards.distributorConfigured && (
