@@ -1,10 +1,24 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useAccount } from "wagmi";
 import { useAppKit } from "@reown/appkit/react";
-import { Gift, Zap, ArrowUpRight, Loader2, Droplets, ShoppingCart, Wallet as WalletIcon, AlertTriangle, Bug } from "lucide-react";
+import {
+  Gift,
+  Zap,
+  ArrowUpRight,
+  Loader2,
+  Droplets,
+  Flame,
+  ShoppingCart,
+  Wallet as WalletIcon,
+  AlertTriangle,
+  Bug,
+  CheckCircle2,
+  Waves,
+  ShieldAlert,
+} from "lucide-react";
 import clsx from "clsx";
-import { timeAgo, timeUntil } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { QuestCard, type QuestState } from "./QuestCard";
 import { ReferralCard } from "./ReferralCard";
 import { FaucetClaimCard } from "./FaucetClaimCard";
@@ -84,6 +98,32 @@ interface RewardsStatus {
   buyElsTestnet: { configured: boolean; address: `0x${string}` | null; chainId: number };
 }
 
+// ---------------------------------------------------------------------------
+// PHASE 6.6.3.1 — "Earn Command Center" UI/UX polish. Pure presentation
+// restructure of the same data/handlers the page already had (loadEnergy,
+// loadRewards, handleClaim, verifyQuest, claimQuest, and every quest's
+// href/state) — no new endpoints, no changed reward math, no touched
+// verification logic. See EARN_CENTER_FILTERS below for the one bit of new
+// client-side derived state (a view filter over quest.state), which reads
+// existing data and writes nothing.
+// ---------------------------------------------------------------------------
+
+type EarnFilter = "all" | "available" | "in_progress" | "completed";
+
+const EARN_FILTERS: { key: EarnFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "available", label: "Available" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "completed", label: "Completed" },
+];
+
+/** Buckets an existing QuestState into a filter tab — display grouping only. */
+function bucketOf(state: QuestState): Exclude<EarnFilter, "all"> {
+  if (state === "CLAIMED") return "completed";
+  if (state === "AVAILABLE" || state === "COMING_SOON") return "available";
+  return "in_progress"; // SUBMITTED / VERIFYING / VALID / CLAIMABLE / CLAIMING / SYSTEM_ERROR / CLAIM_ERROR / INVALID
+}
+
 export function EarnView() {
   const { address: connectedWallet } = useAccount();
   const { open: openWalletConnect } = useAppKit();
@@ -91,6 +131,7 @@ export function EarnView() {
   const [claiming, setClaiming] = useState(false);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
   const [rewards, setRewards] = useState<RewardsStatus | null>(null);
+  const [filter, setFilter] = useState<EarnFilter>("available");
   // Phase 6.6 — a wallet-mismatch/no-linked-wallet rejection from
   // /api/rewards/verify happens BEFORE a submission row exists, so it
   // can't be read back from rewards.quests[].submission on the next poll
@@ -169,8 +210,26 @@ export function EarnView() {
   const liquidityQuest = rewards?.quests.find((q) => q.slug === "add_liquidity");
   const buyElsQuest = rewards?.quests.find((q) => q.slug === "buy_els");
 
+  const liquidityState: QuestState = (liquidityQuest?.state as QuestState) ?? "AVAILABLE";
+  const buyElsState: QuestState = (buyElsQuest?.state as QuestState) ?? "COMING_SOON";
+  // Referral has no tx-based state machine (server-driven by the onboarding
+  // hook, see ReferralCard) — treated as an evergreen "available" quest for
+  // filtering, same bucket regardless of how many friends were rewarded.
+  const referralBucket: Exclude<EarnFilter, "all"> = "available";
+  const showBuyElsTestnet = Boolean(rewards?.buyElsTestnet?.configured && rewards.buyElsTestnet.address);
+
+  const visibleCount = useMemo(() => {
+    if (!rewards) return 0;
+    let n = 0;
+    if (rewards.referral && (filter === "all" || filter === referralBucket)) n += 1;
+    if (filter === "all" || filter === bucketOf(liquidityState)) n += 1;
+    if (filter === "all" || filter === bucketOf(buyElsState)) n += 1;
+    if (showBuyElsTestnet && (filter === "all" || filter === "available")) n += 1;
+    return n;
+  }, [rewards, filter, liquidityState, buyElsState, showBuyElsTestnet, referralBucket]);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {data === null && (
         <div className="flex items-center gap-2 rounded-md border border-line bg-bg-surface p-4 text-xs text-ink-faint">
           <Loader2 size={14} className="animate-spin" /> Memuat…
@@ -185,14 +244,38 @@ export function EarnView() {
 
       {data && data !== "unauth" && (
         <>
-          {/* Header — brief Section 3: AI Energy, ELS Testnet balance, wallet, total earned, completed quests. */}
+          {/* EARN OVERVIEW — AI Energy & ELS Testnet are primary metrics
+              (bigger figure, colored icon); Wallet/Completed stay compact. */}
           <section className="rounded-md border border-line bg-bg-surface p-4">
-            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Earn &amp; Rewards</p>
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Earn Overview</p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatBlock icon={<Zap size={13} className="text-signal-glow" />} label="AI Energy" value={rewards?.aiEnergyBalance ?? data.balance} />
-              <StatBlock icon={<Droplets size={13} className="text-signal-glow" />} label="ELS Testnet" value={rewards?.elsTestnetBalance ?? 0} />
-              <StatBlock icon={<WalletIcon size={13} className="text-signal-glow" />} label="Wallet" value={connectedWallet ? `${connectedWallet.slice(0, 6)}…${connectedWallet.slice(-4)}` : "Not connected"} mono={false} />
-              <StatBlock icon={<Gift size={13} className="text-signal-glow" />} label="Completed" value={rewards?.completedQuestCount ?? 0} />
+              <StatBlock
+                icon={<Zap size={15} />}
+                iconClassName="border-signal/30 bg-signal/10 text-signal-glow"
+                label="AI Energy"
+                value={rewards?.aiEnergyBalance ?? data.balance}
+                primary
+              />
+              <StatBlock
+                icon={<Flame size={15} />}
+                iconClassName="border-amber/30 bg-amber/10 text-amber"
+                label="ELS Testnet"
+                value={rewards?.elsTestnetBalance ?? 0}
+                primary
+              />
+              <StatBlock
+                icon={<WalletIcon size={14} />}
+                iconClassName="border-smartmoney/30 bg-smartmoney/10 text-smartmoney-glow"
+                label="Wallet"
+                value={connectedWallet ? `${connectedWallet.slice(0, 6)}…${connectedWallet.slice(-4)}` : "Not connected"}
+                mono={false}
+              />
+              <StatBlock
+                icon={<CheckCircle2 size={14} />}
+                iconClassName="border-up/30 bg-up/10 text-up"
+                label="Completed"
+                value={rewards?.completedQuestCount ?? 0}
+              />
             </div>
             {rewards && !rewards.distributorConfigured && (
               <p className="mt-3 flex items-start gap-1.5 text-[11px] text-ink-faint">
@@ -202,161 +285,223 @@ export function EarnView() {
             )}
           </section>
 
-          {/* Active quests */}
-          <section className="rounded-md border border-line bg-bg-surface p-4">
-            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Active Quests</p>
-            <div className="space-y-3">
-              {rewards?.referral && (
-                <ReferralCard
-                  referralUrl={rewards.referral.referralUrl}
-                  referralCode={rewards.referral.code}
-                  totalReferred={rewards.referral.totalReferred}
-                  totalRewarded={rewards.referral.totalRewarded}
-                />
-              )}
-
-              {!connectedWallet && (
-                <div className="rounded-md border border-line bg-bg-raised/40 p-3 text-[11px] text-ink-faint">
-                  Connect a wallet to submit and verify on-chain quests below.
+          <div className="grid gap-4 lg:grid-cols-3">
+            {/* EARN CENTER — quest list with a lightweight view filter over
+                each quest's existing state. Filtering is display-only: it
+                never changes which quests exist, their configured/state, or
+                any submit/verify/claim call below. */}
+            <section className="rounded-md border border-line bg-bg-surface p-4 lg:col-span-2">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Earn Center</p>
+                <div className="flex flex-wrap gap-1 rounded-md border border-line bg-bg-raised/40 p-0.5">
+                  {EARN_FILTERS.map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setFilter(f.key)}
+                      className={clsx(
+                        "rounded px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                        filter === f.key ? "bg-signal/15 text-signal-glow" : "text-ink-faint hover:text-ink-muted"
+                      )}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
 
-              <QuestCard
-                icon={<Droplets size={16} />}
-                title="Provide ELS Liquidity"
-                rewardLabel="+15 ELS TESTNET · +35 AI ENERGY"
-                state={(liquidityQuest?.state as QuestState) ?? "AVAILABLE"}
-                lastErrorMessage={liquidityQuest?.submission?.lastErrorMessage}
-                blockingError={submitErrors.add_liquidity || null}
-                actionLabel="Add Liquidity"
-                actionHref={liquidityQuest?.state === "AVAILABLE" || !liquidityQuest?.submission ? ADD_LIQUIDITY_URL : undefined}
-                walletConnected={Boolean(connectedWallet)}
-                onConnectWallet={() => openWalletConnect()}
-                onVerify={(txHash) => verifyQuest("add_liquidity", txHash)}
-                onClaim={() => claimQuest("add_liquidity", liquidityQuest?.submission?.txHash ?? "")}
-              />
+              <div className="space-y-3">
+                {rewards?.referral && (filter === "all" || filter === referralBucket) && (
+                  <ReferralCard
+                    referralUrl={rewards.referral.referralUrl}
+                    referralCode={rewards.referral.code}
+                    totalReferred={rewards.referral.totalReferred}
+                    totalRewarded={rewards.referral.totalRewarded}
+                  />
+                )}
 
-              <QuestCard
-                icon={<ShoppingCart size={16} />}
-                title="Buy ELS"
-                rewardLabel="+25 ELS TESTNET · +35 AI ENERGY"
-                description={buyElsQuest?.configured ? undefined : "Coming soon — purchase infrastructure not yet configured."}
-                state={(buyElsQuest?.state as QuestState) ?? "COMING_SOON"}
-                lastErrorMessage={buyElsQuest?.submission?.lastErrorMessage}
-                blockingError={submitErrors.buy_els || null}
-                actionLabel="Buy ELS"
-                actionHref={buyElsQuest?.state === "AVAILABLE" || !buyElsQuest?.submission ? BUY_ELS_SWAP_URL : undefined}
-                walletConnected={Boolean(connectedWallet)}
-                onConnectWallet={() => openWalletConnect()}
-                onVerify={(txHash) => verifyQuest("buy_els", txHash)}
-                onClaim={() => claimQuest("buy_els", buyElsQuest?.submission?.txHash ?? "")}
-              />
+                {!connectedWallet && visibleCount > (rewards?.referral ? 1 : 0) && (
+                  <div className="rounded-md border border-line bg-bg-raised/40 p-3 text-[11px] text-ink-faint">
+                    Connect a wallet to submit and verify on-chain quests below.
+                  </div>
+                )}
 
-              {/* No external DEX exists for our custom testnet Swap contract. Phase
-                  6.6.2: instead of doing the swap inline in a compact widget, this
-                  now leads into the full Elstand DEX page (app/earn/dex/page.tsx +
-                  ElstandDexView.tsx), which does the actual swap/verify/claim. */}
-              {rewards?.buyElsTestnet?.configured && rewards.buyElsTestnet.address && (
-                <div className="rounded-md border border-line bg-bg-raised/40 p-3">
-                  <div className="flex items-start gap-3">
+                {(filter === "all" || filter === bucketOf(liquidityState)) && (
+                  <QuestCard
+                    icon={<Droplets size={16} />}
+                    title="Provide ELS Liquidity"
+                    rewardLabel="+15 ELS TESTNET · +35 AI ENERGY"
+                    state={liquidityState}
+                    lastErrorMessage={liquidityQuest?.submission?.lastErrorMessage}
+                    blockingError={submitErrors.add_liquidity || null}
+                    actionLabel="Add Liquidity"
+                    actionHref={liquidityQuest?.state === "AVAILABLE" || !liquidityQuest?.submission ? ADD_LIQUIDITY_URL : undefined}
+                    walletConnected={Boolean(connectedWallet)}
+                    onConnectWallet={() => openWalletConnect()}
+                    onVerify={(txHash) => verifyQuest("add_liquidity", txHash)}
+                    onClaim={() => claimQuest("add_liquidity", liquidityQuest?.submission?.txHash ?? "")}
+                  />
+                )}
+
+                {(filter === "all" || filter === bucketOf(buyElsState)) && (
+                  <QuestCard
+                    icon={<ShoppingCart size={16} />}
+                    title="Buy ELS"
+                    rewardLabel="+25 ELS TESTNET · +35 AI ENERGY"
+                    description={buyElsQuest?.configured ? undefined : "Coming soon — purchase infrastructure not yet configured."}
+                    state={buyElsState}
+                    lastErrorMessage={buyElsQuest?.submission?.lastErrorMessage}
+                    blockingError={submitErrors.buy_els || null}
+                    actionLabel="Buy ELS"
+                    actionHref={buyElsQuest?.state === "AVAILABLE" || !buyElsQuest?.submission ? BUY_ELS_SWAP_URL : undefined}
+                    walletConnected={Boolean(connectedWallet)}
+                    onConnectWallet={() => openWalletConnect()}
+                    onVerify={(txHash) => verifyQuest("buy_els", txHash)}
+                    onClaim={() => claimQuest("buy_els", buyElsQuest?.submission?.txHash ?? "")}
+                  />
+                )}
+
+                {/* No external DEX exists for our custom testnet Swap contract. Phase
+                    6.6.2: instead of doing the swap inline in a compact widget, this
+                    now leads into the full Elstand DEX page (app/earn/dex/page.tsx +
+                    ElstandDexView.tsx), which does the actual swap/verify/claim. */}
+                {showBuyElsTestnet && (filter === "all" || filter === "available") && (
+                  <div className="rounded-md border border-line bg-bg-raised/60 p-3.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                          <ShoppingCart size={16} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-ink">Buy ELS (Testnet)</p>
+                          <p className="text-xs font-semibold text-signal-glow">+25 ELS TESTNET · +35 AI ENERGY</p>
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                        Available
+                      </span>
+                    </div>
+                    <a
+                      href="/earn/dex"
+                      className="mt-3 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
+                    >
+                      Open Elstand DEX
+                    </a>
+                  </div>
+                )}
+
+                {visibleCount === 0 && (
+                  <div className="rounded-md border border-dashed border-line p-4 text-center text-[11px] text-ink-faint">
+                    No quests in this view yet.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Right rail — Daily Reward (utility card, not a quest) + Recent Activity. */}
+            <div className="space-y-4">
+              <section className="rounded-md border border-line bg-bg-surface p-4">
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Daily Reward</p>
+                <div className="rounded-md border border-line bg-bg-raised/60 p-3.5">
+                  <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
-                      <ShoppingCart size={16} />
+                      <Gift size={16} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-ink">Buy ELS (Testnet)</p>
-                      <p className="text-xs text-ink-muted">+25 ELS TESTNET · +35 AI ENERGY</p>
-                      <a
-                        href="/earn/dex"
-                        className="mt-2 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow hover:bg-signal/20"
-                      >
-                        Open Elstand DEX
-                      </a>
+                      <p className="text-sm font-medium text-ink">Daily Reward</p>
+                      <p className="text-xs font-semibold text-signal-glow">+10 AI ENERGY</p>
                     </div>
                   </div>
+
+                  {claimNotice && <p className="mt-2 text-[11px] text-ink-faint">{claimNotice}</p>}
+
+                  {data.canClaim ? (
+                    <button
+                      onClick={handleClaim}
+                      disabled={claiming}
+                      className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-signal/40 bg-signal/10 px-3 py-2 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {claiming && <Loader2 size={12} className="animate-spin" />}
+                      {claiming ? "Mengklaim…" : "Claim Now"}
+                    </button>
+                  ) : (
+                    <div className="mt-3">
+                      <p className="text-[10px] uppercase tracking-wide text-ink-faint">Available in</p>
+                      <DailyRewardCountdown nextClaimAt={data.nextClaimAt} />
+                    </div>
+                  )}
                 </div>
-              )}
+              </section>
+
+              <section className="rounded-md border border-line bg-bg-surface p-4">
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Recent Activity</p>
+                {rewardHistory.length === 0 && <p className="text-xs text-ink-faint">Belum ada reward yang diklaim.</p>}
+                {rewardHistory.length > 0 && (
+                  <div className="space-y-2.5">
+                    {rewardHistory.slice(0, 8).map((tx) => (
+                      <div key={tx.id} className="flex items-center gap-2.5">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-up/10 text-up">
+                          <ArrowUpRight size={12} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs text-ink-muted">{REASON_LABEL[tx.reason] ?? tx.reason}</p>
+                          <p className="mono-num text-[11px] text-ink-faint">
+                            +{tx.delta} AI Energy · {timeAgo(tx.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+
+          {/* QUICK ACTIONS — compact shortcuts. Buy ELS / Add Liquidity link
+              straight out to the same destinations their Earn Center cards
+              use; Faucet / Report a Bug jump to the full sections below
+              (both need more than a link — wallet/cooldown state and a
+              report form respectively — so the tile scrolls to the real
+              thing instead of duplicating it). */}
+          <section className="rounded-md border border-line bg-bg-surface p-4">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Quick Actions</p>
+            <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+              <QuickActionTile href={BUY_ELS_SWAP_URL} external icon={<ShoppingCart size={16} />} label="Buy ELS" />
+              <QuickActionTile href={ADD_LIQUIDITY_URL} external icon={<Droplets size={16} />} label="Add Liquidity" />
+              <QuickActionTile href="#faucet" icon={<Waves size={16} />} label="Testnet Faucet" />
+              <QuickActionTile href="#report-bug" icon={<Bug size={16} />} label="Report Bug" />
             </div>
           </section>
 
-          {/* Phase 6.6.1 — Bug Hunter entry point. Additive, self-contained;
-              does not touch quest state/logic above. */}
-          <section className="rounded-md border border-line bg-bg-surface p-4">
+          {/* Faucet — direct wallet tx, not a quest (no reward, not backend-verified). */}
+          {rewards?.faucet?.configured && rewards.faucet.address && (
+            <section id="faucet" className="scroll-mt-24 rounded-md border border-line bg-bg-surface p-4">
+              <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Testnet Faucet</p>
+              <FaucetClaimCard address={rewards.faucet.address} chainId={rewards.faucet.chainId} />
+            </section>
+          )}
+
+          {/* Phase 6.6.1 — Bug Hunter entry point, now framed as a secondary
+              "security" action per the Command Center IA (never above Earn
+              Center). Additive, self-contained; does not touch quest
+              state/logic above. */}
+          <section id="report-bug" className="scroll-mt-24 rounded-md border border-line bg-bg-surface p-4">
             <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
-                <Bug size={16} />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-down/30 bg-down/10 text-down">
+                <ShieldAlert size={16} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-ink">Report a Bug</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">Security</p>
+                <p className="mt-0.5 text-sm font-medium text-ink">Found a vulnerability?</p>
                 <p className="mt-0.5 text-xs text-ink-muted">Temukan bug di ELSTAND Intelligence? Laporkan dan dapatkan reward ELS.</p>
                 <a
                   href="/earn/bug-hunter"
-                  className="mt-2 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow hover:bg-signal/20"
+                  className="mt-2 inline-block rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:border-down/40 hover:text-down"
                 >
-                  Lapor Bug
+                  Report a Bug
                 </a>
               </div>
             </div>
           </section>
-
-          {/* Daily Reward claim — pre-existing mechanic, unchanged. */}
-          <section className="rounded-md border border-line bg-bg-surface p-4">
-            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Daily Reward</p>
-            <div className="flex items-center justify-between gap-3 rounded-md border border-line bg-bg-raised/60 p-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
-                  <Gift size={16} />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-ink">Daily Reward</p>
-                  <p className="text-xs text-ink-faint">
-                    {claimNotice ??
-                      (data.canClaim ? "+10 AI Energy siap diklaim sekarang." : `Tersedia lagi ${timeUntil(data.nextClaimAt)}.`)}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleClaim}
-                disabled={!data.canClaim || claiming}
-                className={clsx(
-                  "shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors",
-                  data.canClaim && !claiming
-                    ? "border-signal/40 bg-signal/10 text-signal-glow hover:bg-signal/20"
-                    : "cursor-not-allowed border-line text-ink-faint"
-                )}
-              >
-                {claiming ? "Mengklaim…" : "Klaim +10"}
-              </button>
-            </div>
-          </section>
-
-          {/* Completed — reward transactions only (positive deltas). */}
-          <section className="rounded-md border border-line bg-bg-surface p-4">
-            <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Completed</p>
-            {rewardHistory.length === 0 && <p className="text-xs text-ink-faint">Belum ada reward yang diklaim.</p>}
-            {rewardHistory.length > 0 && (
-              <div className="space-y-1.5">
-                {rewardHistory.map((tx) => (
-                  <div key={tx.id} className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 text-ink-muted">
-                      <ArrowUpRight size={12} className="text-up" />
-                      {REASON_LABEL[tx.reason] ?? tx.reason}
-                    </span>
-                    <span className="mono-num text-ink-faint">
-                      +{tx.delta} · {timeAgo(tx.created_at)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Faucet — direct wallet tx, not a quest (no reward, not backend-verified). Bottom of the page, per request. */}
-          {rewards?.faucet?.configured && rewards.faucet.address && (
-            <section className="rounded-md border border-line bg-bg-surface p-4">
-              <p className="mb-3 text-[11px] uppercase tracking-wide text-ink-faint">Testnet Faucet</p>
-              <FaucetClaimCard address={rewards.faucet.address} chainId={rewards.faucet.chainId} />
-            </section>
-          )}
 
           {/* TEMPORARY — see components/earn/TestDistributeButton.tsx. Only renders when ENABLE_TEST_DISTRIBUTE=true server-side; remove once ELSTestnetSwap exists. */}
           {rewards?.testDistributeEnabled && <TestDistributeButton />}
@@ -366,13 +511,79 @@ export function EarnView() {
   );
 }
 
-function StatBlock({ icon, label, value, mono = true }: { icon: React.ReactNode; label: string; value: string | number; mono?: boolean }) {
+function StatBlock({
+  icon,
+  iconClassName,
+  label,
+  value,
+  mono = true,
+  primary = false,
+}: {
+  icon: React.ReactNode;
+  iconClassName?: string;
+  label: string;
+  value: string | number;
+  mono?: boolean;
+  primary?: boolean;
+}) {
   return (
     <div className="rounded-md border border-line bg-bg-raised/40 p-2.5">
-      <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-ink-faint">
-        {icon} {label}
+      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-ink-faint">
+        <span className={clsx("flex h-5 w-5 shrink-0 items-center justify-center rounded-full border", iconClassName)}>{icon}</span>
+        {label}
       </p>
-      <p className={clsx("mt-1 text-sm font-semibold text-ink", mono && "mono-num")}>{value}</p>
+      <p className={clsx("mt-1.5 font-semibold text-ink", primary ? "text-xl" : "text-sm", mono && "mono-num")}>{value}</p>
     </div>
+  );
+}
+
+/**
+ * Ticks down a real server-provided timestamp (rewards.nextClaimAt, same
+ * value the old `timeUntil()` text used) once a second on the client — no
+ * invented duration, just a live display of an already-real deadline.
+ */
+function DailyRewardCountdown({ nextClaimAt }: { nextClaimAt: string }) {
+  const target = useMemo(() => new Date(nextClaimAt).getTime(), [nextClaimAt]);
+  const [remainingMs, setRemainingMs] = useState(() => Math.max(0, target - Date.now()));
+
+  useEffect(() => {
+    setRemainingMs(Math.max(0, target - Date.now()));
+    const id = setInterval(() => {
+      setRemainingMs(Math.max(0, target - Date.now()));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [target]);
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const display = h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+
+  return <p className="mono-num text-2xl font-semibold text-ink">{display}</p>;
+}
+
+function QuickActionTile({
+  href,
+  external = false,
+  icon,
+  label,
+}: {
+  href: string;
+  external?: boolean;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <a
+      href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener noreferrer" : undefined}
+      className="flex min-h-[44px] flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-bg-raised/40 px-2 py-3 text-center transition-colors hover:border-signal/40 hover:bg-signal/5"
+    >
+      <span className="text-signal-glow">{icon}</span>
+      <span className="text-[11px] font-medium text-ink-muted">{label}</span>
+    </a>
   );
 }
