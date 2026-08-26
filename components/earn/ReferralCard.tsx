@@ -1,5 +1,6 @@
 "use client";
 import { Users } from "lucide-react";
+import clsx from "clsx";
 import { CopyButton } from "./QuestCard";
 
 interface ReferralCardProps {
@@ -17,11 +18,12 @@ interface ReferralCardProps {
 // /api/rewards/status's `referral` block.
 // ---------------------------------------------------------------------------
 export function ReferralCard({ referralUrl, referralCode, totalReferred, totalRewarded }: ReferralCardProps) {
+  const rewarded = totalRewarded > 0;
   return (
-    <div className="rounded-md border border-line bg-bg-raised/60 p-3.5">
+    <div className="rounded-md border border-line bg-bg-raised/60 p-3.5 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow shadow-glow-signal">
             <Users size={16} />
           </div>
           <div>
@@ -30,8 +32,13 @@ export function ReferralCard({ referralUrl, referralCode, totalReferred, totalRe
             <p className="mt-0.5 text-[11px] text-ink-faint">Rewarded once your friend completes sign-in — not just for opening the link.</p>
           </div>
         </div>
-        <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
-          {totalRewarded} rewarded
+        <span
+          className={clsx(
+            "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            rewarded ? "border-up/30 bg-up/10 text-up" : "border-line text-ink-faint"
+          )}
+        >
+          {rewarded ? "Rewarded" : `${totalRewarded} rewarded`}
         </span>
       </div>
 

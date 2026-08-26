@@ -15,7 +15,6 @@ import {
   Bug,
   CheckCircle2,
   Waves,
-  ShieldAlert,
 } from "lucide-react";
 import clsx from "clsx";
 import { timeAgo } from "@/lib/format";
@@ -245,34 +244,34 @@ export function EarnView() {
       {data && data !== "unauth" && (
         <>
           {/* EARN OVERVIEW — AI Energy & ELS Testnet are primary metrics
-              (bigger figure, colored icon); Wallet/Completed stay compact. */}
-          <section className="rounded-md border border-line bg-bg-surface p-4">
+              (bigger figure, colored + glowing icon); Wallet/Completed stay compact. */}
+          <section className="rounded-md border border-line bg-bg-surface p-4 shadow-card">
             <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Earn Overview</p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatBlock
                 icon={<Zap size={15} />}
-                iconClassName="border-signal/30 bg-signal/10 text-signal-glow"
+                iconClassName="border-signal/30 bg-signal/10 text-signal-glow shadow-glow-signal"
                 label="AI Energy"
                 value={rewards?.aiEnergyBalance ?? data.balance}
                 primary
               />
               <StatBlock
                 icon={<Flame size={15} />}
-                iconClassName="border-amber/30 bg-amber/10 text-amber"
+                iconClassName="border-amber/30 bg-amber/10 text-amber shadow-glow-amber"
                 label="ELS Testnet"
                 value={rewards?.elsTestnetBalance ?? 0}
                 primary
               />
               <StatBlock
                 icon={<WalletIcon size={14} />}
-                iconClassName="border-smartmoney/30 bg-smartmoney/10 text-smartmoney-glow"
+                iconClassName="border-smartmoney/30 bg-smartmoney/10 text-smartmoney-glow shadow-glow-smartmoney"
                 label="Wallet"
                 value={connectedWallet ? `${connectedWallet.slice(0, 6)}…${connectedWallet.slice(-4)}` : "Not connected"}
                 mono={false}
               />
               <StatBlock
                 icon={<CheckCircle2 size={14} />}
-                iconClassName="border-up/30 bg-up/10 text-up"
+                iconClassName="border-up/30 bg-up/10 text-up shadow-glow-up"
                 label="Completed"
                 value={rewards?.completedQuestCount ?? 0}
               />
@@ -290,17 +289,19 @@ export function EarnView() {
                 each quest's existing state. Filtering is display-only: it
                 never changes which quests exist, their configured/state, or
                 any submit/verify/claim call below. */}
-            <section className="rounded-md border border-line bg-bg-surface p-4 lg:col-span-2">
+            <section className="rounded-md border border-line bg-bg-surface p-4 shadow-card lg:col-span-2">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Earn Center</p>
-                <div className="flex flex-wrap gap-1 rounded-md border border-line bg-bg-raised/40 p-0.5">
+                <div className="flex flex-wrap gap-1 rounded-md border border-line bg-bg-raised/60 p-0.5">
                   {EARN_FILTERS.map((f) => (
                     <button
                       key={f.key}
                       onClick={() => setFilter(f.key)}
                       className={clsx(
                         "rounded px-2.5 py-1 text-[11px] font-semibold transition-colors",
-                        filter === f.key ? "bg-signal/15 text-signal-glow" : "text-ink-faint hover:text-ink-muted"
+                        filter === f.key
+                          ? "bg-signal/20 text-signal-glow shadow-glow-signal"
+                          : "text-ink-muted hover:text-ink"
                       )}
                     >
                       {f.label}
@@ -365,10 +366,10 @@ export function EarnView() {
                     now leads into the full Elstand DEX page (app/earn/dex/page.tsx +
                     ElstandDexView.tsx), which does the actual swap/verify/claim. */}
                 {showBuyElsTestnet && (filter === "all" || filter === "available") && (
-                  <div className="rounded-md border border-line bg-bg-raised/60 p-3.5">
+                  <div className="rounded-md border border-line bg-bg-raised/60 p-3.5 shadow-card">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow shadow-glow-signal">
                           <ShoppingCart size={16} />
                         </div>
                         <div className="min-w-0 flex-1">
@@ -376,7 +377,7 @@ export function EarnView() {
                           <p className="text-xs font-semibold text-signal-glow">+25 ELS TESTNET · +35 AI ENERGY</p>
                         </div>
                       </div>
-                      <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                      <span className="shrink-0 rounded-full border border-signal/30 bg-signal/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-signal-glow">
                         Available
                       </span>
                     </div>
@@ -399,11 +400,11 @@ export function EarnView() {
 
             {/* Right rail — Daily Reward (utility card, not a quest) + Recent Activity. */}
             <div className="space-y-4">
-              <section className="rounded-md border border-line bg-bg-surface p-4">
+              <section className="rounded-md border border-line bg-bg-surface p-4 shadow-card">
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Daily Reward</p>
-                <div className="rounded-md border border-line bg-bg-raised/60 p-3.5">
+                <div className="rounded-md border border-line bg-bg-raised/60 p-3.5 shadow-card">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow shadow-glow-signal">
                       <Gift size={16} />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -432,14 +433,14 @@ export function EarnView() {
                 </div>
               </section>
 
-              <section className="rounded-md border border-line bg-bg-surface p-4">
+              <section className="rounded-md border border-line bg-bg-surface p-4 shadow-card">
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Recent Activity</p>
                 {rewardHistory.length === 0 && <p className="text-xs text-ink-faint">Belum ada reward yang diklaim.</p>}
                 {rewardHistory.length > 0 && (
                   <div className="space-y-2.5">
                     {rewardHistory.slice(0, 8).map((tx) => (
                       <div key={tx.id} className="flex items-center gap-2.5">
-                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-up/10 text-up">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-up/10 text-up shadow-glow-up">
                           <ArrowUpRight size={12} />
                         </div>
                         <div className="min-w-0 flex-1">
@@ -462,7 +463,7 @@ export function EarnView() {
               (both need more than a link — wallet/cooldown state and a
               report form respectively — so the tile scrolls to the real
               thing instead of duplicating it). */}
-          <section className="rounded-md border border-line bg-bg-surface p-4">
+          <section className="rounded-md border border-line bg-bg-surface p-4 shadow-card">
             <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Quick Actions</p>
             <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
               <QuickActionTile href={BUY_ELS_SWAP_URL} external icon={<ShoppingCart size={16} />} label="Buy ELS" />
@@ -472,36 +473,43 @@ export function EarnView() {
             </div>
           </section>
 
-          {/* Faucet — direct wallet tx, not a quest (no reward, not backend-verified). */}
-          {rewards?.faucet?.configured && rewards.faucet.address && (
-            <section id="faucet" className="scroll-mt-24 rounded-md border border-line bg-bg-surface p-4">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Testnet Faucet</p>
-              <FaucetClaimCard address={rewards.faucet.address} chainId={rewards.faucet.chainId} />
+          {/* Bug Hunter + Testnet Faucet — the two "utility" destinations,
+              framed side by side as illustrated cards (glow blob + rotated
+              icon badge) per reference. Each keeps its real functionality:
+              FaucetClaimCard is the exact same wallet-connected component
+              used before (untouched), and Report a Bug still links to the
+              existing /earn/bug-hunter flow — only the shell around them
+              changed. */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <section id="report-bug" className="scroll-mt-24 relative overflow-hidden rounded-md border border-line bg-bg-surface p-4 shadow-card">
+              <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-signal/25 blur-3xl" />
+              <div className="pointer-events-none absolute right-5 top-5 flex h-14 w-14 rotate-45 items-center justify-center rounded-2xl border border-signal/40 bg-signal/10 shadow-glow-signal">
+                <Bug size={22} className="-rotate-45 text-signal-glow" />
+              </div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-signal-glow">Bug Hunter</p>
+              <p className="mt-1 max-w-[70%] text-sm font-medium text-ink">Found a vulnerability?</p>
+              <p className="mt-1 max-w-[75%] text-xs text-ink-muted">
+                Temukan bug di ELSTAND Intelligence? Laporkan dan dapatkan reward ELS.
+              </p>
+              <a
+                href="/earn/bug-hunter"
+                className="mt-3 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
+              >
+                Report a Bug
+              </a>
             </section>
-          )}
 
-          {/* Phase 6.6.1 — Bug Hunter entry point, now framed as a secondary
-              "security" action per the Command Center IA (never above Earn
-              Center). Additive, self-contained; does not touch quest
-              state/logic above. */}
-          <section id="report-bug" className="scroll-mt-24 rounded-md border border-line bg-bg-surface p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-down/30 bg-down/10 text-down">
-                <ShieldAlert size={16} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">Security</p>
-                <p className="mt-0.5 text-sm font-medium text-ink">Found a vulnerability?</p>
-                <p className="mt-0.5 text-xs text-ink-muted">Temukan bug di ELSTAND Intelligence? Laporkan dan dapatkan reward ELS.</p>
-                <a
-                  href="/earn/bug-hunter"
-                  className="mt-2 inline-block rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:border-down/40 hover:text-down"
-                >
-                  Report a Bug
-                </a>
-              </div>
-            </div>
-          </section>
+            {rewards?.faucet?.configured && rewards.faucet.address && (
+              <section id="faucet" className="scroll-mt-24 relative overflow-hidden rounded-md border border-line bg-bg-surface p-4 shadow-card">
+                <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-smartmoney/25 blur-3xl" />
+                <div className="pointer-events-none absolute right-5 top-5 flex h-14 w-14 rotate-45 items-center justify-center rounded-2xl border border-smartmoney/40 bg-smartmoney/10 shadow-glow-smartmoney">
+                  <Waves size={22} className="-rotate-45 text-smartmoney-glow" />
+                </div>
+                <p className="mb-3 max-w-[70%] text-[10px] font-semibold uppercase tracking-wide text-smartmoney-glow">Testnet Faucet</p>
+                <FaucetClaimCard address={rewards.faucet.address} chainId={rewards.faucet.chainId} />
+              </section>
+            )}
+          </div>
 
           {/* TEMPORARY — see components/earn/TestDistributeButton.tsx. Only renders when ENABLE_TEST_DISTRIBUTE=true server-side; remove once ELSTestnetSwap exists. */}
           {rewards?.testDistributeEnabled && <TestDistributeButton />}
@@ -580,7 +588,7 @@ function QuickActionTile({
       href={href}
       target={external ? "_blank" : undefined}
       rel={external ? "noopener noreferrer" : undefined}
-      className="flex min-h-[44px] flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-bg-raised/40 px-2 py-3 text-center transition-colors hover:border-signal/40 hover:bg-signal/5"
+      className="flex min-h-[44px] flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-bg-raised/40 px-2 py-3 text-center shadow-card transition-all hover:-translate-y-0.5 hover:border-signal/40 hover:bg-signal/10 hover:shadow-glow-signal"
     >
       <span className="text-signal-glow">{icon}</span>
       <span className="text-[11px] font-medium text-ink-muted">{label}</span>

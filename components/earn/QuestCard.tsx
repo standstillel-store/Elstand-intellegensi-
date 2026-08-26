@@ -97,10 +97,10 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
   const showRetryClaim = state === "CLAIM_ERROR";
 
   return (
-    <div className="rounded-md border border-line bg-bg-raised/60 p-3.5">
+    <div className="rounded-md border border-line bg-bg-raised/60 p-3.5 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-signal/30 bg-signal/10 text-signal-glow shadow-glow-signal">
             {icon}
           </div>
           <div>
@@ -243,7 +243,7 @@ export function QuestCard({ icon, title, rewardLabel, description, state, lastEr
 
 function StatusBadge({ state }: { state: QuestState }) {
   const map: Record<QuestState, { label: string; className: string }> = {
-    AVAILABLE: { label: "Available", className: "border-line text-ink-faint" },
+    AVAILABLE: { label: "Available", className: "border-signal/30 bg-signal/10 text-signal-glow" },
     COMING_SOON: { label: "Coming Soon", className: "border-line text-ink-faint" },
     SUBMITTED: { label: "Pending", className: "border-signal/30 text-signal-glow" },
     VERIFYING: { label: "Verifying", className: "border-signal/30 text-signal-glow" },
