@@ -1,9 +1,16 @@
 "use client";
 import { useState, useCallback, useEffect } from "react";
 import { useAccount } from "wagmi";
+import Image from "next/image";
 import { Trophy, ShoppingCart, Bug, Sparkles, Loader2, CheckCircle2, XCircle, ExternalLink, X } from "lucide-react";
 import clsx from "clsx";
 import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
+
+/** ELS token mark — swapped in for the generic Trophy icon wherever this
+ * card represents the actual ELS reward being claimed. */
+function ElsMark({ size }: { size: number }) {
+  return <Image src="/tokens/els-logo.png" alt="ELS" width={size} height={size} style={{ width: size, height: size }} />;
+}
 
 // ---------------------------------------------------------------------------
 // Phase 6.6.3.2 — Eligible Reward Center. A SEPARATE reward flow from Buy
@@ -43,7 +50,7 @@ export function EligibleRewardCard() {
         <div className="pointer-events-none absolute -left-10 -bottom-10 h-40 w-40 rounded-full bg-smartmoney/10 blur-3xl" />
         <div className="relative flex flex-col items-center gap-3 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-gold/50 bg-gold/10 shadow-glow-gold">
-            <Trophy size={26} className="text-gold-glow" />
+            <ElsMark size={30} />
           </div>
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gold-glow">Eligible Reward Center</p>
@@ -154,7 +161,7 @@ function EligibleRewardDashboard({ onClose }: { onClose: () => void }) {
           <>
             <div className="mb-4 text-center">
               <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl border border-gold/50 bg-gold/10">
-                <Trophy size={22} className="text-gold-glow" />
+                <ElsMark size={26} />
               </div>
               <p className="text-sm font-semibold uppercase tracking-wide text-gold-glow">Claim Your Token</p>
               <p className="mt-1 text-xs text-ink-muted">Verified ELS Reward</p>
@@ -323,7 +330,7 @@ function ClaimedState({ totalReward, txHash, onClose }: { totalReward: number; t
   return (
     <div className="text-center">
       <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-gold/50 bg-gold/15 shadow-glow-gold">
-        <Sparkles size={26} className="text-gold-glow" />
+        <ElsMark size={30} />
       </div>
       <p className="text-sm font-semibold uppercase tracking-wide text-gold-glow">Reward Claimed ✓</p>
       <p className="mono-num mt-2 text-2xl font-semibold text-ink">{totalReward} ELS</p>
@@ -336,6 +343,15 @@ function ClaimedState({ totalReward, txHash, onClose }: { totalReward: number; t
         className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-gold/40 bg-gold/10 px-4 py-2 text-xs font-semibold text-gold-glow hover:bg-gold/20"
       >
         View on BscScan <ExternalLink size={13} />
+      </a>
+      {/* Section 12/16 — separate contract, separate flow (ELSTestnetSell,
+          not the reward distributor); actual wallet ELS balance is still
+          the source of truth on /earn/dex itself, not "claimed" status. */}
+      <a
+        href="/earn/dex"
+        className="mt-3 flex items-center justify-center gap-1.5 rounded-md border border-signal/40 bg-signal/10 px-4 py-2 text-xs font-semibold text-signal-glow hover:bg-signal/20"
+      >
+        Sell ELS to tBNB
       </a>
       <button onClick={onClose} className="mt-3 block w-full text-xs text-ink-faint hover:text-ink">
         Back to Earn

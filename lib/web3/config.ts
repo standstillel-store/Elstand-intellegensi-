@@ -75,6 +75,14 @@ export const WALLET_NETWORK_CONFIG = {
   ELS_CONTRACT: "0x4AeA3938eb5c5A594410Bf67c2F2107970901a4D" as `0x${string}`,
   ELS_NAME: "ELSTAND",
   ELS_SYMBOL: "ELS",
+  /**
+   * Phase 6.6.3.3 — ELSTestnetSell.sol. Standalone contract, separate from
+   * ELSTestnetSwap.sol (buy) and ELSTestnetRewardDistributor.sol (claim).
+   * Not secret — same reasoning as ELS_CONTRACT/SWAP above, safe to ship to
+   * the client since /earn/dex calls quote()/sell() directly from the
+   * user's own wallet (no server-signed tx involved).
+   */
+  SELL_CONTRACT: "0x97A8EE8157C1fe62124c5fBD475b1282cB248D34" as `0x${string}`,
   /** Premium (Elvoid Pro) purchase contract. Null until deployed — purchase stays disabled/"Coming Soon". */
   PREMIUM_PURCHASE_CONTRACT: null as `0x${string}` | null,
   /** AI Energy purchase contract. Null until deployed — purchase stays disabled/"Coming Soon". */
