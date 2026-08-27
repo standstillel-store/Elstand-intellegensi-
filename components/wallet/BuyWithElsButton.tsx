@@ -171,7 +171,7 @@ export function BuyWithElsButton({
 
   return (
     <div className="w-full">
-      {pendingTxHash && step !== "verifying" && step !== "done" && (
+      {pendingTxHash && step !== "verifying" && (
         <p className="mb-1.5 text-[10px] text-amber">
           Payment already sent on-chain but not yet confirmed by our server. Click below to finish — this will NOT charge you again.
         </p>
