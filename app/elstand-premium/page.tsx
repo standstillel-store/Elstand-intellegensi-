@@ -7,6 +7,8 @@ import { AltcoinScreenerPro } from "@/components/dashboard/premium/AltcoinScreen
 import { FomcPanel } from "@/components/dashboard/premium/FomcPanel";
 import { MacroNewsPanel } from "@/components/dashboard/MacroNewsPanel";
 import { getPremiumIntelligenceSnapshot } from "@/lib/intelligence/premium";
+import { MembershipLocked } from "@/components/membership/MembershipLocked";
+import { getMembershipStatus } from "@/lib/membership";
 
 // Refetch on every request server-side — this is a live intelligence
 // terminal, not a static page. Individual sources still control their own
@@ -16,6 +18,22 @@ import { getPremiumIntelligenceSnapshot } from "@/lib/intelligence/premium";
 export const dynamic = "force-dynamic";
 
 export default async function ElstandPremiumPage() {
+  // Entitlement check happens BEFORE getPremiumIntelligenceSnapshot() is
+  // ever called — a non-member request must never trigger, let alone
+  // receive, the premium data fetch.
+  const status = await getMembershipStatus();
+  if (!status.active) {
+    return (
+      <AppShell title="ELSTAND PREMIUM" subtitle="Macro, market regime & altcoin intelligence">
+        <MembershipLocked
+          title="Premium Dashboard"
+          description="Your premium membership is required to access this dashboard."
+          reason={!status.signedIn ? "signed_out" : status.expiresAt ? "expired" : "no_membership"}
+        />
+      </AppShell>
+    );
+  }
+
   const snapshot = await getPremiumIntelligenceSnapshot();
   const connectedCount = snapshot.sources.filter((s) => s.state !== "unavailable").length;
 

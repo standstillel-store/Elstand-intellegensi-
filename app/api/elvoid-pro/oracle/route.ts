@@ -4,6 +4,7 @@ import { computeConfluence } from "@/lib/ai/oracle/confluence";
 import { gradeConfluence } from "@/lib/ai/oracle/grading";
 import { buildMarketInsight } from "@/lib/ai/oracle/insight";
 import { buildOracleRiskPlan } from "@/lib/ai/oracle/risk";
+import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 /**
  * GET /api/elvoid-pro/oracle?symbol=BTC&interval=15m
@@ -19,8 +20,15 @@ import { buildOracleRiskPlan } from "@/lib/ai/oracle/risk";
  * Returns everything the ELVOID Pro dashboard needs to render the Oracle
  * card AND everything the Execute Signal button needs to POST straight to
  * /api/elvoid-pro/execute-signal without recomputing anything client-side.
+ *
+ * Server-side entitlement guard — reachable directly by URL regardless of
+ * whether the ELVOID PRO page rendered it.
  */
 export async function GET(req: Request) {
+  if (!(await hasActiveMembership())) {
+    return NextResponse.json(MEMBERSHIP_REQUIRED_BODY, { status: 403 });
+  }
+
   const { searchParams } = new URL(req.url);
   const symbol = (searchParams.get("symbol") ?? "").trim().toUpperCase();
   const interval = searchParams.get("interval") ?? "15m";

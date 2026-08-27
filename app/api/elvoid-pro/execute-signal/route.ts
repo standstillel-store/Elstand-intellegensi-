@@ -3,6 +3,7 @@ import { executeOracleSignal } from "@/lib/ai/oracle/execute";
 import type { OracleAssessment, OracleRiskPlan } from "@/lib/ai/oracle/gradingTypes";
 import type { ConfluenceResult } from "@/lib/ai/oracle/confluenceTypes";
 import type { OrderType } from "@/lib/elvoid/types";
+import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 const VALID_ORDER_TYPES: OrderType[] = ["market", "limit", "stop"];
 
@@ -26,6 +27,10 @@ interface ExecuteBody {
  * idempotency contract.
  */
 export async function POST(req: Request) {
+  if (!(await hasActiveMembership())) {
+    return NextResponse.json({ success: false, ...MEMBERSHIP_REQUIRED_BODY }, { status: 403 });
+  }
+
   let body: ExecuteBody;
   try {
     body = (await req.json()) as ExecuteBody;
