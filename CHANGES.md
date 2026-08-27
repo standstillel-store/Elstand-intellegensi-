@@ -1,621 +1,157 @@
-# ElStand AI — Market Intelligence Dashboard: apa yang berubah
+# ELVOID PRO — Phase 7 Changelog
 
-## V6.0 — Phase 6.6: Earn, Bug Hunter, Swap, Eligibility & On-chain Infrastructure
+## Phase 7.0 — Baseline + Runtime Audit
 
-Ringkasan satu rilis besar yang dikerjakan bertahap (6.6.1 → 6.6.4). Ditulis di sini setelah semuanya selesai dan diverifikasi langsung terhadap kode yang ada di repo — bukan dari rencana awal, jadi kalau ada bagian rencana lama yang berubah di implementasi final, yang didokumentasikan adalah versi final.
+### Objective
+Trace the real runtime path of the Elvoid Pro decision pipeline before changing anything, and confirm standard Elvoid AI (`/ai signal`) is architecturally separate.
 
-### Phase 6.6.1 — Bug Hunter & Security
+### Findings
+- `/api/elvoid-pro/oracle` → `assembleOracleContext` → `computeConfluence` → `buildOracleRiskPlan` → `gradeConfluence` → `buildMarketInsight`.
+- `/api/elvoid-pro/insights` reuses the same `assembleOracleContext` + `computeConfluence` output (5s in-process cache) and only adds `classifyMarketRegime` + `detectAllPatterns` — it does not compute a second decision.
+- `/api/elvoid-pro/execute-signal` computes nothing; it persists an `assessment`+`risk` the client already has.
+- Single source of truth per value: `side`/`confidence`/`grade` all come from `gradeConfluence()`; `entry`/`SL`/`TP` come from the separate `buildOracleRiskPlan()`.
+- Standard Elvoid AI (`lib/elvoid/engine.ts` + `lib/ai/core/modules/oracle.ts`) is a fully separate module tree with its own LLM wrapper that never re-derives `side`/`confidence` from the model — it always echoes the deterministic signal's own numbers.
+- UI: `AISignalPanel.tsx` → `/api/ai-signals` (standard AI). `OraclePanel.tsx` → `/api/elvoid-pro/oracle`. `InsightsPanel.tsx` → `/api/elvoid-pro/insights`. Confirmed as two separate systems, not two competing engines inside Pro.
+- Gap confirmed: `OracleContext` is single-timeframe only (one `candles` series, one `interval` param) — no HTF/MTF/LTF concept exists yet (Phase 7.2 scope). `classifyMarketRegime` exists but does not yet reweight evidence (Phase 7.3 scope).
 
-**Status: ✅ COMPLETED**
+### Files Modified
+None (read-only audit).
 
-Sistem bug bounty end-to-end, terpisah total dari reward system Phase 6.5 (`reward_submissions`/`reward_quests` tidak disentuh):
+### Tests
+None yet — no test runner installed in the repo (`package.json` has only `dev`/`build`/`start`/`lint`). Deferred to a lightweight script (see 7.1) instead of introducing Jest/Vitest, per instruction.
 
-- Submission laporan bug researcher (`app/api/bug-hunter/report/route.ts`, form di `components/earn/BugReportForm.tsx`) dengan upload screenshot/evidence ke Supabase Storage bucket **private** (`lib/bugHunter/store.ts`, `EVIDENCE_BUCKET`) — tidak pernah jadi public URL.
-- Validasi file evidence pakai **magic-byte check** (`lib/bugHunter/imageValidation.ts`) — mengecek header byte asli PNG/JPEG, bukan percaya Content-Type/ekstensi dari client, plus batas ukuran 8MB.
-- Evidence hanya bisa dilihat lewat **signed URL** berumur 5 menit (`app/[adminEntry]/api/bug-hunter/[id]/evidence-url/route.ts`), diminta setelah admin session tervalidasi.
-- **Claim token**: token mentah acak 256-bit, yang disimpan di database cuma `sha256(token)` (`lib/bugHunter/claimToken.ts`) — one-time-use ditegakkan lewat conditional `UPDATE ... WHERE used_at IS NULL` di `lib/bugHunter/store.ts`, bukan check-then-set, sehingga race dua klaim hampir bersamaan tetap aman.
-- **Admin dashboard** Bug Hunter (`app/[adminEntry]/bug-hunter/page.tsx` + API di `app/[adminEntry]/api/bug-hunter/`) dengan approve/reject per laporan, keduanya menulis ke **admin audit log** (`logAdminAction("BUG_REPORT_APPROVED"/"BUG_REPORT_REJECTED", ...)`).
-- **Email notification** via SMTP/Nodemailer (`lib/email.ts`) — dikirim dari alur report dan approve/reject.
-- **Rate limiting** in-memory (`lib/bugHunter/rateLimit.ts`): 5 submission/jam/IP untuk report, 10 attempt/10 menit/IP untuk claim endpoint (didokumentasikan sebagai speed-bump per-instance, bukan hard guarantee di serverless).
-- **BugBountyEscrow.sol** integration (`lib/bugHunter/onchain.ts`): `createBounty → fundBounty → approveBounty` dijalankan idempotent oleh operational signer (owner-only functions) setelah admin approve; `claimBounty()` HANYA pernah dipanggil dari wallet researcher sendiri lewat browser (`components/earn/BugClaimView.tsx`) — operational signer tidak pernah menyentuh fungsi klaim, dan kontrak sendiri punya guard `msg.sender == bounty.researcher` sebagai jaminan on-chain, bukan sekadar konvensi kode.
-- Verifikasi klaim on-chain (`verifyClaimTransaction`) mengecek tx sukses, target contract benar, sender benar, dan state akhir `CLAIMED` sebelum status di database berubah — mencegah replay/double-claim.
-- **Pemisahan keamanan operational signer vs user wallet** ditegaskan sebagai batas desain eksplisit (lihat komentar di `lib/bugHunter/onchain.ts`), sama pola dengan `lib/rewards/distributor.ts`.
+### Regression Status
+N/A — no code changed.
 
-### Phase 6.6.2 — Testnet Swap / Buy ELS / Sell ELS
-
-**Status: ✅ COMPLETED**
-
-Dua arah transaksi, dua contract terpisah:
-
-**Buy ELS (tBNB → ELS)** — `contracts/ELSTestnetSwap.sol`. UI Buy di `components/earn/BuyElsTestnetCard.tsx` dan tab "Buy" di `components/earn/ElstandDexView.tsx`: input amount, quote on-chain (`quote()`), konfirmasi transaksi lewat wallet, receipt + TX hash, link BSCScan Testnet, verifikasi otomatis via backend setelah tx terkonfirmasi.
-
-**Sell ELS (ELS → tBNB)** — contract terpisah, address `SELL_CONTRACT` di `lib/web3/config.ts` (deployed di BSC Testnet — lihat `CONTRACTS.md`). Tab "Sell" di `components/earn/ElstandDexView.tsx`: approve ELS (skip approve ulang kalau allowance sudah cukup), input amount jual, quote fixed-rate testnet, cek likuiditas tBNB, konfirmasi transaksi, receipt, TX hash, link BSCScan Testnet. Sell flow ini yang muncul terintegrasi di Eligible Reward dashboard (`components/earn/EligibleRewardCard.tsx`) sebagai tombol "Sell ELS to tBNB" setelah reward diklaim.
-
-Buy dan Sell sengaja pakai dua contract terpisah (tidak digabung jadi satu swap dua arah), sesuai desain final di `ElstandDexView.tsx`.
-
-### Phase 6.6.3 — Professional Earn UI/UX
-
-**Status: ✅ COMPLETED**
-
-Redesign `/earn` (`components/earn/EarnView.tsx`) yang bersifat **additive** — tidak mengubah logic quest/reward yang sudah ada di `lib/rewards/*`:
-
-- Earn Overview dengan AI Energy dan ELS sebagai metrik utama, Wallet dan Completed sebagai metrik sekunder.
-- "Earn Center" dengan filter quest: All / Available / In Progress / Completed.
-- Daily Reward utility card dengan live countdown.
-- Recent Activity feed.
-- Quick Actions: Buy ELS, Add Liquidity, Faucet, Bug Hunter — masing-masing tautan langsung ke flow yang sudah ada, bukan flow baru.
-- Layout responsive desktop/tablet/mobile, touch-friendly di mobile.
-- Bug Hunter ditempatkan sebagai section sekunder "Security" di halaman Earn, bukan section utama.
-
-### Phase 6.6.3.2 — Eligible / Reward Center
-
-**Status: ✅ COMPLETED**
-
-Sistem eligibility terpisah dari quest reward biasa, dihitung di `lib/rewards/eligibility.ts`:
-
-- **Eligibility utama**: (1) Buy ELS terverifikasi (dari `reward_submissions` JOIN `reward_quests`, slug `buy_els`/`buy_els_testnet`, status `CLAIMED` — bukan tabel baru), (2) TOP 10 Leaderboard (`lib/leaderboard.ts`, ranking yang sama dengan `/api/leaderboard`, bukan papan kedua).
-- **Bug Hunter bonus** bersifat opsional/tambahan, bukan syarat eligibility utama — bonus diambil dari kolom `reward_amount` milik laporan Bug Hunter berstatus `REWARDED` di database, **tidak** ada hardcode mapping severity→angka.
-- **Base Eligible Reward: 200 ELS** (`ELIGIBLE_BASE_REWARD_ELS`, konstanta tetap — bukan disimpan di `reward_quests` karena Eligible Reward bukan quest). Total = base + bug bounty bonus (mis. 200 ELS + 100 ELS Bug Bounty = 300 ELS).
-
-**AI Eligibility Oracle — Status: ✅ COMPLETED**
-
-Oracle/backend menghitung eligibility murni dari data yang sudah terverifikasi — bukan LLM yang menebak reward:
-
-- Verified Buy ELS transaction, ranking leaderboard, riwayat reward Bug Hunter, dan wallet primer terverifikasi (`lib/wallet/primary.ts`) adalah sumber input.
-- Output: eligible/tidak, daftar alasan (`reasons`), base reward, bug bounty bonus, total reward.
-- Data transaksi dan database tetap sumber kebenaran; layer "AI/Oracle" di sini adalah lapisan verifikasi/agregasi deterministik atas data existing, bukan model bahasa yang memutuskan besaran reward sendiri.
-
-**Eligible Reward Claim — Status: ✅ COMPLETED**
-
-Alur: Check Eligibility → AI Oracle Verification → Eligible → Calculate Reward → Claim Reward → On-chain Distribution → Transaction Confirmation, via `contracts/ELSTestnetRewardDistributor.sol` (`lib/rewards/distributor.ts` → `distributeToWallet()`, dipanggil dari `app/api/rewards/eligibility/claim/route.ts`). Wallet penerima **selalu** wallet primer terverifikasi milik user yang login (bukan alamat dari body request), dan jumlah reward dihitung ulang server-side saat klaim — tidak pernah dipercaya dari client.
-
-Eligible Reward ini terpisah sepenuhnya dari reward quest Buy ELS/Add Liquidity yang sudah ada sejak Phase 6.5 — membeli ELS tidak otomatis memberi 200 ELS Eligible Reward; keduanya adalah dua sistem reward berbeda yang kebetulan sama-sama membaca status "Buy ELS terverifikasi" sebagai salah satu sinyal.
-
-**Eligible Reward UI**: `components/earn/EligibleRewardCard.tsx` — menampilkan wallet address, checklist eligibility (Buy ELS / TOP 10 Leaderboard / Bug Bounty + Bonus), status verifikasi, total reward, tombol Claim Reward, dan setelah klaim menampilkan TX hash + akses langsung ke Sell ELS → tBNB (`ElstandDexView.tsx` tab Sell) yang aktif begitu user punya reward/eligibility sesuai implementasi final.
-
-### Phase 6.6.4 — Payment / Membership / AI Energy
-
-**Status: ✅ COMPLETED**
-
-`contracts/ELSTestnetPayment.sol` sebagai satu-satunya payment processor berbasis ELS untuk ELVOID PRO Weekly, ELVOID PRO Monthly, dan AI Energy (`lib/payments/config.ts`, tiga `productId` yang sama dengan yang di-seed di constructor contract). Flow: User → ELS Approval → Payment Contract → `/api/payments/verify` → grant ke database (`lib/payments/store.ts`).
-
-Membership: tersimpan di tabel `premium_memberships` (satu baris per user, kolom `expires_at`); ELVOID PRO Weekly maupun Monthly sama-sama menulis ke baris yang sama (kind `"premium"` untuk keduanya) — **ELVOID PRO dan ELSTAND PREMIUM memakai satu sistem membership yang sama** di implementasi final, bukan dua sistem terpisah. Entitlement dicek server-side lewat `lib/membership.ts` (`getMembershipStatus()`/`hasActiveMembership()`, baca session dari cookie, bukan dari body request):
-
-- `/elvoid-pro` dan `/elstand-premium` (Server Component) tidak merender dashboard sama sekali untuk user tanpa membership aktif — menampilkan Locked UI yang mengarahkan ke `/wallet`.
-- Endpoint API yang dipakai dashboard premium (`/api/elvoid-pro/oracle`, `/insights`, `/execute-signal`) punya guard 403 sendiri, karena reachable langsung lewat URL terlepas dari gate di halaman.
-
-### AI Energy Balance Fix
-
-**Status: ✅ COMPLETED**
-
-Bug: pembayaran on-chain dan credit database sebenarnya berhasil, tapi UI menampilkan balance lama karena tiap komponen (`AiEnergyWidget.tsx`, `AiEnergySection.tsx`, `ProfileMenu.tsx`, `SidebarProfile.tsx`) fetch sekali saat mount tanpa mekanisme refresh bersama. Diperbaiki dengan `lib/energyBus.ts` — `CustomEvent` browser sederhana (`notifyAiEnergyChanged()` / `useAiEnergyRefresh()`), dipanggil setelah purchase dan setelah daily reward claim, supaya semua display yang sedang mount ikut refresh. Tidak ada tabel/database baru — tetap baca-tulis `ai_token`/`ai_token_transactions` yang sama seperti sebelumnya.
-
-### Smart Contracts yang digunakan di Phase 6.6
-
-| Contract | Fungsi |
-|---|---|
-| `ELSTestnetSwap.sol` | Buy ELS (tBNB → ELS) |
-| `ELSTestnetSell` (address di `lib/web3/config.ts`) | Sell ELS → tBNB |
-| `ELSTestnetRewardDistributor.sol` | Distribusi Eligible Reward |
-| `BugBountyEscrow.sol` | Bug Hunter bounty escrow |
-| `ELSTestnetPayment.sol` | Payment ELVOID PRO / AI Energy |
-| `TestnetFaucet.sol` | Testnet faucet |
-
-Lihat `CONTRACTS.md` di root repo untuk daftar address lengkap.
-
-### Ringkasan Phase 6.6
-
-```
-PHASE 6.6
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-6.6.1 Bug Hunter + Security       ✅
-6.6.2 Buy / Sell ELS              ✅
-6.6.3 Professional Earn UI/UX     ✅
-6.6.3.2 Eligible / Reward Center  ✅
-6.6.4 Payment / Membership        ✅
-
-Smart Contract Integration        ✅
-On-chain Verification             ✅
-Reward Distribution               ✅
-Membership Gating                 ✅
-AI Energy Refresh                 ✅
-Mobile / Desktop Earn UI          ✅
-
-STATUS: PHASE 6.6 COMPLETED
-```
-
-## V5.1 — Phase 6.5: Earn & Reward System — audit produksi & perbaikan
-
-Brief kali ini beda dari yang lain: bukan minta fitur baru, tapi audit sistem Earn & Rewards (`/earn`) yang **SUDAH ada** — inspeksi dulu, cuma perbaiki blocker yang beneran ketemu, jangan rebuild dari nol. Implementasi sebelumnya (`config.ts`, `chainClient.ts`, `verifier.ts`, `store.ts`, migration, komponen `/earn`) ternyata udah sangat matang — RPC fallback, state machine `SUBMITTED→...→CLAIMED`, proteksi double-claim (idempotency key + partial unique index + conditional UPDATE), semua constraint anti-duplikat di migration udah lengkap. Jadi ronde ini murni nyari & nutup gap yang beneran ada, bukan nulis ulang yang udah bagus.
-
-**Bug ketemu & diperbaiki:**
-
-1. **Buy ELS quest default-nya salah chain.** `BUY_ELS_QUEST_CONFIG.chainId` sebelumnya default ke 97 (BSC testnet, ikut chain dashboard `/wallet` yang lama) dan `elsTokenAddress`-nya ke alamat ELS TESTNET — padahal brief Section 5 eksplisit minta `chainId == 56` + "correct ELS Mainnet token", dan Section 2 juga jelas: aktivitas yang di-cek eligibility-nya itu MAINNET, ELS Testnet cuma reward-nya (sama persis kayak Add Liquidity). Kalau ini gak ketauan sekarang, begitu purchase contract-nya beneran di-deploy nanti, verifier bakal ngecek chain yang salah total. Diperbaiki: default sekarang chain 56 + alamat ELS Mainnet (`0x3a066...C82`), lewat env var baru `EARN_BUY_ELS_ELS_ADDRESS` (dulu numpang `NEXT_PUBLIC_ELS_TESTNET_ADDRESS`, yang sekarang jadi menyesatkan kalau tetap dipakai buat default mainnet).
-
-2. **Verifikasi $10 USD-nya belum pernah ada sama sekali.** Ini yang paling penting. Kedua verifier (`verifyAddLiquidityTransaction`/`verifyBuyElsTransaction`) sebelumnya cuma ngecek `minimumElsAmountRaw` — jumlah token ELS mentah — yang default-nya 0. Artinya SEBELUM perbaikan ini, siapa pun bisa lolos quest Add Liquidity/Buy ELS dengan transaksi berapa pun nilainya (bahkan $0.01), karena gak ada konversi ke USD sama sekali. Brief Section 6 eksplisit: "$10 is USD value, not 10 ELS/10 BNB/10 wei" — dan minta mekanisme valuasi yang deterministik + bisa direproduksi, plus `SYSTEM_ERROR` (bukan lolos diam-diam) kalau harga gak tersedia.
-
-   File baru `lib/rewards/pricing.ts` — harga historis BNB/USD pas block transaksi itu sendiri (bukan "sekarang", biar verifikasi ulang transaksi lama hasilnya tetap sama), lewat endpoint klines Binance Futures yang **persis sama** kayak yang udah dipakai `lib/binance.ts` di tempat lain (gak nambah dependency/API key baru). Yang di-price itu sisi NATIVE currency (BNB, dari `tx.value`) — bukan ELS — karena token ELS yang baru ini gak punya price feed independen di manapun di codebase ini (`lib/geckoterminal.ts` cuma punya list trending/new pool, gak ada lookup per-pool, dan pool Uniswap V4 pula gak punya alamat pair terpisah buat di-lookup). Kalau harga gagal diambil (network error dsb), verifier balikin `SYSTEM_ERROR` yang jelas ("USD price verification is temporarily unavailable... retry shortly") — bukan meloloskan transaksi begitu aja atau nolak permanen. Metadata lengkap (native amount, price source, price used, USD value, timestamp) disimpan di `verified_transactions.verification_data` sesuai yang diminta Section 6.
-
-   **Batasan yang jujur diakui, bukan disembunyikan:** ini nge-price `tx.value` (native currency yang dikirim langsung ke transaksi) — cocok buat flow yang sekarang (URL Uniswap yang dikasih pakai `currencyA=NATIVE`), tapi kalau nanti ada routing yang gerakin BNB lewat cara lain (misal WBNB sebagai ERC20, bukan `msg.value`), amount-nya bakal ke-undercount. Ditulis jelas di komentar kode + `lib/rewards/README.md`, bukan diklaim bulletproof buat semua kemungkinan bentuk transaksi.
-
-3. **State "distributor belum dikonfigurasi" gak pernah nyampe ke UI.** Reward Distributor (Section 8) emang belum ada sama sekali di repo ini (dikonfirmasi lagi: gak ada signer/private key di manapun) — itu udah bener, ELS Testnet dicatat sebagai ledger credit (`ai_energy_ledger`), bukan transfer on-chain beneran. Tapi sebelumnya gak ada indikasi apa pun ke user bahwa itu masih ledger, bukan token yang udah beneran nyampe ke wallet — quest yang CLAIMED langsung nampilin "Reward Claimed" polos, padahal brief Section 14 eksplisit minta pesan "Testnet reward distribution is currently being configured." kalau distributor belum ada. Diperbaiki: `GET /api/rewards/status` sekarang balikin `distributorConfigured` (dari env var baru `EARN_REWARD_DISTRIBUTOR_ADDRESS`, kosong = false), dipakai `EarnView.tsx` buat nampilin catatan itu di header Earn & Rewards. AI Energy TETAP langsung real (gak berubah — itu udah bener dari awal), yang dikasih catatan cuma bagian ELS Testnet-nya.
-
-   File baru `lib/rewards/distributor.ts` — titik integrasi buat transfer on-chain beneran nanti, sengaja SELALU balikin "not configured"/"not implemented" untuk saat ini (dipanggil dari `claimReward()`, non-fatal, gak ngubah perilaku apa pun hari ini) — biar begitu distributor beneran ada, cuma file ini yang perlu diisi, gak perlu bongkar state machine claim yang udah teruji.
-
-**Perbaikan kecil:** copy `SYSTEM_ERROR`/`CLAIM_ERROR`/`CLAIMED` di `QuestCard.tsx` (dan pesan API `claim/route.ts`) disamakan persis ke wording yang diminta brief Section 14 (sebelumnya semantiknya sama tapi kata-katanya beda).
-
-**Ditambahkan:** `.env.example` (Section 16) — sebelumnya gak ada sama sekali di repo ini (bukan cuma buat Earn & Rewards — seluruh app emang belum pernah punya `.env.example`; scope-nya di sini dibatasi ke variable Phase 6.5 sendiri, ditulis jelas di header file kenapa). `lib/rewards/README.md` — peta modul + batasan yang diketahui, sekalian jawab komentar lama di `verifier.ts` yang nyebut "lib/rewards/README" tapi file-nya belum pernah ada.
-
-**Sengaja TIDAK disentuh** (sesuai Section 1/18): migration SQL (semua constraint anti-duplikat yang diminta Section 12 — duplicate transaction, duplicate one-time quest, duplicate referral, duplicate claim, idempotency key — udah lengkap, diverifikasi ulang satu-satu, gak ada yang kurang, jadi gak ada migration baru), state machine claim di `store.ts` (proteksi concurrency-nya udah benar, cuma ditambah satu panggilan distributor yang non-fatal), referral system (`lib/referral.ts`, `app/auth/callback`) — sudah benar soal "reward hanya dari onboarding event asli, bukan buka link doang", dan sudah benar soal wallet-only login (skema `users` di app ini mewajibkan email, jadi gak ada konsep akun wallet-only berdiri sendiri — wallet SELALU nempel ke akun Google yang udah ada, jadi gak butuh hook onboarding terpisah), landing page, dashboard, semua halaman lain.
-
-**Masih terbuka, butuh keputusan Karin (bukan sesuatu yang aman ditebak):**
-- Ambiguitas chain Add Liquidity yang udah diflag dari sesi sebelumnya (komentar `config.ts`): URL Uniswap yang dikasih pakai `chain=bnb` (mainnet 56) tapi itu beda dari alamat ELS TESTNET yang udah dikonfigurasi di `/wallet` dashboard (`lib/web3/config.ts`) — kemungkinan besar URL-nya perlu di-generate ulang lawan pool testnet, tapi ini keputusan produk/URL, bukan bug kode. Tetap dibiarkan seperti sesi sebelumnya (default ke apa yang literal ada di URL), gak ditebak-tebak sendiri.
-- Reward Distributor: alamat kontrak + signer/private key-nya belum ada — dua keputusan terpisah yang gak aman diasumsikan begitu aja.
-- Buy ELS purchase contract: belum deploy sama sekali, quest tetap "Coming Soon".
-
-**Testing:** `tsc --noEmit` bersih (baseline sebelum perubahan juga 0 error). `next build` sukses generate semua 90 route termasuk 4 endpoint `/api/rewards/*` dan `/earn` (10.6 kB) — Google Fonts di-stub sementara buat sanity-check build persis kayak V4.0 (network sandbox ini emang gak diizinkan akses `fonts.googleapis.com`), langsung di-revert (`git diff` konfirmasi `app/layout.tsx` balik byte-identik) sebelum selesai — gak ada perubahan permanen. Belum bisa test lawan RPC BSC/Binance API beneran (sandbox ini gak ada akses jaringan ke domain-domain itu) — perlu dicoba di environment Karin sendiri sebelum quest ini dinyalakan buat user asli.
-
-## V5.0 — Phase: ELSTAND PREMIUM (second intelligence layer — macro + altcoin + FOMC + news)
-
-Brief baru: bikin destinasi kedua yang terpisah dari ELVOID PRO (trading/execution terminal) — fokusnya macro regime + market regime + altcoin intelligence + news, bukan trading. Rute baru `/elstand-premium`, group nav baru "Premium Intelligence" (di `Sidebar.tsx` & `mobile/NavDrawer.tsx`, dua-duanya diupdate biar tetap sinkron kayak konvensi yang udah ada). **ELVOID PRO, Footprint, TPO, Liquidity Heatmap, Order Book, Oracle, AI Signal, PaperTrade, AI Performance — nggak disentuh sama sekali**, sesuai batasan di brief.
-
-**Penamaan beda dari reference image, sengaja:** Reference image nyebut grup ini "ELVOID INTELLIGENCE PRO" — tapi itu mirip banget sama nama "ELVOID PRO" (terminal trading yang udah ada), padahal brief teksnya sendiri eksplisit warning "jangan sampai ELSTAND PREMIUM dan ELVOID PRO ketuker". Jadi dipakai nama dari brief teks: **"ELSTAND PREMIUM"**. Kalau Karin lebih suka nama dari gambar, gampang diganti — cuma string di 3 tempat (`Sidebar.tsx`, `NavDrawer.tsx`, judul halaman).
-
-**Scope round ini:** satu halaman gabungan ("Dashboard Utama" dari reference image) yang isinya strip + regime + screener + FOMC/news. Reference image juga nunjukkin 4 halaman detail terpisah (Altcoin Screener PRO / Accumulation Scanner / Dump-Rugpull Scanner / Macro & News Intelligence sebagai route sendiri-sendiri) — itu belum dibikin round ini (scope-nya besar banget buat sekali jalan), tapi datanya sudah di `lib/intelligence/premium.ts` jadi tinggal bikin halaman baru yang manggil snapshot yang sama kalau mau di-split.
-
-**Data real yang di-reuse langsung (0 fetch baru):**
-- DXY → `getUsdReading()` (udah ada sejak V2)
-- S&P 500 / Nasdaq → `getStocksReading()` (SPY/QQQ dari Finnhub — ditandai **PROXY** di UI, bukan REAL, karena index ticker asli butuh Finnhub tier berbayar; ini jujur ditulis di badge-nya, bukan disamarkan)
-- Total Crypto Mcap / BTC Dominance / 24H change → `getGlobal()` (CoinGecko)
-- BTC/ETH price + sparkline 7D → `getTopMarkets()` (sparkline dari field `sparkline_in_7d` yang ternyata udah ke-fetch tapi belum pernah dipakai di UI manapun)
-- Fear & Greed → `getFearGreed()`
-- Global Risk Regime (gauge + AI Summary + Key Factors) → `deriveGlobalSentiment()` dipakai apa adanya, cuma dirender ulang; nggak bikin scoring baru
-- Altcoin Screener Pro (2 mode) → `buildPumpCandidates()` buat mode Accumulation, `buildRugpullRisks()` buat mode Dump/Rugpull Risk — persis fungsi yang sama yang dipakai `/api/pump-candidates` & `/api/rugpull-risk`, dipanggil langsung (server component, bukan self-fetch API)
-- News Intelligence → komponen `MacroNewsPanel` yang udah ada dipakai apa adanya (kategorisasi Crypto/Macro/Stocks/Forex/ETF-nya real, bukan bikin klasifikasi baru)
-
-**Data real yang baru ditambah (`lib/macro.ts`, pola sama persis kayak `getDxyProxy`/`getM2Supply` yang udah ada — FRED_API_KEY, cache, graceful-undefined kalau gagal):**
-- `getUs10Y()` — FRED `DGS10`, primary source (bukan proxy)
-- `getFedFundsRate()` — FRED `DFEDTARU`/`DFEDTARL` (target range asli FOMC), plus "Last Rate Change" yang dihitung dari histori 400 hari terakhir (tanggal terakhir angkanya beneran berubah — bukan diklaim sebagai "keputusan meeting terakhir", karena app ini nggak punya feed hasil meeting per-tanggal, cuma punya deret rate-nya)
-- `getUsNationalDebt()` — **US Treasury Fiscal Data API** (`api.fiscaldata.treasury.gov/.../debt_to_penny`), bukan FRED — no API key sama sekali (public, unauthenticated), perubahan YoY dihitung dari record ~365 hari lalu di deret yang sama (Treasury nggak nerbitin field YoY-nya sendiri)
-
-**Yang sengaja ditandai UNAVAILABLE, bukan dikarang:**
-- **Rate-cut probability distribution** (gaya CME FedWatch) — nggak ada sumber gratis buat ini, jadi kartunya nampilin "DATA UNAVAILABLE" persis kayak instruksi di brief, bukan angka contoh (67.3%/32.7%) yang emang cuma placeholder ilustratif di brief.
-- **Tanggal FOMC berikutnya** kalau lagi nggak ada di window `getEconomicCalendar()` (feed itu cuma cover "this week") — fallback ke jadwal resmi FOMC 2026 yang dipublikasi Fed (`federalreserve.gov`, di-hardcode sebagai *tanggal publik*, bukan data pasar — beda kategori sama "data dikarang"), badge-nya nunjukkin sumbernya "live calendar" vs "published schedule" biar jujur ke user mana yang mana.
-
-**UI baru** (`components/dashboard/premium/`): `MarketIntelligenceStrip` (11 tile, REAL/PROXY/UNAVAILABLE badge di tiap tile + sparkline kalau ada deret asli), `GlobalRiskRegimePanel`, `AltcoinScreenerPro` (mobile: toggle 1 tabel aktif; desktop: dua tabel Accumulation/Dump-Rugpull side-by-side sekaligus — beda layout desktop/mobile sesuai konvensi app ini), `FomcPanel` (countdown live client-side, ticking per detik). Sparkline-nya reuse `components/intelligence/ui/Sparkline.tsx` yang udah ada (sempet ke-duplikat sebentar pas nulis, ketauan pas final check, langsung dibetulin ke versi reuse). Satu atom baru yang genuinely baru: `components/ui/DataStateBadge.tsx` (badge REAL/PROXY/UNAVAILABLE, dipakai di semua panel di atas).
-
-**Testing:** `tsc --noEmit` 0 error (baseline sebelum perubahan juga 0 error, jadi ini murni tambahan bersih). `next build` sempet dicoba di sandbox ini tapi gagal di step fetch Google Fonts (`app/layout.tsx`, `fonts.googleapis.com` diblokir jaringan sandbox-nya, bukan error dari kode baru) — webpack sempet jalan sampai compile module sebelum kena error font itu, jadi resolusi import/module graph-nya udah kevalidasi.
-
-**Gak disentuh:** `/elvoid-pro` & semua yang di bawahnya (`components/elvoid-pro/*`, `lib/elvoid/*`), Footprint/TPO/Liquidity Heatmap/Order Book/Oracle/AI Signal/PaperTrade/AI Performance, `lib/scoring.ts` & `lib/types.ts` (dipakai apa adanya, nggak diubah sama sekali — jadi 0 risiko ke `/scanner` atau route lain yang udah pakai fungsi yang sama), semua halaman selain yang disebut di atas.
-
-## V4.1 — Phase: Global Market Intelligence Map → AI Relationship Graph
-
-Brief-nya kali ini beda dari V4.0: bukan restyle doang, tapi minta Map-nya jadi "fully interactive AI relationship graph" 3 tingkat (Global Market → 6 kategori → aset masing-masing → 6 koin di bawah Altcoin), dengan left panel, top bar, dan relationship timeline. Karena brief-nya secara eksplisit minta struktur data baru (bukan cuma tampilan), ronde ini **beda dari V4.0** — `lib/intelligence/marketMap.ts` dan beberapa source file memang disentuh, tapi dengan aturan yang sama seperti semua fase sebelumnya: **nggak ada angka dikarang.**
-
-**Keputusan paling penting: real data vs "belum tersambung" — bukan ditutup-tutupi**
-
-Dari ~40 node yang diminta, hampir semuanya ternyata BISA dapet data asli, dengan cara nyambungin ke sumber yang udah ADA di app ini, cuma belum pernah ditarik ke level segranular ini:
-- **Stocks (NASDAQ/SP500/NVDA/AAPL/TSLA)** — `lib/intelligence/sources/stocks.ts` sebelumnya cuma nge-track QQQ/SPY/DIA lewat Finnhub `/quote`; tinggal nambah 3 ticker lagi ke array `TRACKED`, endpoint & mekanismenya persis sama.
-- **Forex (EUR/GBP/JPY/CNY)** — file baru `lib/intelligence/sources/forex.ts`, murni wrapper tipis di atas `fetchTwelveDataSeries()` yang udah ada (dipakai USD/DXY & Gold sejak V2), cuma ganti simbol pair-nya.
-- **Macro (Interest Rate/CPI/PPI/NFP/GDP)** — `lib/intelligence/macroEvents.ts` udah punya taksonomi `MacroCategory` (FOMC/CPI/PPI/NFP/PMI/Interest Rate); tambah "GDP" sebagai kategori baru (regex detection doang, gak ubah logic dampak/forecast), terus tiap node macro tinggal filter array yang sama by category.
-- **News (Reuters/Bloomberg/CoinDesk)** — dikelompokkan dari `newsItems` yang udah ada (NewsAPI/GNews), match by nama source. Real kalau outlet itu lagi ada beritanya di feed, kosong (jujur, bukan dipaksa nol) kalau nggak.
-- **Sentiment (Fear&Greed/Funding/OI/Whale/ETF Flow)** — 5-5nya reuse data yang udah dihitung buat Market Pulse & Whale/Institutional Flow panel, cuma sekarang JUGA muncul sebagai node sendiri di peta.
-- **Stablecoin** — ternyata `getStablecoinSupply()` (DefiLlama, no API key) udah dipanggil dari `getDashboardSnapshot()` buat kebutuhan lain (`snap.stablecoin`); tinggal diteruskan ke map, 0 fetch baru.
-- **Altcoin Level 3 (SOL/BNB/XRP/LINK/SUI/RENDER)** — lookup langsung dari `scannerRows` (Altcoin Scanner) yang udah dihitung di halaman yang sama; top 150 market cap udah pasti mencakup ke-6 coin ini.
-
-Yang **beneran belum ada sumbernya** dan sengaja dibiarkan tampil sebagai node yang jujur nunggu API (bukan dihapus, bukan dikarang): **DEX volume** (belum ada integrasi DefiLlama DEX di app ini), **Twitter** dan **Telegram** (app ini belum punya integrasi media sosial sama sekali). Ketiganya tetap muncul sebagai node yang bisa diklik di peta — taksonomi yang diminta tetap lengkap — tapi selalunampilin "Menunggu API" persis kayak node lain yang belum tersambung, konsisten sama aturan anti-data-dummy yang udah dipegang dari V1.
-
-**Satu penyesuaian dari brief:** "Gold" (XAU, komoditas) nggak ada di 6 kategori Level 1 yang diminta (Crypto/Forex/Stocks/Macro/News/Sentiment) — daripada dihapus (padahal datanya real & udah jalan dari V2), dipindah jadi child ke-6 di bawah Forex, ditandai jelas sebagai komoditas bukan mata uang.
-
-**Cascade effect (contoh CPI→USD→BTC di brief) — dibuat reaktif ke data asli, bukan di-script**
-
-Brief kasih contoh urutan "CPI naik → USD hijau → garis ke BTC merah → AI Verdict jadi Risk Off 82%". Itu nggak di-hardcode sebagai animasi yang muter apapun kondisi pasarnya — soalnya itu sama aja bikin AI pura-pura mikir. Sebagai gantinya: warna & ketebalan tiap garis dihitung dari tone KEDUA node yang disambungnya SAAT INI (dua-duanya connected & searah = terang; salah satu belum tersambung = redup; tone-nya beda arah = netral), dan partikel cuma jalan di garis yang dua ujungnya beneran live. Kalau kondisi pasar beneran membentuk pola kayak di contoh itu, peta bakal nunjukkinnya — tapi karena itu beneran kejadian, bukan diputer terus-terusan.
-
-**UI baru:**
-- **AI Core orb** di tengah (node "Global Market") — lebih besar dari V4.0, breathing glow + 2 ring rotasi + sonar ping, warna ring luar ikut status sentiment live (hijau/merah/biru/gold).
-- **Hub-and-spoke layout**: News di atas, Forex/Global/Stocks di tengah, Macro/Sentiment di bawahnya, Crypto di baris paling bawah — mengikuti sketsa ASCII di brief, dibangun pakai grid col-start/row-start (bukan grid-template-areas arbitrary, lebih aman lintas breakpoint).
-- **Expand/collapse**: tiap node kategori (dan Altcoin di dalam Crypto) punya chevron buat buka anak-anaknya; klik chevron nggak ikut milih node itu (event `stopPropagation`, tombol terpisah dari card). Klik chip "Connected Markets"/"Related Assets" di panel otomatis buka cabang yang relevan di peta.
-- **Left panel** (`components/intelligence/ui/NodeDrawer.tsx`, ditulis ulang) — permanent sidebar di desktop (≥1024px), bottom sheet di mobile (perilaku lama dipertahankan). Isi: Title, Current Trend, Confidence (kalau node itu emang punya angka confidence asli — AI Score, sentiment confidence; nggak dipaksain buat node yang nggak punya), AI Reasoning, Latest Event, Connected Markets (dari edge graph), Related Assets (sibling di parent yang sama).
-- **Top bar**: AI Verdict, Risk Mode, Confidence %, Market Phase — 4 angka berbeda (2 dari `GlobalSentimentReading`, 2 dari `FinalConclusion` yang emang komputasi terpisah), bukan angka yang sama ditempel 4x.
-- **Relationship Timeline** (bawah): AI Reasoning / Macro Event / Whale Movement / ETF Flow — 4 bacaan "terkini" dari data yang udah connected, bukan histori beneran (app ini belum nyimpen snapshot historis di mana pun) — jujur ditampilin sebagai bacaan terbaru, bukan diklaim sebagai "timeline" 24 jam.
-- Tema: gold + purple tetap, tambah **cyan** (`tailwind.config.ts`) buat aksen graph/data-flow sesuai brief "Gold + Purple + Cyan".
-- Layout dashboard: Map dikeluarin dari grid 2 kolom (dulu share row sama Crypto Heatmap) jadi full-width sendiri — sekarang punya top bar + panel + graph + timeline, nggak muat lagi di setengah kolom. Crypto Heatmap jadi baris sendiri di bawahnya.
-
-**Testing:** `tsc --noEmit` 0 error, `next build` sukses 88 route termasuk `/dashboard` (29.9kB, naik dari 21.3kB — proporsional sama fitur barunya). Semua sumber eksternal baru (TwelveData buat 4 FX pair, Finnhub buat 3 ticker saham) manggil fungsi generik yang sama kayak yang udah dipakai USD/Gold/Nasdaq dari V2 — bukan integrasi baru dari nol.
-
-**Gak disentuh:** logic klasifikasi bullish/bearish/neutral/transition di manapun (threshold-nya sama persis), `deriveGlobalSentiment`/`deriveFinalConclusion` (Map cuma baca hasilnya, gak ikut ngitung), `TerminalReportView`/AI Snapshot/AI Final Conclusion (masih pake `buildReasoningChain` yang sama, gak diubah), semua halaman selain `/dashboard`.
-
-## V4.0 — Phase: Dashboard Visual Overhaul (Bloomberg × Apple, UI/UX-only)
-
-Brief-nya eksplisit: redesign visual `/dashboard` doang — gold (#D4AF37) jadi primary accent, purple tetap dipakai tapi cuma buat AI, tambah "rasa hidup" (ambient glow, particle/grid background, micro-interaction, animated skeleton) ke 6 section yang dianggap masih kosong (Global Intelligence Map, AI Snapshot, Market Pulse, Sector Rotation, Altcoin Scanner, Whale Intelligence), **tanpa nyentuh fitur/API flow/business logic/backend**. Jadi ronde ini murni presentation layer: nggak ada file di `lib/intelligence/*.ts` atau route API manapun yang disentuh — semua komponen tetap nerima props yang persis sama, cuma cara render-nya beda.
-
-**Sistem warna baru — perubahan paling mendasar ronde ini**
-
-Sebelumnya `signal` (violet, CSS-var jadi bisa diganti user lewat Accent Color picker di Settings) dipakai sebagai warna default hampir di semua tempat — bukan cuma buat AI. Sekarang:
-- **Gold** (`gold` token baru di `tailwind.config.ts`, static hex, sengaja BUKAN CSS-var kayak `signal` — biar Accent Color picker tetap cuma ngatur `signal`/AI, gold gak ikut kegeser) jadi primary/premium accent: ambient glow di card penting, hover glow default (`.glow-card` dapet `box-shadow` beneran sekarang, sebelumnya cuma ganti border-color padahal namanya "glow"), border aktif node/sector/quick-link.
-- **Purple (`signal`)** sekarang ketat cuma buat elemen yang literally "AI": AI Core orb di Intelligence Map, AI Snapshot (verdict + confidence bar), Confidence gauge di Market Pulse (kebetulan di data-nya emang udah ditandai `tone: "signal"` dari sononya — `lib/intelligence/marketPulse.ts` gak disentuh, cuma sekarang ke-render sesuai tag yang emang udah ada), AI Score bar di Altcoin Scanner, AI Energy widget.
-- **Neutral = Blue**, **Transition = Gold**: sebelumnya "neutral" state kadang ke-render ungu (ketuker sama AI) dan kadang abu-abu; sekarang konsisten biru (`smartmoney`) di semua tempat yang genuinely soal state pasar netral (Intelligence Map, Market Status Badge, Market Pulse, Sector Rotation, Altcoin Scanner, Whale Panel). "Transition"/amber tetap dilabeli amber di data, cuma tampilannya sekarang gold.
-- Perubahan warna ini **cuma di file yang eksklusif dipakai `/dashboard`** (dicek satu-satu lewat grep sebelum disentuh: `GlobalIntelligenceMap`, `MarketStatusBadge`, `PulseGauge`, `Sparkline`, `SectorRotationHeatmap`, `AltcoinScannerTable`, `WhaleLiquidityPanel`, `AIFinalConclusion` — semua konfirmed cuma di-import dari `app/dashboard/page.tsx`). Komponen yang dipakai bareng halaman lain (`GlowCard`, `Badge`, `LiveDot`, `SectionHeader`) cuma dapet tambahan opsional (tone/prop baru) tanpa ubah default — semua ~30+ caller lain di luar dashboard (trading, paper-trader, scanner, whale activity, settings, dst.) render persis kayak sebelumnya.
-
-**Per-section**
-
-- **Global Intelligence Map** — tambah "AI Core" orb (breathing scale + 2 ring rotasi arah berlawanan + sonar ping, reuse `coreBreathe`/`orbitSlow`/`orbitSlowReverse` dari Phase 5 landing, bukan mekanisme baru) gantiin bar status polos di tengah map; data yang ditampilin (status/confidence/reasons) sama persis, cuma dibungkus visual baru. Node dirapetin dikit (`space-y-3`→`space-y-2.5`), hover sekarang enlarge (`scale-1.03`) selain lift, dan klik node sekarang ikut nge-pin connected-path highlight (sebelumnya cuma hover) — tetap buka NodeDrawer yang sama kayak sebelumnya.
-- **AI Snapshot** (`AISummaryCard.tsx`) — full rewrite dari tabel divide-y (`TerminalReportView`, yang JUGA dipakai AI Final Conclusion + tiap balasan AIChatDock/ElVoidChatPanel/AskNocturnBar) jadi grid status-card premium: AI Verdict + Confidence progress bar di atas, lalu 6 card (Market Mode/Fear & Greed/Whale Activity/Macro/Liquidity/Market Bias) icon+warna. Sengaja **gak nyentuh `TerminalReportView.tsx`** — komponen itu tetep persis sama kayak sebelumnya buat AI Final Conclusion dan semua balasan chat, cuma AI Snapshot yang dapet layout baru, ambil row yang sama dari object `TerminalReport` yang sama (`lib/intelligence/marketSnapshotReport.ts` gak disentuh sama sekali).
-- **Market Pulse** — `PulseGauge` sekarang punya jarum beneran (garis dari pusat ke titik baca, animasi rotasi halus) di atas arc yang udah ada, plus glow pas connected dan pulse ring lembut di sekeliling gauge yang live.
-- **Sector Rotation** — tambah icon per sector, trend arrow, approx % (diturunkan dari `momentum` yang udah dihitung — `(momentum-50)/3.5`, kebalikan formula yang ada di `lib/intelligence/sectorRotation.ts`, ditulis ulang di layer tampilan doang, bukan angka baru), sama mini sparkline 2-titik (baseline netral 50 → momentum live). Sengaja gak bikin sparkline pura-pura ada histori — data row sector emang gak nyimpen time-series, jadi 2-titik yang jujur dipilih ketimbang ngarang angka masa lalu (konsisten sama aturan "no dummy data" yang udah dipegang proyek ini dari awal).
-- **Altcoin Scanner** — nambahin logo koin (`row.image`, field yang udah ada dari CoinGecko tapi belum pernah dirender), sector badge dengan icon, AI Score jadi progress bar gradient (bar baru lokal di file ini — sengaja gak nyentuh `ConfidenceMeter` yang dipakai bareng RugpullRiskPanel/PumpCandidatesPanel/mobile sections), liquidity jadi badge berwarna, plus accent border kiri pas hover row.
-- **Whale Intelligence** — icon Waves dikasih animasi mengambang halus, tiap whale card dapet icon arah transaksi (inflow/outflow/accumulation, diturunkan dari teks label card yang udah ada), badge "Live"/"Waiting" jujur berdasarkan flag `sample` yang emang udah ada (bukan angka confidence baru yang dikarang).
-- **Card lain di halaman yang sama** (Crypto Heatmap, Institutional Flow, AI Final Conclusion, Top Market Overview, AI Energy widget) — polish ringan biar konsisten sama section di atas: header icon, ambient glow gold, hover state, tanpa restructure besar karena emang gak diminta eksplisit di brief.
-
-**Testing:** `tsc --noEmit` bersih (0 error, seluruh proyek) dan `next build` sukses generate semua 88 route termasuk `/dashboard`. Google Fonts (`Inter`/`JetBrains Mono`/`Bricolage Grotesque`) gak ke-fetch pas build karena sandbox nulis kode ini emang gak diizinin akses `fonts.googleapis.com` — di-stub sementara cuma buat sanity-check build, langsung di-revert (`git checkout`) sebelum kelar, gak ada perubahan permanen ke `app/layout.tsx`. 403 dari CoinGecko/Binance/DefiLlama/Farside pas static generation juga murni network sandbox, bukan bug — itu justru nunjukin fallback "waiting for API"/sample yang udah ada di codebase ini jalan kayak yang diharapin.
-
-**Gak disentuh** (sesuai brief): semua file `lib/intelligence/*.ts` dan file bisnis logic lain, semua route API, struktur/urutan section di `app/dashboard/page.tsx` (cuma tambah `<AmbientBackground />` + styling), halaman selain `/dashboard` (Settings Accent Color picker tetap punya mekanisme yang sama persis, cuma sekarang ngatur cakupan yang lebih sempit — AI-only — karena gold gak lagi lewat token `signal` yang sama).
-
-
-Brief-nya: audit codebase dulu, baru implementasikan brief "ELSTAND AI CORE" (dokumen system-prompt terpisah yang di-upload Karin) jadi engine modular production-ready — 10 module (Oracle, Market Intelligence, Technical Analyst, Scanner, Confidence Engine, Narrative, Paper Trading Coach, Journal, Personal Coach, Token Analyzer), masing-masing bisa dipanggil independen lewat AI Router, gak bikin fitur baru dulu, gak ubah UI kecuali perlu, fokus backend AI/prompt engineering/reasoning flow/service layer/integrasi data yang udah ada.
-
-**Prinsip inti, dipegang di semua 10 module:** layer AI ini gak pernah menghitung ulang atau menggantikan angka yang udah final dari engine rule-based (`lib/elvoid/engine.ts`) — Confidence, Trade Grade, entry/SL/TP semua tetep punya SATU sumber kebenaran. Tugas tiap module cuma menjelaskan/menarasikan/memberi konteks pada angka itu. Konkretnya: field numerik dari hasil AI (mis. `confidence`, `grade`) selalu ditimpa balik dengan angka asli dari signal SETELAH LLM merespons — gak pernah dipercaya mentah-mentah dari output model, meski prompt-nya udah eksplisit minta jangan diubah.
-
-**Arsitektur (`lib/ai/core/`)**
-- `llm.ts` — `callAiCore()`, satu pintu masuk semua module ke LLM: coba paid provider dulu kalau `AI_CHAT_PROVIDER` di-set eksplisit, jatuh ke chain gratis Groq→OpenRouter (Phase 3.0) kalau enggak. Parse JSON + satu percobaan "perbaikan" (strip ```json fence) + validasi shape sebelum dipercaya. GAK PERNAH throw ke caller — apapun yang gagal (belum dikonfigurasi, timeout, JSON invalid, shape gak cocok) collapse jadi `null`, tiap module lalu fallback ke hasil deterministik sendiri. Sama persis prinsip "integrasi opsional gak boleh matiin fitur" yang udah dipakai di `lib/energyGate.ts`/`app/api/chat`.
-- `lib/ai/router.ts` (Phase 3.0's file) — ditambah `routeStructured()` + refactor internal (`runProviderChain` diekstrak dari `runRouterChain` lama). **`routeChat`/`routeChatStream` gak berubah perilakunya sama sekali** — cuma sekarang manggil fungsi chain yang sama dari dalam, byte-for-byte pesan/cache/timeout yang sama kayak sebelumnya.
-- `lib/ai/provider.ts` — `AiProviderInput` nambah `systemPromptOverride`/`maxTokensOverride` opsional. Kalau gak diisi (semua call site lama gak ngisi ini), perilaku 100% sama kayak sebelumnya — cuma dipakai `callAiCore()` pas eksplisit mau lewat paid provider.
-- `prompts.ts` — preamble misi/aturan inti (dari brief AI CORE yang di-upload: jangan pernah mengarang, jangan hitung ulang angka yang udah final, jangan janjikan profit, selalu jelasin KENAPA) + instruksi + skema JSON per module. Ditulis Bahasa Indonesia biar konsisten sama suara ElVoid AI yang udah ada di seluruh app (bukan bahasa dokumen aslinya yang Inggris).
-- `types.ts`, `context.ts` (context builder market-wide buat Market Intelligence/Narrative — reuse fungsi-fungsi yang udah diekspor `app/api/chat/route.ts` juga pakai, tanpa nyentuh route chat itu sendiri), `modules/*.ts` (10 file, satu per module), `router.ts` (registry — re-export semua + `AI_CORE_MODULES` buat referensi).
-
-**Penyesuaian kecil ke 2 file existing (visibility doang, logic gak disentuh):** `lib/elvoid/engine.ts` — `CONFLUENCE_FACTOR_KEYS` di-export (dipakai Confidence Engine biar gak duplikat daftar 12 faktor). `lib/elvoid/performance.ts` — nambah `getJournalEntryById()` (query select yang sama kayak `getJournalEntries()`, cuma di-narrow ke 1 baris, buat route AI Journal on-demand di bawah).
-
-**Wiring ke route — opt-in semua, gak ada perilaku default yang berubah**
-- `POST /api/ai-signals` — body `includeAiReasoning: true` → jalanin Oracle + Technical Analyst + Confidence Engine paralel, nempel di response sebagai `aiReasoning`. Tanpa flag ini: response sama persis kayak sebelum phase ini.
-- `POST /api/ai-signals/scan` — body `includeAiReasoning: true` → AI Scanner narasiin batch, nempel sebagai `aiScanner`.
-- `GET /api/token-analysis?ai=1` → AI Token Analyzer, nempel sebagai `aiTokenAnalysis`. Eksplisit nyebutin di `unavailableChecks` kalau holder count/unlock schedule/audit/treasury wallet emang gak ada sumber datanya di app ini (`CoinReport.holders`/`.nextUnlock` udah `null` dari sononya) — gak pernah dikarang.
-- `GET /api/ai-performance?ai=1` → Paper Trading Coach + Personal Coach, nempel sebagai `aiCoach`.
-- `POST /api/ai-journal/review` (route baru) — body `{ journalEntryId }`, generate `TradeReview` rule-based (`lib/elvoid/review.ts`, gak diubah) lalu AI Journal narasiin ulang. Sengaja route terpisah dari `GET /api/ai-journal` (list) biar buka tab Journal gak mancing N-request AI buat N baris histori.
-- `GET /api/ai-market-intelligence?mode=intelligence|narrative|both` (route baru) — Market Intelligence + Narrative dari 1 context fetch yang sama.
-
-**Energy** (`lib/energy.ts`, tambahan murni — 5 cost lama gak berubah): `ai_reasoning` (3), `ai_scanner_reasoning` (3), `ai_token_analysis` (2), `ai_market_intelligence` (3), `ai_journal_review` (2), `ai_coach` (3). Semuanya cuma kena charge kalau minimal salah satu module beneran jalan di LLM asli — kalau semuanya jatuh ke fallback deterministik (AI belum dikonfigurasi / provider lagi gagal semua), reservation-nya di-refund, bukan di-charge diam-diam buat fitur yang secara fungsional gak kejadian.
-
-**Gak disentuh** (sesuai brief): UI (semua field baru di atas cuma ada di response API, belum ada tampilan buat nampilinnya — itu next step kalau mau disurface), Signal Logic/engine perhitungan (`lib/elvoid/engine.ts` selain 1 baris export), Landing Page, Auth, Dashboard Layout, Google Login, Wallet, `routeChat`/`routeChatStream` punya Phase 3.0. Zero dependency npm baru (gak nambah zod/schema-lib — validasi JSON manual, konsisten sama gaya codebase yang emang gak pernah pakai schema library).
-
-**Belum digarap ronde ini**
-- "AI Risk Engine" (Module 10 di dokumen brief asli) gak termasuk di 10 prioritas yang diminta round ini — kalau mau, bisa nyusul, kemungkinan besar tinggal narasiin `scanRiskAssessment()` yang udah ada di `lib/elvoid/scanners.ts`.
-- Belum ada UI buat nampilin `aiReasoning`/`aiScanner`/`aiTokenAnalysis`/`aiCoach`/route baru — murni backend + service layer dulu sesuai brief.
-- Belum di-test end-to-end lawan Groq/OpenRouter/paid-provider beneran (sandbox nulis kode ini gak punya akses network ke API-API itu) — udah lolos `tsc --noEmit` (strict, 0 error) dan `next build` (lolos semua compile/bundle, cuma kepentok fetch Google Fonts yang network sandbox-nya emang gak izinin, gak related ke kode ini) tapi test API call beneran perlu dicoba di environment Karin sendiri.
-- Belum ada persistensi hasil AI ke DB (mis. simpen `aiReasoning` bareng row `ai_signals`) — sekarang di-generate on-demand tiap request, gak nambah kolom/migration baru.
-
-## V3.0 — Phase 3.2: AI Energy System (akhirnya beneran jalan, bukan stub)
-
-**Patch (hari yang sama):** bug asli ketemu abis first delivery — `reserveEnergy()` nge-treat SEMUA kegagalan `spendEnergy()` sebagai "insufficient_energy" (402, AI gak dipanggil), termasuk kalau penyebabnya infra error (misal migration `ai_token` belum jalan di Supabase live, RLS misconfig, DB blip). Efeknya: kalau ada masalah infra apapun di sistem energy, 3 fitur yang di-gate (Analyze Coin, Generate Signal, AI Chat) ikut mati total — padahal harusnya masalah di layer metering gak boleh sampai matiin fitur AI yang sebenarnya. Fixed: sekarang cuma rejection asli ("insufficient_energy") yang nge-block; error lain (dikasih kode `"infra_error"`) bikin request lanjut *unmetered* (di-log, tapi AI tetep jalan). `reserveEnergy()` juga dibungkus try/catch penuh sebagai jaring terakhir — apapun yang meledak di situ gak akan pernah nge-crash route AI-nya.
-
-Brief-nya: bikin sistem AI Energy yang beneran berfungsi — belum ada payment/top-up/blockchain/wallet payment/subscription, itu semua nanti. Pas mulai ngoprek, ternyata table-nya (`ai_token`, `ai_token_transactions`) udah ada dari Phase 3.1 lengkap dengan RLS, cuma masih stub separuh jalan: UI-nya nampilin "0" hardcoded, dan `chargeEnergy()` di `lib/energyGate.ts` gak dipanggil di endpoint manapun. Jadi round ini nyambungin yang udah ada, bukan bikin sistem paralel — table-nya dipakai apa adanya, gak ada migration nambah table baru.
-
-**Ganti mekanisme daily reward, bukan cuma nyalain switch**
-
-Versi Phase 3.1 reset balance ke 10 flat tiap 24 jam secara pasif, begitu ada request yang baca balance-nya. Brief minta yang beda banget: klaim +10 manual lewat tombol, gated 24 jam sejak klaim terakhir (bukan reset jam 00.00). Itu ganti mekanisme beneran, bukan rename doang — jadi `lib/energy.ts` gue tulis ulang total:
-- `claimDailyEnergy()` — klaim +10, compare-and-swap atomic di level query biar gak bisa spam-klik tombol atau klaim dobel dari 2 tab/device.
-- `spendEnergy()` — tetep ada (logic-nya udah bener dari Phase 3.1), sekarang dipakai sebagai langkah "reserve" di gate baru (lihat bawah).
-- `refundEnergy()` — baru. Undo spend kalau fitur yang dibayar ternyata gagal.
-- Kolom DB tetep `balance` dan `last_reset_at`, gak di-rename — cuma makna `last_reset_at` sekarang "kapan terakhir klaim", bukan "kapan terakhir reset pasif". Rename kolom berarti nyentuh tiap caller cuma buat manfaat kosmetik, jadi gue skip demi minim risiko.
-- Nambahin `check (balance >= 0)` di `ai_token` (`supabase/schema.sql`) — jaga-jaga di level DB, bukan cuma percaya logic aplikasi.
-
-**Reserve-then-refund buat 3 fitur yang di-gate**
-
-Brief-nya beda redaksi soal kapan energy dipotong per fitur: Generate Signal & AI Chat eksplisit "kalau gagal jangan dipotong", Analyze Coin cuma bilang "harus otomatis mengurangi" tanpa nyebut sukses/gagal. Gue samain ketiganya biar konsisten: potong energy duluan (atomic — gak bisa kebobol biarpun ada 2 request bareng di sisa energy pas-pasan), baru jalanin fitur-nya, refund kalau gagal. Analyze Coin jadi ikut auto-refund kalau exception juga, meski brief gak eksplisit minta — lebih aman buat user dan brief-nya emang gak bilang sebaliknya. `lib/energyGate.ts` nambah `reserveEnergy()` + `settleEnergy()` buat pola ini; `chargeEnergy()` yang lama dibiarin nganggur (masih gak kepake di mana pun, tapi gak gue hapus — gak ada ruginya).
-
-Yang di-gate, biaya, dan definisi sukses/gagal yang gue pakai:
-- **Analyze Coin** (`app/api/token-analysis`, −2) — sukses kecuali exception (502). "Coin not found" tetep dianggap sukses — mesin analisisnya emang jalan, cuma datanya kosong, itu jawaban valid.
-- **Generate AI Signal** (`app/api/ai-signals` POST, −4) — sukses kalau ada signal object yang keluar (persisted atau enggak ke DB, dua-duanya tetep kena charge — user tetep dapet signal beneran). 404 "candle data gak tersedia" dan exception di-refund.
-- **AI Agent Chat** (`app/api/chat` POST, −2) — sukses kecuali report balik dengan `title: "SYSTEM"` (penanda internal buat "AI sedang sibuk" / error — udah ada dari sononya di `errorReport()`, bukan gue yang nambahin). Jawaban rule-based "COIN NOT FOUND" tetep charge, itu jawaban beneran bukan error.
-
-Cuma 3 endpoint ini yang di-gate. `/api/ai-signals/scan` (full watchlist scan) dan `/api/ai-signals/analyze-chart` sengaja gue biarin — brief nyebut 3 fitur spesifik, gue gak nebak-nebak nambahin sendiri.
-
-**Endpoint baru**
-
-`/api/ai-energy` (GET — balance + riwayat 10 transaksi terakhir), `/api/ai-energy/claim` (POST), `/api/ai-energy/consume` (POST — generic validate-then-spend, dipanggil siapapun yang butuh potong energy langsung by feature key). `/api/account/energy` (bikinan Phase 3.1) sengaja dibiarin apa adanya — masih jalan normal, cuma UI baru gak manggil dia lagi, semua pindah ke `/api/ai-energy`.
-
-**UI**
-
-- **Profile Dropdown** (`ProfileMenu.tsx`) — angka "0" hardcoded diganti balance beneran (data-nya sebenarnya udah ke-fetch dari `/api/account/me`, cuma gak dipakai), label "AI Token" → "AI Energy" biar sama kayak brief. Ditambah refetch pas dropdown dibuka biar gak nampilin angka basi.
-- **Settings** (`AiEnergySection.tsx`) — plot twist: komponennya udah lumayan lengkap dari Phase 3.1 (bukan static placeholder kayak dugaan awal gue dari komentar lama di schema.sql), tapi ternyata gak pernah di-render — gak ada di `SettingsView.tsx` maupun di nav (`SettingsNav.tsx`). Gue tulis ulang (tombol Klaim, copy diupdate biar gak nyebut "reset otomatis" lagi) sekalian akhirnya didaftarin ke nav + di-render.
-- **Dashboard** — widget kecil baru (`AiEnergyWidget.tsx`), pill kecil pojok kanan atas halaman, styling sama persis kayak pill di Settings/Profile (gak bikin gaya baru). Gak nyentuh grid/panel yang udah ada — cuma 1 baris baru paling atas, sebelum disclaimer.
-
-**Pesan error yang bener, bukan silent fail**
-
-Chat: response insufficient-energy dibungkus dalam bentuk `TerminalReport` yang sama kayak balasan normal (biar `useElVoidChat.ts` gak perlu diubah — kalau formatnya beda, hook-nya bakal nganggep ini network error terus auto-retry, user gak pernah liat pesan yang bener). Token Analyzer (drawer + versi mobile) dan Chart Analysis (`ChartAnalysisView.tsx` — tombol Save Signal/Execute) ditambahin state buat nangkep status 402 secara spesifik, biar "AI Energy tidak mencukupi." beneran nongol ke user. `AiSignalView.tsx` (halaman utama Generate Signal) udah otomatis bener dari sononya berkat error-handling yang udah ada — gak gue apa-apain.
-
-**Gak disentuh** (sesuai brief): Landing Page, Google Login, Wallet, Signal Logic, AI Router, Dashboard Layout, Authentication. Zero dependency npm baru.
-
-**Belum digarap ronde ini**
-- Payment / top-up / blockchain / wallet payment / subscription — emang belum scope-nya, brief-nya jelas soal ini.
-- `/api/ai-signals/scan` dan `/analyze-chart` gak di-meter — brief cuma nyebut 3 fitur spesifik.
-- Edge case concurrency yang sempit banget: 2 request nyaris bersamaan dari sisa energy pas-pasan bisa dua-duanya lolos reservation sebelum salah satu ke-block (balance tetap gak akan pernah negatif — itu dijamin — tapi teorinya bisa "kebobolan" 1 request ekstra dalam skenario super jarang ini). Fix penuhnya butuh pola hold/reserve yang lebih berat dari compare-and-swap; kalau nanti concurrency-nya beneran jadi masalah, itu langkah berikutnya.
-
-## V2.9 — Phase 3.0: AI Router (Groq + OpenRouter, gratis, auto-failover)
-
-Fokus ronde ini murni AI Chat Backend — gak nyentuh Dashboard, Landing Page, Wallet, Google Login, komponen UI manapun, database, atau AI Signal Engine (`lib/elvoid/*`). Yang berubah cuma `lib/ai/`, `app/api/chat/route.ts`, dan dokumentasi.
-
-- File baru `lib/ai/router.ts` — router LLM gratis: **Groq (primary, retry sekali kalau gagal) → OpenRouter (fallback, jalan turun daftar model FREE: Qwen → Mistral → Llama → satu ekstra safety net)**. Gak ada Gemini/Claude/GPT/provider berbayar manapun yang dipanggil di jalur ini — sama sekali gak masuk ke kode router-nya.
-- Auto-failover beneran otomatis dan gak kelihatan user: kalau Groq kena rate limit/timeout/500/quota habis, langsung pindah ke OpenRouter tanpa user notice apa-apa. Provider mana yang jawab cuma dicatat di server log (`[AI Router] Provider: ...`), gak pernah ikut ke response API.
-- Timeout keras 15 detik per attempt (`AbortController`), retry Groq cuma sekali sebelum pindah, dan model OpenRouter yang udah retired/salah nama cukup bikin attempt itu gagal cepat terus lanjut ke model berikutnya di daftar — gak nge-hang di satu model yang mati.
-- Cache 45 detik (`AI_ROUTER_CACHE_TTL_MS`, default di tengah rentang 30-60 detik yang diminta) berdasarkan teks pesan — pertanyaan yang sama diulang dalam jendela waktu itu gak nembak API lagi. Sengaja gak ikutin `liveContext` (harga BTC dkk yang berubah tiap request) di cache key-nya, biar cache-nya kepake beneran buat pertanyaan berulang.
-- System prompt SAMA PERSIS dipakai buat Groq maupun tiap model OpenRouter, jadi gaya jawabnya konsisten siapa pun yang jawab di baliknya — natural, gak markdown, gak template kaku (sesuai instruksi STYLE AI di brief).
-- **Default zero-config gak berubah**: kalau `GROQ_API_KEY` dan `OPENROUTER_API_KEY` dua-duanya kosong, chat tetap 100% jalan di rule-based Intelligence Engine yang lama — gak ada yang break buat siapa pun yang belum nambahin key. Kalau dua-duanya ADA tapi semua attempt gagal, baru muncul pesan "AI sedang sibuk. Silakan coba beberapa saat lagi." (sesuai brief) — bukan diam-diam diganti market snapshot.
-- `lib/ai/provider.ts` (provider paid — OpenAI/Claude/Gemini/DeepSeek/local) SENGAJA gak disentuh sama sekali — masih ada buat siapa pun yang mau opt-in eksplisit lewat `AI_CHAT_PROVIDER`, biar nambahin provider lain nanti tetap tinggal config, bukan rombak arsitektur.
-- Bonus opsional: `app/api/chat/stream/route.ts` — endpoint SSE streaming token-by-token dari router yang sama, buat kalau nanti frontend mau diupgrade ke streaming beneran. **Gak dipasang ke UI manapun saat ini** (dock/panel/mobile bar semua masih manggil `/api/chat` yang JSON biasa, `lib/hooks/useElVoidChat.ts` gak disentuh) — murni disiapin di baliknya aja sesuai batasan "jangan ubah UI".
-
-Belum/gak digarap ronde ini (di luar scope brief): perubahan apapun ke `lib/hooks/useElVoidChat.ts` atau komponen chat biar beneran nampilin streaming secara visual (endpoint-nya udah siap, tinggal disambungin kalau ada ronde UI berikutnya), dan daftar model free OpenRouter itu sendiri — lineup free OpenRouter dikenal suka rotasi, jadi `OPENROUTER_FREE_MODELS` di `.env.local` ada buat di-update tanpa perlu sentuh kode kalau suatu saat modelnya di-retire.
-
-## V2.8 — Phase 3 slice: Reasoning Chain di Global Sentiment node ("bukan black box")
-
-Developer prompt Phase 3 minta "Rule Engine + Correlation Engine + Confidence Engine + Cross Market Analysis" dengan rantai sebab-akibat News→Sentiment→DXY→Gold→Stocks→Crypto→BTC→ETH→Altcoin→AI Conclusion yang bisa dijelaskan, bukan black box. Itu scope berminggu-minggu kalau digarap literal (butuh correlation engine statistik yang beneran, dan aku gak punya data historis buat validasi itu di sandbox ini — jadi gak digarap, biar gak pura-pura ada rigor statistik yang sebenarnya gak ada).
-
-Yang beneran achievable dan jujur round ini: `deriveGlobalSentiment()` (di `globalSentiment.ts`) TERNYATA sudah jadi rule engine yang tepat — baca 8 sinyal (Fear&Greed, market cap, DXY, Gold, Stocks, BTC, Altcoin, macro event) dan vote jadi satu status + confidence. Masalahnya reasoning-nya cuma keluar sebagai list rata (gak dikelompokkan per node, dan di card ringkasan cuma nongol top-3). Round ini bikin itu jadi chain yang bener-bener bisa diklik & ditelusuri:
-
-- `SentimentReason` sekarang punya field `node` (macro/usd/gold/stocks/crypto/altcoin) — nandain reason itu asalnya dari node mana di peta. Threshold & rumus vote-nya SAMA PERSIS, cuma reason-nya sekarang ditag.
-- Fungsi baru `buildReasoningChain()` — regroup `reasons` (yang tadinya flat) jadi urutan tetap macro → USD → Gold → Stocks → Crypto → Altcoin, tiap node nunjukkin reason-nya sendiri atau "Tidak ada sinyal signifikan saat ini" kalau memang gak ada — gak pernah diisi dummy.
-- `DrawerSection` di `marketMap.ts` punya varian baru `"chain"`, dipasang di node "Global Sentiment" pada Global Intelligence Map — ganti list datar yang lama.
-- `NodeDrawer.tsx` render chain itu sebagai flow vertikal: titik + garis penghubung per node, warna sesuai tone, berakhir di baris "AI Conclusion" (status + confidence). Klik node "Global Sentiment" di peta → langsung keliatan kenapa AI narik kesimpulan itu, node per node.
-- PENTING soal kejujuran desain: ini fan-in (semua node vote paralel ke satu Sentiment), BUKAN pipeline sekuensial (DXY gak benar-benar "menyebabkan" Gold gerak di kode ini). Aku render sebagai flow visual karena itu cara paling gampang dibaca, tapi framing-nya "sinyal-sinyal ini membentuk verdict" bukan "A men-trigger B men-trigger C" — biar gak ngarang causal claim yang gak didukung logic-nya.
-
-Belum digarap: reasoning chain ini baru nempel di node Map doang, belum di-surface ke AI Final Conclusion card atau chat/Market Snapshot (V2.7). "Correlation Engine" versi statistik beneran (korelasi historis antar aset) juga belum — butuh data historis + keputusan soal sumbernya dulu. Sisa Phase 3 (Cross Market Analysis view yang lebih eksplisit, dsb) juga belum disentuh. Phase 4/5/6/7 di developer prompt itu juga masih di luar round ini.
-
-## V2.7 — AI Chat + AI Summary jadi terminal beneran (bukan lagi chatbot)
-
-Bagian paling "ChatGPT banget" di seluruh app — chat dock, AI Summary card, dan mobile Ask bar — masih pakai markdown header, `**bold**`, emoji (📊🐋⚠️📈📰💡), dan paragraf panjang di rounded bubble sampai round ini. Padahal Map, Heatmap, Market Pulse, dan AI Final Conclusion semua udah kena gaya terminal dari V2.1–V2.5. Round ini nutup gap itu — fokus ke bagian "AI Response Style", "Terminal Experience", "Error Handling", dan "AI Summary Redesign" di brief V3.
-
-- Tipe baru `TerminalReport` (`lib/terminalReport.ts`) — title + baris label/value + tone + list singkat + conclusion + recommended action + watchlist. Format bersama untuk SEMUA output AI, bukan komponen per komponen.
-- `lib/analysis.ts` dirombak total: semua fungsi yang tadinya nge-generate string markdown+emoji sekarang balikin `TerminalReport`. Matematika/threshold-nya SAMA PERSIS — gak ada logic yang diubah, cuma bentuk output-nya. `buildConclusion()`, `CoinReport`, `getCoinReportData()` (dipakai Token Analyzer widget) sengaja gak disentuh sama sekali biar gak ada risiko break di fitur lain.
-- Komponen baru `components/ui/TerminalReportView.tsx` — satu renderer buat semua card (title bar ala Bloomberg `<GO>`, LiveDot, baris label/value, watchlist, recommended action). Dipakai bareng-bareng oleh AI Summary card DAN chat (dock/panel/mobile bar) — ubah gaya card cukup di satu file.
-- Chat sekarang beneran kerasa terminal: pesan user ditulis `root@elvoid` / `«teks»`, bukan bubble ijo. Loading state siklus "Connecting... → Loading Intelligence... → Checking Macro... → ... → Generating Final Decision..." (urutan persis dari brief), bukan "Thinking…" doang. Kalau fetch lebih lama dari sequence-nya, berhenti di step terakhir — gak ngulang dari awal biar gak kesan buggy. Hormat `prefers-reduced-motion` (langsung ke step terakhir, gak nyicil).
-- Error state juga terminal-style (`root@elvoid` / `ERROR` / alasan / `Retrying...`) — dan "Retrying..." itu BENERAN retry sekali otomatis, bukan teks dekoratif. Kalau gagal lagi baru muncul tombol "Coba lagi" manual.
-- `AISummaryCard.tsx` sekarang render `TerminalReport` yang angkanya sama persis dengan Market Pulse + AI Final Conclusion — dihitung SEKALI di `app/dashboard/page.tsx` (`pulseInputs`, `pulseMetrics`, `finalConclusion`) terus dipakai bertiga, jadi card ini gak mungkin beda pendapat sama panel lain. Field baru yang nambah: Market Cap, BTC Dominance, Fear Index, Funding, Open Interest.
-- `app/api/chat/route.ts` dirombak: klasifikasi intent dulu (murah, gak fetch apa-apa) buat pertanyaan spesifik (coin/whale/risk/momentum/news/greeting) — baru kalau user nanya market secara umum, route ini fetch sentiment/ETF/macro yang SAMA kayak dashboard (`lib/intelligence/marketSnapshotReport.ts`), biar jawaban "ringkasan market" gak pernah beda sama yang ditampilin di halaman utama.
-- Buang field `action`/`open_chart` lama dari response API — ternyata udah 100% redundan sama `report.chartSymbol` yang baru (dua-duanya nunjuk coin yang sama), disederhanain jadi satu jalur.
-- `AskNocturnBar.tsx` (mobile) tadinya punya fetch logic sendiri, terpisah dari `useElVoidChat`. Sekarang dipindah ke hook yang sama biar loading sequence & retry konsisten di 3 tempat (dock, panel, mobile bar), bukan 3 implementasi yang gampang beda-beda sendiri-sendiri.
-
-Belum digarap ronde ini: restyle terminal buat sisa panel (Whale/Institutional Flow, Sector Rotation, Altcoin Scanner masih visual lama dari V1), Settings page redesign, Market Mode masih 4 state bukan 8 (Strong Risk On/Bullish/Bearish/Strong Risk Off belum ada threshold-nya di `deriveGlobalSentiment`), desktop top ribbon belum dicek satu-satu match sama daftar di brief (BTC/ETH/DOM/DXY/GOLD/NASDAQ/FEAR/NEWS).
-
-## V2.6 — Audit "API di env tapi gak kebaca" + sambungin yang masih stub
-
-Ronde ini fokus ke reliability data, bukan UI. Yang saya temuin & benerin:
-
-**Bug utama yang paling mungkin nyebabin "udah taruh API key tapi gak kebaca":**
-`lib/cache.ts` nyimpen HASIL GAGAL (`undefined`) selama TTL yang SAMA kayak
-hasil sukses — buat DXY/M2 (FRED) itu 6-12 JAM. Jadi kalau server sempat
-kepanggil SEKALI sebelum key ditambahin (gagal, ke-cache sebagai gagal),
-nambahin key setelahnya gak langsung kelihatan — nunggu proses restart
-atau TTL abis. Sekarang hasil gagal cuma di-cache maks 10 detik, sukses
-tetap dapet TTL penuh. Ini kemungkinan besar akar masalahnya — **tapi kalau
-masih belum muncul setelah ini, restart/redeploy Repl-nya sekali** biar
-proses lama (yang mungkin masih pegang env var lama) beneran mati.
-
-**Semua source (`lib/intelligence/sources/*.ts`, `lib/alchemy.ts`,
-`lib/newsapi.ts`, `lib/stablecoins.ts`, `lib/snapshot.ts`,
-`lib/dashboardSnapshot.ts`) sekarang nge-log alasan gagal yang sebenarnya**
-(`console.error` dengan prefix `[nama-source]`) — sebelumnya semua gagal
-diem-diem jadi `undefined`. Setelah deploy, cek log Replit-nya: kalau ada
-baris `[twelvedata] ...` / `[finnhub] ...` dst, itu alasan pastinya (key
-salah, plan gak cover simbol, rate limit, dll) — bukan saya nebak lagi.
-
-**Ketauan pas audit:** `NEWSAPI_KEY` free tier NewsAPI.org **cuma jalan di
-localhost** — ditolak dari domain manapun begitu di-deploy (aturan
-NewsAPI sendiri, bukan bug). Ini kemungkinan salah satu API yang "ada
-key-nya tapi gak pernah nyala". Fix: tambahin `GNEWS_API_KEY`
-(https://gnews.io, gratis, gak ada batasan localhost) — kalau diisi,
-otomatis jadi fallback pas NewsAPI gagal.
-
-**Fitur baru/disambungin:**
-- USD (DXY) node: kalau TwelveData gagal (simbol DXY sering gak ke-cover
-  plan gratis), otomatis fallback ke FRED DTWEXBGS yang udah ada di
-  `lib/macro.ts` — sesuai brief "if DXY fails, try another symbol".
-- `lib/intelligence/institutionalFlow.ts`: sebelumnya stub yang SENGAJA
-  selalu balikin kosong (didokumentasikan jelas di komentarnya — bukan
-  bug, emang belum ada API ETF flow gratis). Sekarang scrape tabel publik
-  Farside (https://farside.co.uk/btc/), sesuai prioritas di brief. **Catatan
-  jujur:** saya tulis parser-nya berdasarkan HTML halaman itu yang saya
-  baca lewat web-fetch saya sendiri (bukan dari sandbox coding, yang gak
-  bisa akses situs luar) — jadi BELUM saya jalankan end-to-end. Cek log
-  buat baris `[farside]`: gak ada = parsing sukses, ada = layout-nya
-  beda dari yang saya baca, kasih tau saya buat saya sesuaikan. Kalaupun
-  gagal, jatuhnya balik ke "Waiting" seperti sebelumnya — gak bakal nampilin
-  angka ngasal.
-
-**Sudah beres dari ronde sebelumnya (No. 10 & 11 di brief ini):** Market
-Pulse (rule-based, 9 gauge) dan AI Summary yang menggabungkan semua sinyal
-sudah dibangun di V2.4/V2.5 — gak perlu dikerjain ulang.
-
-**Belum digarap ronde ini:** node-level status/last-update/confidence
-animasi di Intelligence Map (No. 9), retry-with-backoff otomatis &
-AbortController (No. 12 performance), Binance Long/Short Ratio (funding
-rate + open interest udah ada, long/short ratio belum).
-
-## V2.5 — AI Final Conclusion gaya terminal + urutan section dirapikan
-
-- Section baru `components/intelligence/AIFinalConclusion.tsx` +
-  `lib/intelligence/finalConclusion.ts`, persis format di brief V3
-  (MARKET MODE / CONFIDENCE / BTC / ETH / ALT / WATCHLIST / FINAL
-  ACTION) tapi semua nilainya baca ulang data yang sudah ada:
-  - MARKET MODE & CONFIDENCE = `sentiment.status`/`.confidence` yang
-    sama dipakai di Intelligence Map.
-  - BTC/ETH/ALT = klasifikasi Bullish/Bearish/Neutral dari 24h change
-    (ambang ±2%, sama kayak ambang "top decliners" yang udah dipakai
-    di tempat lain) — ALT dari rata-rata top-30 altcoin yang sudah
-    dihitung buat node Crypto Market di Map.
-  - WATCHLIST = top-3 24h gainer beneran dari data yang sama dipakai
-    `topGainer`/`topLoser`, bukan ticker contoh dari brief.
-  - FINAL ACTION sengaja BUKAN sinyal beli/jual — WAIT/MONITOR/CONFIRMED
-    cuma nunjukkin seberapa sejalan sinyal-sinyal di atas, konsisten
-    sama disclaimer dashboard sendiri ("bukan sinyal beli/jual").
-- Urutan section dirapikan biar sesuai nomor Section di brief: Altcoin
-  Scanner (4) dipindah ke sebelum Market Pulse (6), dan AI Summary + AI
-  Final Conclusion (7) sekarang jadi dua section PALING BAWAH — sesuai
-  "AI Summary MUST become the final output after every analysis".
-
-## V2.4 — Market Pulse (section baru)
-
-- Section baru sesuai brief V3 (Section 6, sebelum AI Summary):
-  `lib/intelligence/marketPulse.ts` + `components/intelligence/ui/PulseGauge.tsx`
-  (gauge setengah lingkaran, reusable) + `components/intelligence/MarketPulsePanel.tsx`.
-- 9 gauge: Risk Mode, Macro, Whale Activity, Institution, Sentiment,
-  Liquidity, Volatility, Market Bias, Confidence — **semuanya baca ulang
-  angka yang sudah dihitung panel lain** (sentiment, kalender makro,
-  whale summary, Fear&Greed, stablecoin supply, funding rate BTC,
-  altseason index, ETF flow), bukan angka baru yang dikarang.
-- Ketauan pas nyambungin: `getInstitutionalFlowData()` sekarang selalu
-  balikin `connected: false` (belum ada sumber data ETF flow yang live —
-  kemungkinan integrasinya belum/sudah dicabut). Gauge "Institution"
-  jujur nampilin "Waiting" bukan "Flat", karena "Flat" bakal keliatan
-  kayak ada data yang bilang net flow-nya nol padahal sebenernya belum
-  konek sama sekali. Sama buat gauge lain kalau sumbernya undefined
-  (mis. stablecoin gagal fetch).
-- Dipasang di dashboard tepat sebelum AI Summary, konsisten sama urutan
-  section di brief.
-
-## V2.3 — Crypto Heatmap disandingkan dengan Intelligence Map
-
-- `components/heatmap/CryptoHeatmap.tsx` sudah ada dari sesi sebelumnya
-  (treemap per-koin, ukuran cell mengikuti market cap rank, warna+intensity
-  dari % perubahan, kategori bullish/bearish/rugpull-risk/smart-money,
-  toggle Top 40/Top 80, klik cell buka Token Analyzer) tapi belum pernah
-  dipasang ke dashboard — sekarang dipasang persis sesuai brief V3
-  Section 1 (Map di kiri, Heatmap di kanan, desktop 2 kolom / mobile
-  tumpuk). Datanya dari `base.markets`, `base.rugpullRisks`, dan
-  `snap.smartMoneyAccumulation` yang sebenarnya sudah dihitung di
-  `getDashboardSnapshot()` — jadi tidak perlu fetch baru.
-- Heatmap dikasih `max-height` + scroll halus (`scrollbar-none`) supaya
-  tetap rapi bersebelahan dengan Map waktu toggle ke Top 80, plus
-  `LiveDot` di header konsisten dengan panel lain.
-- Grid cell & hover-nya (`.heat-cell` di globals.css) sudah bagus dari
-  sebelumnya, tidak diutak-atik.
-- Section brief V3 yang lain (Whale Intelligence & Institutional Flow
-  restyle, Sector Rotation restyle, Altcoin Scanner restyle, Economic
-  Calendar di dashboard, Market Pulse — section baru, AI Final Conclusion
-  gaya terminal, Settings redesign) belum digarap ronde ini.
-
-## V2.2 — Zoom & pan di Global Intelligence Map
-
-- Peta sekarang jadi canvas yang bisa di-zoom & digeser, gaya graph
-  explorer Arkham Intelligence, lewat hook baru yang reusable:
-  `components/intelligence/ui/useZoomPan.ts` — tanpa dependency
-  tambahan, murni Pointer Events + satu native wheel listener.
-- Interaksi: **mouse** klik-drag buat geser, **Ctrl/Cmd+scroll** buat
-  zoom (scroll biasa dibiarkan apa adanya supaya halaman tetap bisa
-  di-scroll normal walau kursor ada di atas peta). **Touch** satu jari
-  TIDAK ditangkap sama sekali supaya swipe-scroll halaman tetap jalan
-  seperti biasa — cubit/geser dua jari baru men-zoom & menggeser peta,
-  persis seperti embed Google Maps. Tombol +/− dan reset selalu
-  terlihat di pojok kanan bawah buat yang tidak coba gesture-nya, plus
-  double click/tap buat lompat zoom.
-- Klik node tetap berfungsi seperti biasa — ada guard kecil yang
-  menekan event klik selama ±300ms setelah drag/pinch beneran
-  terjadi, supaya menggeser peta tidak sengaja kebuka drawer.
-- Perbaikan sekalian: garis penghubung SVG dulu dihitung dari
-  `getBoundingClientRect()` (posisi di layar). Begitu container dikasih
-  `transform` buat zoom/pan, itu bakal dobel-terskalakan. Sekarang
-  dihitung dari `offsetLeft/offsetTop` (posisi lokal, tidak
-  kepengaruh transform), jadi garis tetap nempel presisi ke node di
-  skala/posisi berapa pun, dan tidak perlu dihitung ulang di tiap
-  frame drag.
-- Latar dot-grid tipis (`.map-canvas-grid` di `globals.css`) ditambahkan
-  di belakang peta supaya "ini area yang bisa digeser" kelihatan dari
-  awal, bukan cuma ketauan pas coba drag.
-- `minScale`/`maxScale`/`edgePadding` di `useZoomPan` bisa dipakai lagi
-  buat panel lain yang bakal jadi canvas juga (Sector Rotation, Altcoin
-  Scanner map, dst.) dari brief redesign V3.
-
-## V2.1 — Animasi flow di garis penghubung
-
-- Garis di `GlobalIntelligenceMap` sekarang solid + glow (bukan dash
-  "marching ants" lagi), dengan **3 partikel/bubble kecil yang mengalir
-  terus-menerus** di sepanjang tiap garis (pakai SVG `animateMotion` +
-  `mpath` native — tanpa dependency tambahan), meniru efek "liquidity
-  mengalir" seperti referensi. Garis/node aktif (hover/klik) dapat partikel
-  lebih besar, lebih terang, lebih cepat; garis idle tetap mengalir pelan
-  supaya peta terasa hidup terus, bukan cuma saat disentuh.
-- Menghormati `prefers-reduced-motion`: kalau user mengaktifkan itu di OS,
-  partikel tidak dirender (garis tetap terlihat, cuma tanpa gerakan).
-- Tidak menambahkan angka $ di garis (seperti di beberapa referensi) karena
-  itu akan jadi data fiktif untuk hubungan macro→crypto yang sifatnya
-  kausal, bukan aliran dana yang terukur — konsisten dengan aturan
-  "no dummy data" dari brief sebelumnya.
-
-## V2 — Global Intelligence Map rebuild
-
-Fokus V2: peta jadi sistem real-time interaktif, bukan tampilan statis.
-
-### Baru
-
-- **`lib/intelligence/globalSentiment.ts`** — mesin AI reasoning. Membaca
-  semua sinyal yang tersedia (Fear & Greed, market cap, DXY, Gold, Stocks,
-  struktur BTC, momentum altcoin, event makro yang akan datang) dan
-  menghasilkan **Risk On / Risk Off / Neutral / Transition** + confidence
-  score 0–100 + daftar alasan. Dipakai bersama oleh Market Status card
-  (Top Market Overview) dan header peta, jadi keduanya tidak pernah
-  berbeda pendapat.
-- **`lib/intelligence/sources/`** — integrasi API baru, masing-masing
-  gated di belakang env var, `cached()`, dan fallback `undefined` yang
-  graceful persis pola `lib/macro.ts`:
-  - `twelvedata.ts` + `usd.ts` + `gold.ts` — DXY & XAU/USD via TwelveData,
-    termasuk time-series untuk sparkline. Perlu `TWELVEDATA_API_KEY`.
-  - `stocks.ts` — Nasdaq/S&P500/Dow Jones via Finnhub, pakai proxy ETF
-    (QQQ/SPY/DIA) karena ticker indeks asli butuh paid add-on di Finnhub.
-    Perlu `FINNHUB_API_KEY`.
-  - `cryptoNews.ts` — berita crypto via CryptoPanic, fallback ke feed
-    NewsAPI yang sudah ada kalau key tidak diisi. Opsional,
-    `CRYPTOPANIC_API_KEY`.
-- **`lib/intelligence/macroEvents.ts`** — mengkategorikan kalender makro
-  yang sudah ada (gratis, ForexFactory) ke FOMC/CPI/PPI/NFP/PMI/Interest
-  Rate sesuai spec, plus deteksi event high-impact yang akan datang untuk
-  reasoning engine. Tidak menambah dependency baru.
-- **`components/intelligence/ui/NodeDrawer.tsx`** — drawer modern: side
-  panel di desktop, bottom sheet di mobile, dengan animasi slide + spring
-  yang sesuai arah layout masing-masing.
-- **`components/intelligence/ui/Sparkline.tsx`** — mini chart SVG ringan
-  untuk node USD/Gold, tanpa dependency tambahan.
-
-### Diubah total
-
-- **`lib/intelligence/marketMap.ts`** — model data ditulis ulang. Setiap
-  node sekarang punya `connected: boolean` (bukan `sample`) dan `sections`
-  (list/stats/chart/text) yang generic — menambah node baru (Whale, Order
-  Flow, Footprint, Liquidity Heatmap) di versi berikutnya tinggal menulis
-  satu `buildXNode()` lagi, tidak perlu ubah tree, drawer, atau garis
-  penghubung.
-- **`components/intelligence/GlobalIntelligenceMap.tsx`** — header Global
-  Sentiment (status + confidence + alasan) selalu tampil tanpa perlu klik;
-  klik node membuka `NodeDrawer` (bukan panel inline di bawah peta seperti
-  V1); semua garis penghubung sekarang berdenyut terus-menerus (lebih
-  cepat & terang saat sebuah node di-hover/aktif, pelan & redup saat idle)
-  supaya terasa hidup, bukan statis.
-- **Tidak ada lagi label "Contoh"** di mana pun. Data yang belum terhubung
-  ke API sekarang tampil sebagai **"Waiting for API Connection"** —
-  termasuk di Institutional Flow (ETF Flow & Institutional Movement kini
-  benar-benar kosong dengan status waiting, bukan angka contoh) dan
-  Sector Rotation.
-
-### Belum ada sumber gratis (tampil "Waiting for API Connection", bukan angka fiktif)
-
-- **ETF Flow & Institutional Movement** — tidak ada API gratis tanpa key
-  untuk data ini; lihat komentar di `lib/intelligence/institutionalFlow.ts`
-  untuk opsi (Farside Investors, SoSoValue, atau vendor berbayar).
-- **Large BTC Transaction on-chain** — feed whale (`lib/alchemy.ts`) hanya
-  memantau token ERC-20, bukan BTC asli.
+### Known Limitations
+No test framework; baseline verification uses a standalone script instead (see Phase 7.1).
 
 ---
 
-## V1 — Dashboard utama (struktur awal)
+## Phase 7.1 — Evidence Normalization
 
-Semua di bawah ini ditambahkan untuk membangun `/dashboard` pertama kali
-sesuai struktur awal yang diminta (Top Market Overview, Whale & Liquidity,
-Institutional Flow, Sector Rotation, AI Summary, Altcoin Scanner). Tidak
-ada file lama dari project asli yang dihapus.
+### Objective
+Make per-factor evidence explicit (source/direction/strength/quality/cluster) without creating a second confluence/decision engine, and establish a baseline snapshot to detect regressions across the rest of Phase 7.
 
-- `lib/intelligence/shared.ts`, `sectorRotation.ts`, `whaleLiquidity.ts`,
-  `altcoinScanner.ts` — helper rule-based dan taksonomi sektor bersama.
-- `components/intelligence/TopMarketOverview.tsx`,
-  `WhaleLiquidityPanel.tsx`, `InstitutionalFlowPanel.tsx`,
-  `SectorRotationHeatmap.tsx`, `AltcoinScannerTable.tsx`,
-  `MarketStatusBadge.tsx`.
-- `app/dashboard/page.tsx` disusun ulang mengikuti urutan brief. AI Signal,
-  Paper Trader, Token Scanner lengkap, dan chat tetap ada — dipindah ke
-  baris "Lainnya dari ElStand AI" + sidebar/menu, bukan dihapus.
+### Architecture
+- New file `lib/ai/oracle/evidence.ts`: a pure, read-only adapter. `normalizeEvidence(confluence, timeframe?)` maps each existing `ConfluenceFactor` 1:1 into a `NormalizedEvidence` record. Direction is derived per-factor from `longWeight`/`shortWeight` comparison (ties, including 0/0, normalize to `NEUTRAL` — never forced to a side). `cluster` reuses the existing `CLUSTERS` grouping from `grading.ts` (now exported, not redefined) so "structure vs orderflow vs context" independent-evidence-cluster logic has exactly one definition in the codebase.
+- No new data fetching. No new scoring. `confluence.dominantSide` and `gradeConfluence()`'s output remain the only decision-level values; this file cannot produce or influence one.
+- `timeframe` and `invalidation` fields are optional and left unset/undefined for now — no per-factor invalidation level or multi-timeframe data exists upstream yet, and this adapter must not invent either ahead of Phase 7.2.
+- Added `scripts/phase7/baseline.ts` + `scripts/phase7/alias-loader.mjs`: a standalone, dev-only script (not part of the Next.js app) that runs the real `computeConfluence → buildOracleRiskPlan → gradeConfluence` pipeline against a deterministic synthetic candle fixture (seeded, no `Math.random`), and additionally exercises the new `normalizeEvidence`/`firingClustersFor` to confirm the adapter reports the same factor count as `confluence.factors` and does not alter `grade`/`side`/`confidence`. The alias-loader only maps the repo's `@/` tsconfig path (and bare relative TS specifiers) to real file paths so the script can run under plain `node --experimental-strip-types` without installing a bundler/ts-node (no network/npm install available in this environment). Output saved to `scripts/phase7/baseline.snapshot.json` for before/after comparison in later sub-phases.
+
+### Files Modified
+- `lib/ai/oracle/grading.ts` — one-line change: `const CLUSTERS` → `export const CLUSTERS` (zero logic change, confirmed via git diff: 1 insertion/1 deletion, same line).
+
+### Files Added
+- `lib/ai/oracle/evidence.ts`
+- `scripts/phase7/baseline.ts`
+- `scripts/phase7/alias-loader.mjs`
+- `scripts/phase7/baseline.snapshot.json`
+
+### What Was Preserved
+- `computeConfluence()` remains the only evidence engine.
+- `longWeight`/`shortWeight` values are read, not recomputed.
+- Independent evidence cluster concept (`structure`/`orderflow`/`context`) — single definition, reused not duplicated.
+- Real/proxy/unavailable quality passthrough, unchanged.
+- Existing contradiction detection (`ConfluenceResult.contradictions`) — exposed via `existingContradictions()` passthrough, not reimplemented.
+- Standard Elvoid AI, `/api/ai-signals`, and standard AI UI — zero files touched (confirmed by `git diff --stat`).
+
+### What Was Added
+- `NormalizedEvidence` type + `normalizeEvidence()` adapter.
+- `firingClustersFor()` helper (read-only convenience over the same cluster grouping grading.ts already enforces internally).
+- `existingContradictions()` passthrough helper.
+- A runnable, deterministic baseline script + saved snapshot for future regression comparison.
+
+### Tests / Checks
+- `npm run lint` / `tsc --noEmit` / `next build`: **not run** — `node_modules` is not installed in this environment and there is no network access to run `npm install`. This is an environment limitation, not a code omission.
+- In lieu of the above: ran `scripts/phase7/baseline.ts` twice against the fixture; output was byte-identical both runs (deterministic). Confirmed `normalizedEvidenceCount === confluence.factors.length` (8 === 8) and `grade`/`side`/`confidence`/`risk` values match what `gradeConfluence`/`buildOracleRiskPlan` alone would produce (evidence.ts does not participate in their computation).
+- Verified via `git diff --stat` that only `lib/ai/oracle/grading.ts` (1-line, non-functional change) was modified among existing files; everything else is new, additive files.
+
+### Regression Status
+No behavioral change to the Pro pipeline. No change to standard Elvoid AI.
+
+### Known Limitations
+- No real test framework in the repo; regression checking for Phase 7 currently relies on the manual baseline script, not automated CI-run tests. Recommend revisiting once npm install is possible in a networked environment.
+- `timeframe` on `NormalizedEvidence` is currently always the single interval passed in — real HTF/MTF/LTF separation is Phase 7.2, not yet implemented.
+- `invalidation` on `NormalizedEvidence` is always `undefined` — no per-factor invalidation level exists upstream yet.
+
+**Baseline factor-count note (from approval message):** the synthetic baseline reports `normalizedEvidenceCount = 8` (one per `ConfluenceSource`), while UI/product terminology elsewhere references "20 confluence factors." Per instruction, not touched yet — the 8 sources in `confluence.ts` are source-level factors; the "20" figure likely refers to a different counting unit (e.g. individual scanner functions across `lib/elvoid/scanners.ts`, or the standard Elvoid AI's own `scans`+`extraReasoning` count in `lib/elvoid/engine.ts`, which is a separate system entirely per Phase 7.0). Actual reconciliation deferred to whichever later sub-phase first needs an exact count (likely 7.5 Scenario Engine or 7.7 Decision Arbitration) — flagged here so it isn't lost.
+
+---
+
+## Phase 7.2 — Multi-Timeframe Intelligence
+
+### Objective
+Give Elvoid Pro real HTF/MTF/LTF context so a lower-timeframe move against the higher-timeframe structure is not misread as a full reversal — without creating a second directional decision.
+
+### Existing Infrastructure Discovered (Step 1 audit)
+- `lib/market-data/timeframeHistory.ts` already defines the app's full supported-interval set: `1m, 5m, 15m, 1h, 4h, 1d` (`TIMEFRAME_HISTORY_DAYS`), shared by the chart engine and `/api/klines`.
+- `lib/binance.ts`'s `getKlines(symbol, interval, limit)` is the single kline-fetch function already used by `dataAdapters.ts` for the anchor timeframe — it has its own keyed 60s in-process cache (`lib/cache.ts`'s `cached()`, key `bn:klines:{pair}:{interval}:{limit}`). No second fetch/cache layer was built; Phase 7.2 calls this exact function for the two additional (HTF/LTF) timeframes.
+- No multi-timeframe concept existed anywhere in `lib/ai/oracle/*` prior to this phase — confirmed via the Phase 7.0 audit (`OracleContext` was single-`candles`-series only).
+- Structure-derivation primitives (`findSwingPoints`, `detectTrend`, `scanMarketStructure`, `scanTrend`, `findSupportResistance` — all in `lib/elvoid/indicators.ts` / `lib/elvoid/scanners.ts`) were already used for the anchor timeframe by `confluence.ts`'s `marketStructureFactor()`. Phase 7.2 reuses these exact functions against additional candle series instead of writing a new structure algorithm.
+
+### Timeframe Mapping (documented, deterministic — `lib/ai/oracle/mtf.ts::TIMEFRAME_MAP`)
+| Anchor | HTF | LTF |
+|---|---|---|
+| 1m | 15m | — |
+| 5m | 1h | 1m |
+| 15m | 4h | 5m |
+| 1h | 1d | 15m |
+| 4h | 1d | 1h |
+| 1d | — | 4h |
+
+An anchor with no mapped side (1m has no HTF, 1d has no HTF) reports that side as unavailable rather than guessing a neighbor.
+
+### Data Fetching Changes
+- `buildMtfContext(symbol, anchorInterval, anchorCandles, currentPrice)`: the anchor/MTF slot reuses `anchorCandles` the caller already fetched (**zero extra fetch** for MTF). Only HTF and LTF (when mapped) trigger a `getKlines()` call each — **at most 2 additional Binance requests per Oracle call**, both going through the existing 60s cache, so repeated requests for the same symbol+interval within 60s cost nothing extra.
+- A failed/missing HTF or LTF fetch (`.catch(() => [])`) or too little candle history (`< 20` candles) marks that slice `available: false` with a `quality`-style reason string — never a fabricated bias.
+
+### MTF Context Structure (`lib/ai/oracle/mtf.ts`)
+```
+MtfContext {
+  anchorInterval, htf: TimeframeSlice | null, mtf: TimeframeSlice, ltf: TimeframeSlice | null,
+  relationship: MtfRelationship, relationshipEvidence: string
+}
+TimeframeSlice { timeframe, available, bias: LONG|SHORT|NEUTRAL, strength, evidence, protectiveLevel }
+```
+`bias` per slice is derived exactly the way `marketStructureFactor()` derives the anchor's bias today (same scanners, same weight scale) — it is evidence/context, not the Pro decision.
+
+### Timeframe Relationship Logic (`classifyMtfRelationship`)
+Pure, descriptive-only function → one of: `ALIGNED_BULLISH/BEARISH`, `PULLBACK_IN_UPTREND/DOWNTREND`, `CONTINUATION_AFTER_PULLBACK_BULLISH/BEARISH`, `HTF_THESIS_THREATENED_BULLISH/BEARISH`, `NEUTRAL_OR_MIXED`, `INSUFFICIENT_DATA`. Never returns LONG/SHORT and is never consumed by `gradeConfluence()`.
+
+"HTF structural level broken" is measured, not guessed: the nearest real protective S/R level (`findSupportResistance()`, same function `risk.ts` uses) for the HTF's own bias, checked against the live current price.
+
+**Documented limitation:** "bearish/bearish displacement" (spec Case C) is approximated as "LTF agrees with the break direction," since no separate displacement-magnitude detector exists yet. This keeps the check evidence-based without inventing a new signal, and is called out in the relationship's own evidence string. A true `TRUE_THESIS_INVALIDATION` verdict is explicitly deferred to Phase 7.6.
+
+### Unavailable-Data Behavior
+- HTF unavailable + MTF/LTF available → `INSUFFICIENT_DATA`, explicit reason, no fabricated HTF bias (spec Case D — verified by fixture 5).
+- Only anchor timeframe available (both neighbors unavailable) → `INSUFFICIENT_DATA`, current single-timeframe Oracle behavior otherwise fully preserved (spec Case E — verified by fixture 7).
+- One neighbor available, one not → relationship is still computed from what IS available rather than being blocked outright (fixture 6).
+
+### Files Modified
+- `app/api/elvoid-pro/oracle/route.ts` — 8 lines added: import + one additional `await buildMtfContext(...).catch(() => null)` call, `mtf` added to the JSON response. Confluence/risk/grading/insight computation lines are byte-for-byte unchanged.
+- `components/elvoid-pro/AISignal/OraclePanel.tsx` — 28 lines added: an optional `mtf` field on the response type and a small read-only "Multi-Timeframe Context" section (HTF/MTF/LTF bias + relationship label) rendered only when `data.mtf` is present. No existing markup restructured.
+
+### Files Added
+- `lib/ai/oracle/mtf.ts` — the MTF module described above.
+- `scripts/phase7/mtf-fixtures.ts` — offline fixture tests for `classifyMtfRelationship()` covering spec Step 11 cases 1–7.
+
+### Tests / Checks
+- `scripts/phase7/mtf-fixtures.ts`: **7/7 passed** (cases 1–7 from spec, including HTF-unavailable, LTF-unavailable, and both-unavailable). Run:
+  `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/mtf-fixtures.ts`
+- Re-ran `scripts/phase7/baseline.ts` and diffed against the Phase 7.1 recorded snapshot: **byte-identical** — `grade`, `side`, `confidence`, `risk`, `dominantSide` all unchanged, confirming MTF context did not alter grading/confluence in any way.
+- `npm run lint` / `tsc --noEmit` / `next build`: still not runnable in this sandbox (no `node_modules`, no network for `npm install`) — same environment limitation noted in Phase 7.1. `getKlines()` itself (the live Binance fetch) is therefore **not exercised** by the offline fixtures either; only the pure relationship-classification logic is tested here.
+- `git diff --stat`: confirms only `app/api/elvoid-pro/oracle/route.ts` and `components/elvoid-pro/AISignal/OraclePanel.tsx` touched among existing files, both additive. No file under `lib/elvoid/`, `lib/ai/core/`, `/api/ai-signals`, or standard AI UI modified.
+
+### Regression Status
+No change to `gradeConfluence()`, `computeConfluence()`, `buildOracleRiskPlan()`, confidence, or grade — confirmed via identical baseline snapshot. `/api/elvoid-pro/insights` and `/api/elvoid-pro/execute-signal` were not touched at all in this sub-phase (MTF was only wired into the Oracle route per Step 9's primary target); `execute-signal` remains persistence/validation only.
+
+### Performance Considerations
+- Up to 2 additional Binance kline requests per Oracle call (HTF + LTF), both cached 60s the same way the anchor already is. For the common case of a page mounting Oracle+Insights together within the existing 5s `assembleOracleContext` cache window, HTF/LTF requests are not duplicated across those two panels' Oracle-route calls within that same 60s window either.
+- No new polling, no new background jobs, no change to existing rate-limit handling — reuses `getKlines()`'s existing `Promise`-based error handling (`.catch(() => [])` here) rather than adding new retry/backoff logic.
+
+### Known Limitations
+- MTF context is only wired into `/api/elvoid-pro/oracle`, not `/api/elvoid-pro/insights` (deliberately out of scope for 7.2 per Step 9 — insights already reuses the anchor confluence and doesn't need its own MTF call yet).
+- "Displacement" is approximated via LTF directional agreement rather than a dedicated magnitude/velocity measure (documented in `mtf.ts`'s own comments).
+- Live `getKlines()` network path is untested in this sandbox (no network access) — only the deterministic relationship-classification logic has fixture coverage. Recommend a manual smoke-test against a live/staging symbol before considering 7.2 fully verified in production.
+- The Phase 7.1 "8 vs 20 factors" terminology question (see note above) remains open and is not addressed by 7.2.

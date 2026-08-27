@@ -30,7 +30,7 @@ import type { OracleAssessment, OracleRiskPlan, OracleRiskStatus } from "./gradi
  *  - "orderflow": real-time execution/resting-liquidity derived (footprint delta, order book depth, traded-volume liquidity nodes).
  *  - "context": derivatives/macro context (funding, basis, DXY) — informative but never sufficient alone.
  */
-const CLUSTERS: Record<ConfluenceSource, "structure" | "orderflow" | "context"> = {
+export const CLUSTERS: Record<ConfluenceSource, "structure" | "orderflow" | "context"> = {
   market_structure: "structure",
   smc_ict: "structure",
   tpo: "structure",

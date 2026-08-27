@@ -1,0 +1,33 @@
+{
+  "dominantSide": "LONG",
+  "longScore": 34.3,
+  "shortScore": 0,
+  "contradictions": [],
+  "dataQuality": [
+    "real",
+    "real",
+    "unavailable",
+    "unavailable",
+    "unavailable",
+    "unavailable",
+    "unavailable",
+    "unavailable"
+  ],
+  "grade": "NO_TRADE",
+  "side": null,
+  "confidence": 0,
+  "independentConfirmationClusters": 0,
+  "riskStatus": "valid",
+  "risk": {
+    "entry": 53154.37487479045,
+    "stopLoss": 52562.22698258836,
+    "takeProfit": 54042.596713093575,
+    "riskReward": 1.5
+  },
+  "normalizedEvidenceCount": 8,
+  "normalizedFactorCountMatchesConfluence": true,
+  "normalizedLongClusters": [
+    "structure"
+  ],
+  "normalizedShortClusters": []
+}

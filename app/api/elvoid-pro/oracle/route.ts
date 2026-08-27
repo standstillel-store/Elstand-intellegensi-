@@ -4,6 +4,7 @@ import { computeConfluence } from "@/lib/ai/oracle/confluence";
 import { gradeConfluence } from "@/lib/ai/oracle/grading";
 import { buildMarketInsight } from "@/lib/ai/oracle/insight";
 import { buildOracleRiskPlan } from "@/lib/ai/oracle/risk";
+import { buildMtfContext } from "@/lib/ai/oracle/mtf";
 import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 /**
@@ -46,7 +47,12 @@ export async function GET(req: Request) {
     const assessment = gradeConfluence(confluence, risk ?? undefined);
     const insight = buildMarketInsight(confluence, assessment);
 
-    return NextResponse.json({ assessment, confluence, insight, risk });
+    // Phase 7.2 — additive only. Does not participate in confluence/grading/
+    // risk above; failures here must never break the existing Oracle
+    // response (see catch: falls back to null, never a fabricated context).
+    const mtf = await buildMtfContext(symbol, interval, context.candles, context.currentPrice).catch(() => null);
+
+    return NextResponse.json({ assessment, confluence, insight, risk, mtf });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Gagal menjalankan ELVOID PRO ORACLE." }, { status: 500 });
   }

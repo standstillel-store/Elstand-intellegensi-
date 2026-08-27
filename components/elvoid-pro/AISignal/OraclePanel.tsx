@@ -5,13 +5,29 @@ import clsx from "clsx";
 import type { ConfluenceResult } from "@/lib/ai/oracle/confluenceTypes";
 import type { OracleAssessment, OracleRiskPlan } from "@/lib/ai/oracle/gradingTypes";
 import type { OracleInsight } from "@/lib/ai/oracle/insight";
+import type { MtfContext } from "@/lib/ai/oracle/mtf";
 
 interface OracleResponse {
   assessment: OracleAssessment;
   confluence: ConfluenceResult;
   insight: OracleInsight;
   risk: OracleRiskPlan | null;
+  /** Phase 7.2 — context only, never a second decision. Optional/null when the fetch failed; the rest of the panel must render fine without it. */
+  mtf?: MtfContext | null;
 }
+
+const MTF_RELATIONSHIP_LABEL: Record<string, string> = {
+  ALIGNED_BULLISH: "HTF & MTF searah bullish",
+  ALIGNED_BEARISH: "HTF & MTF searah bearish",
+  PULLBACK_IN_UPTREND: "Kemungkinan pullback dalam uptrend",
+  PULLBACK_IN_DOWNTREND: "Kemungkinan pullback dalam downtrend",
+  CONTINUATION_AFTER_PULLBACK_BULLISH: "Kandidat continuation bullish setelah pullback",
+  CONTINUATION_AFTER_PULLBACK_BEARISH: "Kandidat continuation bearish setelah pullback",
+  HTF_THESIS_THREATENED_BULLISH: "Tesis HTF bullish terancam",
+  HTF_THESIS_THREATENED_BEARISH: "Tesis HTF bearish terancam",
+  NEUTRAL_OR_MIXED: "HTF/MTF/LTF campuran",
+  INSUFFICIENT_DATA: "Data timeframe tidak lengkap",
+};
 
 const GRADE_STYLE: Record<string, string> = {
   "A+": "bg-gold/20 text-gold border-gold/40",
@@ -157,6 +173,18 @@ export function OraclePanel({ symbol }: { symbol: string }) {
           {executeMsg && (
             <p className={clsx("text-[10px]", executeState === "error" ? "text-down" : "text-ink-faint")}>{executeMsg}</p>
           )}
+        </div>
+      )}
+
+      {status === "ready" && data && data.mtf && (
+        <div className="mt-3 space-y-1 border-t border-line pt-2 text-[10px] leading-relaxed">
+          <p className="font-medium text-ink-muted">Multi-Timeframe Context</p>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-ink-faint">
+            <span>HTF ({data.mtf.htf?.timeframe ?? "–"}): {data.mtf.htf?.available ? data.mtf.htf.bias : "n/a"}</span>
+            <span>MTF ({data.mtf.mtf.timeframe}): {data.mtf.mtf.bias}</span>
+            <span>LTF ({data.mtf.ltf?.timeframe ?? "–"}): {data.mtf.ltf?.available ? data.mtf.ltf.bias : "n/a"}</span>
+          </div>
+          <p className="text-ink-faint">{MTF_RELATIONSHIP_LABEL[data.mtf.relationship] ?? data.mtf.relationship}</p>
         </div>
       )}
     </div>
