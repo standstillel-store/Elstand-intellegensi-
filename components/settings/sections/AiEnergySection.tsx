@@ -4,6 +4,7 @@ import { Zap, ArrowDownRight, ArrowUpRight } from "lucide-react";
 import clsx from "clsx";
 import { SettingsCard, SettingsRow } from "../SettingsCard";
 import { timeAgo, timeUntil } from "@/lib/format";
+import { notifyAiEnergyChanged, useAiEnergyRefresh } from "@/lib/energyBus";
 
 interface EnergyTransaction {
   id: string;
@@ -56,6 +57,10 @@ export function AiEnergySection() {
     load();
   }, []);
 
+  // AI Energy purchase bug fix: also refetch when a purchase happens
+  // elsewhere (e.g. the /wallet page) while this Settings tab is open.
+  useAiEnergyRefresh(load);
+
   async function handleClaim() {
     setClaiming(true);
     setClaimNotice(null);
@@ -67,6 +72,9 @@ export function AiEnergySection() {
       // reloaded balance/nextClaimAt/canClaim already tell the accurate
       // story without needing a separate notice.
       await load();
+      // Tell every other mounted balance display (dashboard widget, profile
+      // dropdown, sidebar) to refresh too — same fix as the purchase flow.
+      notifyAiEnergyChanged();
     } catch {
       setClaimNotice("Gagal klaim — coba lagi sebentar.");
     } finally {

@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useReadContract } from "wagmi";
 import { formatUnits } from "viem";
 import { CircleUser, Zap, Coins } from "lucide-react";
 import type { AppUser, AppProfile } from "@/lib/auth/profile";
 import { shortAddr } from "@/lib/format";
 import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
+import { useAiEnergyRefresh } from "@/lib/energyBus";
 
 interface AccountMeResponse {
   signedIn: boolean;
@@ -47,18 +48,22 @@ function ElsBalance({ address }: { address: `0x${string}` }) {
 export function SidebarProfile() {
   const [me, setMe] = useState<AccountMeResponse | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadMe = useCallback(() => {
     fetch("/api/account/me")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled && data) setMe(data);
+        if (data) setMe(data);
       })
       .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    loadMe();
+  }, [loadMe]);
+
+  // AI Energy purchase bug fix: also refetch when a purchase/claim happens
+  // anywhere else in the app, not only on mount.
+  useAiEnergyRefresh(loadMe);
 
   const nickname = me?.profile?.username || "Trader";
   const energyBalance = me?.energy?.balance;

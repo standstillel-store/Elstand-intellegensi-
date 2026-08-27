@@ -3,6 +3,7 @@ import { forwardRef, useState } from "react";
 import { Zap, Check } from "lucide-react";
 import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
 import { PAYMENT_PRODUCTS } from "@/lib/payments/config";
+import { notifyAiEnergyChanged } from "@/lib/energyBus";
 import { BuyWithElsButton } from "./BuyWithElsButton";
 
 /** Phase 6.6.4 — wired to contracts/ELSTestnetPayment.sol's AI_ENERGY_10 product via BuyWithElsButton. Same "no fake transaction, backend verifies" rule as WalletProCards. */
@@ -28,7 +29,20 @@ export const WalletAiEnergy = forwardRef<HTMLDivElement>(function WalletAiEnergy
               <Check size={13} /> Purchased
             </p>
           ) : (
-            <BuyWithElsButton productId="AI_ENERGY_10" priceElsRaw={PAYMENT_PRODUCTS.AI_ENERGY_10.priceElsRaw} onGranted={() => setJustPurchased(true)} />
+            <BuyWithElsButton
+              productId="AI_ENERGY_10"
+              priceElsRaw={PAYMENT_PRODUCTS.AI_ENERGY_10.priceElsRaw}
+              onGranted={() => {
+                setJustPurchased(true);
+                // AI Energy purchase bug fix: the server balance is already
+                // credited by this point (BuyWithElsButton only calls
+                // onGranted after /api/payments/verify returns GRANTED /
+                // ALREADY_GRANTED) — this just tells every other mounted
+                // balance display to re-fetch instead of showing a stale
+                // number until the user reloads the page.
+                notifyAiEnergyChanged();
+              }}
+            />
           )}
         </div>
       </div>

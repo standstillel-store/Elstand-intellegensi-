@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Zap } from "lucide-react";
+import { useAiEnergyRefresh } from "@/lib/energyBus";
 
 /**
  * Small "AI Energy" pill for the Dashboard ("widget kecil" per the brief).
@@ -17,18 +18,22 @@ import { Zap } from "lucide-react";
 export function AiEnergyWidget() {
   const [balance, setBalance] = useState<number | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(() => {
     fetch("/api/ai-energy")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled && typeof data?.balance === "number") setBalance(data.balance);
+        if (typeof data?.balance === "number") setBalance(data.balance);
       })
       .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // AI Energy purchase bug fix: also refetch when a purchase/claim happens
+  // anywhere else in the app (e.g. the /wallet page), not only on mount.
+  useAiEnergyRefresh(load);
 
   // Not signed in, Supabase not configured, or still loading — stay
   // invisible rather than show a placeholder/zero that isn't real yet.

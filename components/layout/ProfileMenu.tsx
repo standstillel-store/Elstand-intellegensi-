@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CircleUser, ChevronDown, Zap, LogOut, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import type { AppUser, AppProfile } from "@/lib/auth/profile";
+import { useAiEnergyRefresh } from "@/lib/energyBus";
 
 interface AccountMeResponse {
   signedIn: boolean;
@@ -27,31 +28,29 @@ export function ProfileMenu() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/account/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setMe(data);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Balance can change elsewhere (Settings claim, or any AI feature spending
-  // it) between page load and the moment someone actually opens this menu to
-  // check it — refresh right then rather than showing stale data.
-  useEffect(() => {
-    if (!open) return;
+  const loadMe = useCallback(() => {
     fetch("/api/account/me")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) setMe(data);
       })
       .catch(() => {});
-  }, [open]);
+  }, []);
+
+  useEffect(() => {
+    loadMe();
+  }, [loadMe]);
+
+  // Balance can change elsewhere (Settings claim, or any AI feature spending
+  // it) between page load and the moment someone actually opens this menu to
+  // check it — refresh right then rather than showing stale data.
+  useEffect(() => {
+    if (open) loadMe();
+  }, [open, loadMe]);
+
+  // AI Energy purchase bug fix: also refetch the instant a purchase/claim
+  // happens anywhere else in the app, not only when this menu is opened.
+  useAiEnergyRefresh(loadMe);
 
   async function handleLogout() {
     setLoggingOut(true);
