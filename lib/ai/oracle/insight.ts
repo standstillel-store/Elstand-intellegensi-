@@ -21,9 +21,20 @@
 
 import type { ConfluenceResult, ConfluenceFactor } from "./confluenceTypes";
 import type { OracleAssessment } from "./gradingTypes";
+import type { RegimeContext } from "./regime";
+
+const REGIME_LABEL: Record<RegimeContext["type"], string> = {
+  TRENDING_UP: "Trending Up",
+  TRENDING_DOWN: "Trending Down",
+  RANGING: "Ranging",
+  VOLATILE_UNCLEAR: "Volatile / Unclear",
+};
 
 export interface OracleInsight {
+  /** Human-readable line. Phase 7.3B: now sourced from the real classifyMarketRegime() output when available (see `regime` below), falling back to the pre-7.3B structure/microstructure text concat only when the classifier had nothing (e.g. insufficient candles) — kept for backward compatibility with existing consumers of this string field. */
   marketRegime: string;
+  /** Phase 7.3B — structured regime output. Optional/undefined only if the caller didn't pass one in (e.g. an older caller of buildMarketInsight that hasn't been updated). Context only — never fed back into grading. */
+  regime?: RegimeContext;
   primaryScenario: string;
   alternativeScenario: string;
   liquidity: string;
@@ -97,13 +108,20 @@ function factorEvidence(factors: ConfluenceFactor[], source: ConfluenceFactor["s
   return `${f.evidence}${f.quality === "proxy" ? " (proxy)" : ""}`;
 }
 
-export function buildMarketInsight(confluence: ConfluenceResult, assessment: OracleAssessment): OracleInsight {
+export function buildMarketInsight(confluence: ConfluenceResult, assessment: OracleAssessment, regime?: RegimeContext | null): OracleInsight {
   const side = assessment.side;
   const opposite: "LONG" | "SHORT" | null = side === "LONG" ? "SHORT" : side === "SHORT" ? "LONG" : null;
 
   const structureText = factorEvidence(confluence.factors, "market_structure");
   const microText = factorEvidence(confluence.factors, "microstructure");
-  const marketRegime = `${structureText} ${microText !== "Data tidak tersedia." ? microText : ""}`.trim();
+  const structureConcat = `${structureText} ${microText !== "Data tidak tersedia." ? microText : ""}`.trim();
+
+  // Phase 7.3B: prefer the real classifier's own evidence line — it's
+  // already a complete, deterministic sentence (ADX + trend detail) — and
+  // only fall back to the pre-7.3B structure/microstructure concat when no
+  // regime was computed (classifier unavailable/threw) or its own quality
+  // is "unavailable" (e.g. not enough candles for ADX yet).
+  const marketRegime = regime && regime.quality !== "unavailable" ? `${REGIME_LABEL[regime.type]} — ${regime.evidence}` : structureConcat || "Data struktur pasar tidak tersedia.";
 
   const primaryScenario =
     side && assessment.grade !== "NO_TRADE"
@@ -119,7 +137,8 @@ export function buildMarketInsight(confluence: ConfluenceResult, assessment: Ora
       : "Belum ada skenario alternatif signifikan yang terdeteksi dari confluence saat ini.";
 
   return {
-    marketRegime: marketRegime || "Data struktur pasar tidak tersedia.",
+    marketRegime,
+    regime: regime ?? undefined,
     primaryScenario,
     alternativeScenario,
     liquidity: factorEvidence(confluence.factors, "liquidity"),

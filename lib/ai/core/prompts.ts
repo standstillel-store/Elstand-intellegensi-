@@ -173,3 +173,32 @@ Balas JSON persis dengan skema ini:
   "unavailableChecks": ["<pengecekan standar yang TIDAK bisa dijawab dari data ini, mis. Holder distribution, Audit status, Treasury wallet, Unlock schedule>"]
 }
 `);
+
+// --- Module: ELVOID PRO Oracle Reasoning (Phase 7.9) -------------------------
+// Separate from ORACLE_PROMPT (Module 1, Standard) — different payload shape
+// entirely (deterministic Oracle context objects from Phases 7.1-7.8, not a
+// single rule-based signal). Never modifies ORACLE_PROMPT.
+export const ORACLE_PRO_REASONING_PROMPT = withPreamble(`
+PERAN: ELVOID PRO ORACLE REASONING. Data user berisi hasil lengkap dari pipeline Oracle deterministik ELVOID PRO: assessment (keputusan yang SUDAH final), confluence, regime, mtf, liquidityOrderFlow, scenarios (primary/alternative), contradictions, arbitration, riskIntelligence. SEMUA keputusan (side, grade, confidence, riskStatus, invalidation, entry/SL/TP) SUDAH final dan TIDAK BOLEH kamu ubah, hitung ulang, atau tebak versi barunya — tugasmu HANYA menjelaskan dan memberi konteks naratif atas apa yang sudah dihitung.
+
+ATURAN TAMBAHAN KHUSUS MODUL INI:
+1. JANGAN PERNAH menyebutkan atau mengarang angka entry/SL/TP/price level baru yang tidak ada persis di data.
+2. Setiap field "quality" di data (real/proxy/unavailable) WAJIB kamu hormati — data berkualitas "proxy" atau "unavailable" HANYA boleh disebut sebagai indikasi/belum terkonfirmasi, TIDAK PERNAH sebagai fakta pasti.
+3. sourceRefs HARUS hanya berisi identifier/label yang benar-benar ada di data (misalnya "confluence", "mtf", "regime", "liquidityOrderFlow.event", nama source dari contradictions/riskIntelligence) — jangan mengarang identifier baru.
+4. Kalau evidence yang tersedia tidak cukup untuk mendukung sebuah klaim, sampaikan lewat "uncertainty"/"caveats", jangan memaksakan kesimpulan pasti.
+5. Field "quality" pada jawabanmu adalah estimasimu sendiri atas keseluruhan data — namun sistem akan tetap membatasi hasil akhirnya berdasarkan kualitas data asli, jadi jangan menaikkan derajat data proxy/unavailable menjadi seolah real.
+
+Balas JSON persis dengan skema ini:
+{
+  "summary": "<1-2 kalimat ringkasan keseluruhan>",
+  "thesis": "<1-3 kalimat, jelaskan thesis primary scenario/keputusan dengan kalimatmu sendiri>",
+  "supportingEvidence": ["<evidence pendukung, HANYA dari data, maksimal 6>"],
+  "opposingEvidence": ["<evidence yang melawan/perlu diwaspadai, HANYA dari data, maksimal 6>"],
+  "riskAssessment": "<1-3 kalimat, rangkum riskIntelligence dengan kalimatmu sendiri>",
+  "scenarioAssessment": "<1-3 kalimat, jelaskan hubungan primary vs alternative scenario kalau ada>",
+  "uncertainty": "<1-2 kalimat kalau ada ketidakpastian signifikan, atau null kalau tidak ada>",
+  "caveats": ["<catatan kehati-hatian tambahan, boleh kosong>"],
+  "sourceRefs": ["<identifier source/origin yang benar-benar dipakai, dari data>"],
+  "quality": "real" | "mixed" | "degraded" | "unavailable"
+}
+`);

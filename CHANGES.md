@@ -155,3 +155,569 @@ No change to `gradeConfluence()`, `computeConfluence()`, `buildOracleRiskPlan()`
 - "Displacement" is approximated via LTF directional agreement rather than a dedicated magnitude/velocity measure (documented in `mtf.ts`'s own comments).
 - Live `getKlines()` network path is untested in this sandbox (no network access) — only the deterministic relationship-classification logic has fixture coverage. Recommend a manual smoke-test against a live/staging symbol before considering 7.2 fully verified in production.
 - The Phase 7.1 "8 vs 20 factors" terminology question (see note above) remains open and is not addressed by 7.2.
+
+---
+
+## Phase 7.3 — naming clarification
+
+Due to an account/session transition, "Phase 7.3" ended up covering two unrelated pieces of work under one number:
+
+- **Phase 7.3A — ELVOID PRO UI Hierarchy.** Removed the Standard Elvoid AI Signal card from the Elvoid Pro page only (Standard Elvoid AI engine, `/ai-signal`, `/api/ai-signals`, and `lib/elvoid/engine.ts` untouched); promoted the Pro Oracle card to canonical primary; `OraclePanel.tsx` redesigned to surface decision/confidence/Entry/TP/SL/Timeframe/Confluence/Reason/Confirmations/Risk-Invalidation/MTF context. No fabricated TP1/TP2/TP3, no WAIT state introduced. Pro Oracle backend logic itself unchanged in this sub-phase.
+- **Phase 7.3B — Regime-Aware Interpretation** (below). The item the original roadmap label actually meant, and the part that was missing from this repository snapshot.
+
+## Phase 7.3B — Regime-Aware Interpretation
+
+### Why this was discovered missing
+Step 1 audit for Phase 7.4 found `OracleInsight.marketRegime` / `OracleSignalSnapshot.marketRegime` were plain display strings (a concatenation of the market-structure and microstructure confluence factors' evidence text), not the output of any classifier. No `classifyMarketRegime()` existed anywhere in `lib/ai/oracle/`, and grading/confluence had zero regime input. `lib/ai/insights/regime.ts` exists but belongs to the unrelated `lib/ai/insights/engine.ts` subsystem and was deliberately not reused or imported.
+
+### Existing primitives reused (no duplicate math)
+- `lib/elvoid/indicators.ts::detectTrend()` — EMA alignment + swing structure. Same function `mtf.ts`'s `deriveTimeframeSlice()` already calls per timeframe.
+- `lib/elvoid/indicators.ts::calcAdx()` — Wilder's ADX/+DI/-DI, including its own `trendStrength: weak(<20) | developing(20-39) | strong(>=40)` bands.
+- The ADX ≥ 20 "real trend vs. chop" cutoff already established by `adxFactor()` in `lib/elvoid/scanners.ts` — reused verbatim, not re-derived.
+
+### New file: `lib/ai/oracle/regime.ts`
+`classifyMarketRegime(candles, timeframe, mtf?)` — pure function, no fetch:
+
+**Classification rules** (deterministic, bounded):
+1. ADX not computable (`candles.length < 29`, i.e. `calcAdx(14)`'s own `period*2+1` floor) → `VOLATILE_UNCLEAR`, `quality: "unavailable"`.
+2. ADX `< 20` → `RANGING`, regardless of what EMA/swing structure alone suggests. This is what stops a low-ADX chop with a mildly-sloped EMA from being reported as a strong trend.
+3. ADX `>= 20` and `detectTrend()`'s direction agrees with the dominant DI (`uptrend` + `+DI > -DI`, or `downtrend` + `-DI > +DI`) → `TRENDING_UP` / `TRENDING_DOWN`, `strength` = raw ADX value.
+4. ADX `>= 20` but direction and dominant DI disagree (including `detectTrend()` reading `sideways` while ADX indicates a real trend) → `VOLATILE_UNCLEAR`. Two independently-computed reads disagreeing is reported as genuine ambiguity, never forced either way.
+
+**Output schema**
+```
+RegimeContext {
+  type: "TRENDING_UP" | "TRENDING_DOWN" | "RANGING" | "VOLATILE_UNCLEAR"
+  strength: number       // raw ADX (0-100); 0 for RANGING (no "strength of chop" to report)
+  quality: "real" | "proxy" | "unavailable"
+  evidence: string       // ADX values + trend detail, human-readable
+  timeframe: string
+  mtfAlignment: "ALIGNED" | "MIXED" | "UNAVAILABLE"
+}
+```
+
+### MTF interaction
+`computeMtfAlignment()` compares the regime's implied side (`TRENDING_UP` → LONG, `TRENDING_DOWN` → SHORT) against Phase 7.2's already-built `MtfContext.htf`/`.ltf` biases — no new fetch, no new directional decision. `RANGING`/`VOLATILE_UNCLEAR` always report `UNAVAILABLE` (no directional thesis to check alignment against). Any available HTF/LTF slice disagreeing with the regime's side → `MIXED`; all available and agreeing → `ALIGNED`; none available → `UNAVAILABLE`.
+
+### Context-only behavior (unchanged per spec)
+`gradeConfluence()`, `computeConfluence()`, confidence, `dominantSide`, and the risk plan are **not modified**. `regime.ts` is called in `app/api/elvoid-pro/oracle/route.ts` *after* `assessment`/`risk` are already computed, wrapped in try/catch (falls back to `null`), and is passed only into `buildMarketInsight()` and the route's JSON response as a new top-level `regime` field. `OracleInsight.marketRegime` (the pre-existing string field) now sources its text from the real classifier's evidence line when available, falling back to the old structure/microstructure concat only when the classifier returned nothing (or `quality: "unavailable"`) — same field name, same type, backward compatible. A new optional `OracleInsight.regime?: RegimeContext` field carries the structured output.
+
+### Files changed
+- **New:** `lib/ai/oracle/regime.ts`
+- **New:** `scripts/phase7/regime-fixtures.ts`
+- `app/api/elvoid-pro/oracle/route.ts` — added `classifyMarketRegime()` call (try/catch-wrapped) after `mtf` is built; `regime` added to the JSON response; `buildMarketInsight()` now receives it as a third, optional argument.
+- `lib/ai/oracle/insight.ts` — `buildMarketInsight()` gained an optional `regime` parameter; `marketRegime` string now prefers the classifier's evidence text; new optional `regime` field added to `OracleInsight`.
+
+No changes to `lib/elvoid/engine.ts`, `/api/ai-signals`, `lib/ai/oracle/grading.ts`, `lib/ai/oracle/confluence.ts`, or `lib/ai/oracle/risk.ts`.
+
+### Tests (`scripts/phase7/regime-fixtures.ts`, pure/offline)
+1. Clean uptrend + strong ADX → `TRENDING_UP` ✅
+2. Clean downtrend + strong ADX → `TRENDING_DOWN` ✅
+3. Sideways + low ADX → `RANGING` ✅
+4. Directional structure but weak ADX → `RANGING` (not falsely trending) ✅ — required a specially-constructed oscillating-but-drifting synthetic candle series, since ADX measures directional *persistence* rather than magnitude: a monotonic tiny drift alone still saturates ADX toward 100 even at negligible amplitude, so the fixture generator reverses high/low direction bar-to-bar (cancelling +DM/-DM) while keeping a slow net EMA drift.
+5. Insufficient candles for ADX → `VOLATILE_UNCLEAR`, `quality: "unavailable"` ✅
+6. HTF aligned with anchor → `mtfAlignment: "ALIGNED"` ✅
+7. HTF/LTF mixed → `mtfAlignment: "MIXED"` ✅
+8. MTF unavailable (`null`) → `mtfAlignment: "UNAVAILABLE"` ✅
+
+All 8/8 passed. Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/regime-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline (`scripts/phase7/baseline.ts`): identical grade (`NO_TRADE`), side (`null`), confidence (`0`), risk plan, and normalized-evidence counts — unaffected, since `regime.ts` isn't imported by anything in the grading/confluence path.
+- Phase 7.2 MTF fixtures (`scripts/phase7/mtf-fixtures.ts`): all 7/7 still pass unchanged — `mtf.ts` itself was not modified, only consumed (read-only) by the new `regime.ts`.
+- Diff check: only `app/api/elvoid-pro/oracle/route.ts` and `lib/ai/oracle/insight.ts` modified among existing files (both additive), plus the two new files above. `lib/elvoid/engine.ts` and `/api/ai-signals` confirmed byte-identical/untouched.
+
+### Performance
+Zero new network requests. `classifyMarketRegime()` runs against `context.candles` (already fetched by `assembleOracleContext()`) and the `mtf` object (already fetched by Phase 7.2's `buildMtfContext()`), both already resident in memory at the call site in `route.ts`. No new polling, no new cache layer.
+
+### Known limitations
+- `strength` is the raw ADX value (0–100) rather than a normalized 0–100 "confidence" scale of its own — documented, not a separate invented metric.
+- `mtfAlignment` only ever compares against HTF/LTF *bias*, not magnitude/strength of that bias — consistent with `classifyMtfRelationship()`'s own descriptive-only, non-decision nature in `mtf.ts`.
+- `RegimeContext.quality` currently only ever produces `"real"` or `"unavailable"` (never `"proxy"`) — no proxy/degraded regime data source exists yet to justify that value; kept as `OracleDataQuality` for type consistency with the rest of the pipeline in case one is added later.
+- As with Phase 7.2, `tsc --noEmit` / `next build` could not be run against a fully installed `node_modules` in this sandbox (no network for `npm install`); a manual smoke-test of `/api/elvoid-pro/oracle` against a live symbol is recommended before considering 7.3B fully verified in production.
+
+### Phase 7.8 — Risk Intelligence (planning note, preserved)
+Future scope, not started: Entry range + TP1/TP2/TP3 + SL + R:R + invalidation + scenario-dependent targets, replacing the current single entry/SL/TP `OracleRiskPlan`. Depends on Phase 7.5 (Scenario Engine) and Phase 7.7 (Decision Arbitration) landing first, per the dependency chain: 7.4 → 7.5 → 7.6 → 7.7 → 7.8.
+
+---
+
+## Phase 7.4 — Liquidity + Order Flow Intelligence
+
+**Context/evidence generation only. This phase does NOT change the Pro decision** — `computeConfluence()`, `gradeConfluence()`, confidence, `dominantSide`, and `buildOracleRiskPlan()` are all unmodified and untouched by this phase's output.
+
+### Step 1 audit findings
+Before writing anything new, audited what already exists and already feeds `computeConfluence()` in `lib/ai/oracle/confluence.ts`:
+- `smc_ict` factor already runs `scanLiquiditySweep()` (wick pierces a prior swing high/low, closes back beyond it) tied to real `findSwingPoints()` output — a genuine "sweep at a meaningful structural level" detector, not a raw-wick heuristic.
+- `tpo` factor already reads POC/VAH/VAL acceptance/rejection from `ctx.tpo`.
+- `footprint` factor already reads delta ratio + imbalance-cell count.
+- `orderbook` factor already reads live bid/ask depth imbalance.
+- `liquidity` factor already reads a traded-volume high-volume-node "magnet" (tagged `quality: "proxy"`, correctly never claimed as real resting liquidity).
+- `gradingTypes.ts`'s `CLUSTERS` map already groups `footprint`/`orderbook`/`liquidity` into one `"orderflow"` cluster — **Step 10's correlation protection already existed** before this phase; not rebuilt.
+- `lib/elvoid/scanners.ts::scanLiquidityPool()` exists (equal-high/equal-low clustering) but was only wired into **Standard** `lib/elvoid/engine.ts`, never Oracle — reusable read-only.
+
+**What was actually missing** (the real gap this phase fills):
+1. No comparison anywhere between order-flow direction (footprint delta) and what price actually did in response — `footprintFactor()` scores delta magnitude in isolation. No absorption/exhaustion concept existed.
+2. Liquidity sweep was binary (detected / not) — no RECLAIM vs BREAK vs REJECTION distinction once a sweep occurred.
+3. No unified, rankable list of "meaningful market locations" — swing highs/lows, pools, and TPO VAH/VAL/POC existed as separate scattered reads with no common schema for Phase 7.5 to consume.
+
+### New file: `lib/ai/oracle/liquidityOrderFlow.ts`
+Three functions, all pure over the already-assembled `OracleContext` — **zero new fetches**.
+
+#### 1. `buildLiquidityZones(ctx): LiquidityZone[]`
+```
+LiquidityZone {
+  type: "SWING_HIGH" | "SWING_LOW" | "LIQUIDITY_POOL" | "VAH" | "VAL" | "POC"
+  price: number
+  side: "LONG" | "SHORT"        // expected resting-liquidity side
+  strength: number              // 0-10, source-specific
+  source: "swing" | "liquidity_pool" | "tpo"
+  evidence: string
+  quality: "real" | "proxy" | "unavailable"
+  distanceFromPrice: number
+}
+```
+- `SWING_HIGH`/`SWING_LOW`: most recent 5 per side from `findSwingPoints()` (already reused elsewhere in the pipeline).
+- `LIQUIDITY_POOL`: swings clustered using the **same 0.4% tolerance `scanLiquidityPool()` uses internally** (not a new threshold). `scanLiquidityPool()` itself is still called and its bias/weight/text folded into the matching zone's evidence — it just can't supply a numeric price on its own (`ScanResult` has no price field), so the clustering step is re-expressed locally over already-computed `SwingPoint[]`, not re-deriving the swing detection itself.
+- `VAH`/`VAL`/`POC`: read directly off `ctx.tpo`'s last session — zero extra computation.
+- Deduplication: overlapping zones within `0.5x ATR(14)` (the same ATR series `smcIctFactor()` already computes) are merged, keeping the higher-strength zone and noting the overlap in its evidence rather than emitting near-duplicate entries.
+- Insufficient candles (`< 20`) → empty array, never fabricated zones.
+
+#### 2. `classifyLiquidityEvent(ctx): LiquidityEvent`
+```
+LiquidityEvent {
+  type: "SWEEP" | "RECLAIM" | "BREAK" | "REJECTION" | "NO_CLEAR_EVENT"
+  side: "LONG" | "SHORT" | null
+  level: number | null
+  evidence: string
+  quality: "real" | "unavailable"
+}
+```
+`scanLiquiditySweep()` is reused as the sole trigger (replayed against the last few candle slices to find the most recent trigger candle, without altering its own logic). What's new: inspecting the `FOLLOW_THROUGH_CANDLES = 3` candles *after* that trigger:
+- Holds beyond the level **and** meaningfully continues (`> 0.3x ATR` net move) → `BREAK` (acceptance/continuation, not a reversal).
+- Holds beyond the level without strong continuation → `RECLAIM`.
+- Fails to hold, closes back through the level → `REJECTION`.
+- Sweep found but fewer than 3 follow-through candles exist yet → `SWEEP` (reported honestly as unconfirmed, never forced into one of the above).
+- No sweep trigger found at all → `NO_CLEAR_EVENT`.
+
+#### 3. `buildOrderFlowPriceResponse(ctx): OrderFlowPriceResponse`
+The core new analytical primitive — genuinely does not exist elsewhere.
+```
+OrderFlowPriceResponse {
+  interpretation: "BUYING_PRESSURE" | "SELLING_PRESSURE" | "ABSORPTION" | "EXHAUSTION" | "NO_CLEAR_FLOW"
+  deltaDirection: "buy" | "sell" | "neutral"
+  deltaMagnitude: number
+  priceDisplacement: number
+  evidence: string
+  quality: "real" | "unavailable"
+}
+```
+Compares footprint delta over the same `OBSERVATION_WINDOW = 5` candles `footprintFactor()` already uses against actual price displacement over the exact same candle window (matched by timestamp):
+- Delta ratio `< 0.05` (footprintFactor()'s own "near-balanced" cutoff) → `NO_CLEAR_FLOW`.
+- Delta direction confirmed by displacement `> 0.5x ATR` in the same direction → `BUYING_PRESSURE`/`SELLING_PRESSURE`.
+  - Within that, if the later half of the window's delta collapses to `< 40%` of the earlier half despite price having already extended → `EXHAUSTION` instead (flow losing effectiveness after the move, not still building).
+- Delta confirmed direction but displacement `<= 0.5x ATR` or opposite → `ABSORPTION` (flagged as "potential", never asserted as certain).
+- Missing/insufficient footprint or candle data → `NO_CLEAR_FLOW`, `quality: "unavailable"`.
+
+All thresholds (`0.5x ATR`, the `0.05` delta-ratio cutoff, the `0.4%` pool tolerance) are reused from existing conventions already in `confluence.ts`/`scanners.ts`/`regime.ts` — none invented new for this phase.
+
+### Evidence quality handling
+`liquidity` zones stay `quality: "real"` when sourced from swings/TPO (both built off real candles) — the existing `proxy` tag on the *confluence* liquidity-volume-map factor is untouched and not conflated with this new zone list, which is swing/pool/TPO-derived, not traded-volume-derived. Nothing here upgrades a proxy read into a real one.
+
+### Oracle response wiring
+`app/api/elvoid-pro/oracle/route.ts`: calls `buildLiquidityOrderFlowContext(context)` after `assessment`/`risk`/`insight` are already computed, wrapped in try/catch (falls back to `null` on any failure, same pattern as `regime` in 7.3B), and returned as a new sibling `liquidityOrderFlow` field: `{ zones, event, priceResponse }`. Not read by `computeConfluence()`, `gradeConfluence()`, `insight.ts`, or `risk.ts` — kept fully separate per spec.
+
+### Files changed / added
+- **New:** `lib/ai/oracle/liquidityOrderFlow.ts`
+- **New:** `scripts/phase7/liquidity-orderflow-fixtures.ts`
+- `app/api/elvoid-pro/oracle/route.ts` — added the wiring block above.
+
+No changes to `lib/ai/oracle/confluence.ts`, `grading.ts`, `gradingTypes.ts`, `risk.ts`, `execute.ts`, `insight.ts`, `mtf.ts`, `regime.ts`, `lib/elvoid/engine.ts`, or `/api/ai-signals`.
+
+### Tests (`scripts/phase7/liquidity-orderflow-fixtures.ts`, pure/offline, real builders)
+Uses the actual `buildFootprintByCandle()`/`buildTpoSessions()` builders (same functions `dataAdapters.ts` calls) against synthetic candles/trades — not hand-mocked Maps — so fixtures exercise the real integration.
+
+**Zones:** swing liquidity ✅, pool liquidity (2 equal highs cluster) ✅, VAH/VAL/POC from TPO ✅, overlapping/duplicate levels dedupe ✅, unavailable source (insufficient candles → 0 zones) ✅.
+**Events:** sweep+reclaim ✅, sweep+break/continuation ✅, rejection after failed follow-through ✅, insufficient follow-through (reports plain `SWEEP`, not forced) ✅, no sweep → `NO_CLEAR_EVENT` ✅.
+**Price response:** positive delta + positive displacement → `BUYING_PRESSURE` ✅, negative delta + negative displacement → `SELLING_PRESSURE` ✅, positive delta + weak/no displacement → `ABSORPTION` ✅, negative delta + opposite displacement → `ABSORPTION` ✅, insufficient footprint → `NO_CLEAR_FLOW` ✅, balanced/conflicting delta → `NO_CLEAR_FLOW` ✅.
+
+**16/16 passed.** Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/liquidity-orderflow-fixtures.ts`
+
+Note: constructing the "varied swing prices" fixture required a deterministic drift+oscillation candle generator rather than a simple alternating zig-zag — a plain periodic zig-zag produces swing highs/lows within the same 0.4% pool tolerance of each other, collapsing everything into one `LIQUIDITY_POOL` zone after dedup rather than exercising distinct `SWING_HIGH`/`SWING_LOW`/`VAH`/`VAL`/`POC` types. Documented in the fixture file itself.
+
+### Regression
+- Phase 7.1 baseline: identical (`NO_TRADE`/`null`/`0`/unchanged risk plan/8 normalized factors).
+- Phase 7.2 MTF fixtures: 7/7 still pass, unchanged.
+- Phase 7.3B regime fixtures: 8/8 still pass, unchanged.
+- Diff check: only `app/api/elvoid-pro/oracle/route.ts` modified among existing files (additive), plus the two new files above. `lib/elvoid/engine.ts` and `/api/ai-signals` confirmed untouched.
+
+### Standard Elvoid AI
+Untouched. `scanLiquidityPool()` and `scanLiquiditySweep()` are imported **read-only** from `lib/elvoid/scanners.ts` — that file itself was not modified, and `lib/elvoid/engine.ts` (which also calls `scanLiquidityPool()` for Standard signals) was not touched at all.
+
+### Performance
+Zero new network requests. All three functions operate on `context.candles`, `context.tpo`, and `context.footprint` — already fetched/built once per request by Phase 1's `assembleOracleContext()`. No new polling, no new cache layer.
+
+### Known limitations
+- `LIQUIDITY_POOL` zones only surface pools built from swing clustering (≥2 touches within 0.4%) — does not yet incorporate FVG edges or Order Block edges as zone types (spec listed these as "possible", not required); deferred since `smcIctFactor()`'s FVG/OB scanners don't currently expose numeric zone prices any more than `scanLiquidityPool()` does for pools — would need the same "expose price" treatment as pools got here if added later.
+- `classifyLiquidityEvent()` only ever classifies the single most recent sweep trigger within its lookback window, not a full history of all sweeps in the candle series.
+- `EXHAUSTION` detection (delta collapsing in the second half of the observation window) is a bounded heuristic (`<40%` of the earlier half), not a formal statistical test — documented in code comments as conservative/directional evidence, not a certainty claim, consistent with `ABSORPTION`'s own "potential, not asserted" framing.
+- As with 7.2/7.3B, `tsc --noEmit`/`next build` could not run against a fully installed `node_modules` in this sandbox (no network for `npm install`) — recommend a live smoke-test of `/api/elvoid-pro/oracle` against a real symbol before considering 7.4 fully verified in production.
+
+---
+
+## Phase 7.5 — Scenario Engine
+
+**Context/evidence generation only. Does NOT change the Pro decision** — `computeConfluence()`, `gradeConfluence()`, confidence, `dominantSide`, and `buildOracleRiskPlan()` are all unmodified. PRIMARY's direction always follows the already-decided `assessment.side`; this phase never re-decides direction.
+
+### Step 1 audit findings
+Scenario-shaped fields already existed but were shallow presentation strings, not a real model:
+- `insight.primaryScenario`/`alternativeScenario` (`insight.ts`) **already existed** — `primaryScenario` was just `` `${side}: ${top 3 supportingEvidence}` ``; `alternativeScenario` was either `confluence.contradictions` text or leftover opposite-side firing text. Neither had a trigger, its own invalidation, or regime/MTF compatibility.
+- `assessment.invalidation` (`grading.ts::buildInvalidation()`) **already existed** — a single string from either the TPO or market-structure factor's evidence for the graded side. Generic, never referenced Phase 7.4's liquidity events (didn't exist yet when written).
+- `detectPatterns()` (`insight.ts`) already does real conditional logic (2+ markers must co-occur) but produces a label, not a scenario with trigger/invalidation.
+- Conclusion: scenario logic can consume `assessment`/`confluence`/`regime`/`mtf`/`liquidityOrderFlow` directly — all already computed in `route.ts` before any scenario stage, zero refetch.
+
+### New file: `lib/ai/oracle/scenario.ts`
+`buildScenarios(assessment, confluence, regime?, mtf?, liquidityOrderFlow?): ScenarioContext` — pure, zero new fetch, zero new scoring.
+
+```
+Scenario {
+  id, role: PRIMARY|ALTERNATIVE, direction: LONG|SHORT
+  thesis: string
+  supportingEvidence: { source, detail }[]   // detail copied verbatim from the originating module
+  opposingEvidence: { source, detail }[]
+  trigger: string
+  invalidation: string
+  strength: number                            // 0-100, readout of assessment.confidence — never independently scored
+  regimeCompatibility: COMPATIBLE | REQUIRES_STRONGER_EVIDENCE | DEGRADED
+  mtfCompatibility: ALIGNED | MIXED | UNAVAILABLE
+}
+ScenarioContext { primary: Scenario|null, alternative: Scenario|null, contextQuality: real|mixed|degraded|insufficient, note? }
+```
+
+**PRIMARY** — built only when `assessment.grade !== "NO_TRADE"` and `assessment.side` exists; direction is always `assessment.side`, never re-decided. Supporting evidence = `assessment.supportingEvidence` + any Phase 7.4 liquidity event/price-response signal that agrees directionally (including a REJECTION of the *opposite* side's failed sweep, which is itself mean-reversion support for this side). Trigger/invalidation reuse `assessment.invalidation` verbatim, enriched with the actual swept level from `liquidityOrderFlow.event.level` when it exists and matches direction — no new numeric level is ever invented.
+
+**ALTERNATIVE** — only constructed when genuine opposing evidence exists: confluence contradictions, an MTF relationship indicating LTF/HTF disagreement (`PULLBACK_IN_*`, `CONTINUATION_AFTER_PULLBACK_*`, `HTF_THESIS_THREATENED_*`), an opposing liquidity event (RECLAIM/BREAK/REJECTION on the other side), or order-flow ABSORPTION/EXHAUSTION of the primary's own supporting delta. If none found → `alternative: null`, never forced to fill a slot. Its supporting evidence is exactly the opposing signals found; its opposing evidence mirrors the primary's supporting evidence (each side genuinely opposes the other, not two independently invented lists). Wording distinguishes "Pullback within HTF structure" (when the signal is an MTF pullback relationship) from "Rejection/mean-reversion" (when it's a REJECTION event) from a plain "Reversal" label otherwise. `strength` is a conservative fraction of `assessment.confidence` (30-60% depending on how many independent opposing signals exist) — a competing minority hypothesis by construction, never an independent score.
+
+**Compatibility mappings** (deterministic, table-driven):
+- `regimeCompatibility`: no regime/`quality:"unavailable"` → `DEGRADED`. `VOLATILE_UNCLEAR` → always `DEGRADED`. `RANGING` → `REQUIRES_STRONGER_EVIDENCE` unless the scenario is backed by a REJECTION-of-the-opposite-side event (mean-reversion-flavored) → `COMPATIBLE`. `TRENDING_UP`/`TRENDING_DOWN` → `COMPATIBLE` when the scenario's direction agrees with the trend, else `REQUIRES_STRONGER_EVIDENCE`.
+- `mtfCompatibility`: reuses Phase 7.3B's alignment check directly — `regime.ts` now exports `mtfAlignmentForSide(desired, mtf)` (the same logic `classifyMarketRegime()`'s internal `computeMtfAlignment()` already used, refactored to accept an explicit LONG/SHORT side rather than only the regime's own trend direction) so the ALTERNATIVE's alignment (a direction the regime itself doesn't necessarily point at) can be checked without duplicating the comparison. 7.3B fixtures re-run and confirmed byte-identical behavior after this refactor.
+
+### Oracle response wiring
+`app/api/elvoid-pro/oracle/route.ts`: calls `buildScenarios(assessment, confluence, regime, mtf, liquidityOrderFlow)` after all of those are already computed, wrapped in try/catch (falls back to `null`, same pattern as regime/liquidityOrderFlow), returned as a new sibling `scenarios` field. Not read by `computeConfluence()`, `gradeConfluence()`, `insight.ts`, or `risk.ts`.
+
+### Files changed / added
+- **New:** `lib/ai/oracle/scenario.ts`
+- **New:** `scripts/phase7/scenario-fixtures.ts`
+- `lib/ai/oracle/regime.ts` — exported `mtfAlignmentForSide()` (extracted from the existing private `computeMtfAlignment()`, behavior-preserving refactor, re-verified against all 8 Phase 7.3B fixtures).
+- `app/api/elvoid-pro/oracle/route.ts` — added the wiring block above.
+
+No changes to `confluence.ts`, `grading.ts`, `gradingTypes.ts`, `risk.ts`, `execute.ts`, `insight.ts`, `mtf.ts`, `liquidityOrderFlow.ts`'s own logic, `lib/elvoid/engine.ts`, or `/api/ai-signals`.
+
+### Tests (`scripts/phase7/scenario-fixtures.ts`, pure/offline, hand-typed fixtures)
+Covers all 10 requested cases plus 2 extra (no-forced-alternative, verbatim evidence traceability) — **12/12 passed**: bullish continuation, bearish continuation, bullish sweep+reclaim (trigger/invalidation reference the real level), bearish sweep+reclaim, sweep+opposing BREAK → alternative created referencing the real level, HTF bullish+LTF pullback → SHORT "Pullback" alternative (not worded as a full reversal), HTF bearish+LTF pullback → LONG pullback alternative, ranging market (plain continuation → `REQUIRES_STRONGER_EVIDENCE`; REJECTION-backed → `COMPATIBLE`), volatile/unclear → `DEGRADED`, `NO_TRADE` → `{primary:null, alternative:null, contextQuality:"insufficient"}`.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/scenario-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline: identical.
+- Phase 7.2 MTF fixtures: 7/7 unchanged.
+- Phase 7.3B regime fixtures: 8/8 unchanged (re-verified after the `mtfAlignmentForSide()` refactor).
+- Phase 7.4 liquidity/order-flow fixtures: 16/16 unchanged.
+- Diff check: only `app/api/elvoid-pro/oracle/route.ts` and `lib/ai/oracle/regime.ts` modified among existing files (both additive/refactor-only), plus the two new files above. `lib/elvoid/engine.ts` and `/api/ai-signals` confirmed untouched.
+
+### Standard Elvoid AI
+Untouched — `scenario.ts` imports only from other `lib/ai/oracle/*` modules (all already Oracle-only), never from `lib/elvoid/engine.ts`.
+
+### Performance
+Zero new network requests. Operates entirely on `assessment`/`confluence`/`regime`/`mtf`/`liquidityOrderFlow`, all already computed once per request earlier in `route.ts`.
+
+### Known limitations
+- Only ever produces at most one PRIMARY and one ALTERNATIVE (not a ranked list of N competing scenarios) — matches the spec's illustrative example shape; a richer N-scenario model is left for a later phase if needed.
+- `regimeCompatibility`'s RANGING/mean-reversion detection only recognizes a REJECTION liquidity event as "mean-reversion-flavored" — it does not yet consider TPO value-area rejection or order-book-imbalance-based mean-reversion signals as alternate mean-reversion evidence.
+- `strength`'s minority-hypothesis fraction (30-60% of primary confidence) is a documented, bounded heuristic, not a calibrated probability.
+- As with prior 7.x sub-phases, `tsc --noEmit`/`next build` could not run against a fully installed `node_modules` in this sandbox (no network for `npm install`) — recommend a live smoke-test of `/api/elvoid-pro/oracle` before considering 7.5 fully verified in production.
+
+---
+
+## Phase 7.6 — Contradiction Classifier
+
+**Reclassification layer only. Does NOT change the Pro decision** — `computeConfluence()` and `gradeConfluence()` are unmodified in behavior (only one internal function in `grading.ts` was extracted/exported, verified behavior-identical via regression). `hasUnresolvedGenuineContradiction` is a descriptive readout, never written back into `assessment`/grading.
+
+### Step 1 audit findings
+- `detectContradictions()` (`confluence.ts`, Phase 2) already existed but only detected two shapes: single-factor internal ambiguity, and **one hardcoded pair** (`market_structure` vs `footprint`). No general cross-source detection.
+- `crossSourceContradictionStrength()`/`hasInternalAmbiguity()` (`grading.ts`) already consume that list to cap the grade — grading-critical, left untouched (only refactored for reuse, see below).
+- **`lib/ai/oracle/mtf.ts` contained an explicit, literal forward-reference**: `HTF_THESIS_THREATENED_*`'s own evidence string ends with "Belum diklasifikasikan sebagai invalidasi penuh (lihat Contradiction Classifier, Phase 7.6)" — a real, evidenced signal (protective level actually broken + LTF actually confirms) that was deliberately left unclassified until now.
+- `scenario.ts::collectOpposingSignals()` (Phase 7.5) already aggregates opposing evidence from confluence/mtf/liquidityOrderFlow into `scenarios.primary.opposingEvidence`, but as a flat list with no severity/genuineness tagging of its own.
+
+### New file: `lib/ai/oracle/contradiction.ts`
+`classifyContradictions(confluence, assessment, mtf?, scenarios?): ContradictionReport` — pure reclassification, reuses rather than re-detects.
+
+```
+ClassifiedContradiction {
+  description: string        // verbatim from the originating module
+  sources: ConfluenceSource[]
+  severity: LOW | MODERATE | HIGH
+  genuineness: GENUINE | DATA_GAP | SAME_CLUSTER
+  origin: confluence | mtf_thesis_threatened | scenario_opposing_evidence
+}
+ContradictionReport { contradictions: ClassifiedContradiction[], hasUnresolvedGenuineContradiction: boolean }
+```
+
+- **Severity** reuses `grading.ts`'s own severe(>8)/moderate(3-8) thresholds verbatim via a newly-**exported** `contradictionMagnitude()` (extracted from the previously-private `crossSourceContradictionStrength()`, which now just loops and calls it — behavior-identical, re-verified via full regression) — no competing severity scale introduced.
+- **Genuineness** is computed independently of severity, per constraint: `DATA_GAP` when any involved factor's `quality !== "real"`; `SAME_CLUSTER` when all involved sources map to the same `CLUSTERS` group (reused from `grading.ts`, not redefined) but the disagreement is still real and keeps whatever severity its magnitude earns; otherwise `GENUINE`.
+- **HTF-threatened resolution**: only classified (`HIGH`/`GENUINE`) when `mtf.relationship` is `HTF_THESIS_THREATENED_BULLISH`/`_BEARISH` **and** `assessment.side` matches the threatened bias — a threat to the side that isn't even being traded is not surfaced. `classifyMtfRelationship()` itself already verified the broken protective level and LTF confirmation before assigning this relationship; this function only checks whether it applies to the traded side.
+- **Deduplication**: keyed on sorted `sources` + exact `description` text (not `origin`), so the same underlying conflict surfacing via both `confluence.contradictions` and `scenarios.primary.opposingEvidence` collapses to one entry.
+
+### Oracle response wiring
+`app/api/elvoid-pro/oracle/route.ts`: calls `classifyContradictions(confluence, assessment, mtf, scenarios)` after all four are already computed, wrapped in try/catch (falls back to `null`, same pattern as prior sub-phases), returned as a new sibling `contradictions` field.
+
+### Files changed / added
+- **New:** `lib/ai/oracle/contradiction.ts`
+- **New:** `scripts/phase7/contradiction-fixtures.ts`
+- `lib/ai/oracle/grading.ts` — extracted and exported `contradictionMagnitude()` from the previously-private `crossSourceContradictionStrength()` (pure refactor, zero behavior change, confirmed via 7.1 baseline regression).
+- `app/api/elvoid-pro/oracle/route.ts` — added the wiring block above.
+
+No changes to `confluence.ts`, `gradingTypes.ts`, `risk.ts`, `execute.ts`, `insight.ts`, `mtf.ts`'s own logic, `regime.ts`, `scenario.ts`'s own logic, `lib/elvoid/engine.ts`, or `/api/ai-signals`.
+
+### Tests (`scripts/phase7/contradiction-fixtures.ts`, pure/offline, hand-typed fixtures) — 8/8 passed
+Genuine cross-source (different clusters, both real) → `GENUINE`/`HIGH`; same-cluster disagreement → `SAME_CLUSTER` genuineness while severity independently stays `HIGH` (proving the two axes don't collapse into each other); data-gap (one side `proxy`) → `DATA_GAP`; HTF-threatened matching the traded side → `HIGH`/`GENUINE`, and **not** classified when the threat is on the side that isn't even being traded; the same conflict surfacing via both `confluence.contradictions` and scenario opposing evidence → deduplicates to exactly 1 entry; no contradictions → empty report; internal single-factor ambiguity → fixed `LOW` severity, excluded from `hasUnresolvedGenuineContradiction`.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/contradiction-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline: identical.
+- Phase 7.2 MTF fixtures: 7/7 unchanged.
+- Phase 7.3B regime fixtures: 8/8 unchanged.
+- Phase 7.4 liquidity/order-flow fixtures: 16/16 unchanged.
+- Phase 7.5 scenario fixtures: 12/12 unchanged.
+- Diff check: only `app/api/elvoid-pro/oracle/route.ts` and `lib/ai/oracle/grading.ts` (extract-only refactor) modified among existing files, plus the two new files above. `lib/elvoid/engine.ts` and `/api/ai-signals` confirmed untouched.
+
+### Standard Elvoid AI
+Untouched — `contradiction.ts` only imports from other `lib/ai/oracle/*` modules.
+
+### Performance
+Zero new network requests. Pure over `confluence`/`assessment`/`mtf`/`scenarios`, all already computed once per request.
+
+### Known limitations
+- Only `scenarios.primary.opposingEvidence` entries whose `source === "confluence"` are folded in and deduplicated against `confluence.contradictions`; `mtf`/`liquidityOrderFlow`-sourced opposing-evidence entries in `scenarios` are intentionally left for the caller to read directly off the `scenarios` field rather than re-wrapped here, since they aren't duplicates of anything in `confluence.contradictions` to begin with and forcing them through the same `ConfluenceSource[]`-shaped `sources` field would require inventing a source mapping that doesn't cleanly exist.
+- `fromMtfThreat()` always attributes `sources: ["market_structure"]` for the HTF-threatened case, since that's the real underlying cluster (HTF/LTF structure), even though the specific factor object involved isn't literally one row in `confluence.factors` — documented as a deliberate cluster-level attribution, not a literal factor reference.
+- As with prior 7.x sub-phases, `tsc --noEmit`/`next build` could not run against a fully installed `node_modules` in this sandbox (no network for `npm install`) — recommend a live smoke-test of `/api/elvoid-pro/oracle` before considering 7.6 fully verified in production.
+
+---
+
+## Phase 7.7 — Decision Arbitration
+
+**Annotation only. `gradeConfluence()` remains the sole canonical authority** for `side`/`grade`/`confidence`/`riskStatus` — this phase never recomputes, overrides, or feeds back into it. Fixture 10 explicitly asserts `assessment` is byte-identical before/after arbitration.
+
+### Step 1 audit findings (from the prior approved audit turn)
+- `gradeConfluence()` (`grading.ts`) is the sole point where the decision becomes authoritative — called once in `route.ts`, consumed directly by `execute.ts` for real paper-trade execution.
+- No arbitration-like logic existed anywhere; the only reference was `mtf.ts`'s own forward-pointing comment naming "Phase 7.7 Decision Arbitration" as the future consumer of its context.
+- All of Phases 7.3B–7.6's outputs (`regime`, `mtf`, `scenarios`, `contradictions`) were already additive siblings in the route response, never written back into grading — the same discipline continues here.
+
+### New file: `lib/ai/oracle/arbitration.ts`
+`arbitrateDecision(assessment, regime?, mtf?, scenarios?, contradictions?): DecisionArbitration` — pure, read-only.
+
+```
+DecisionArbitration {
+  canonicalSide, canonicalGrade          // direct copies of assessment fields, never recomputed
+  alignment: NOT_APPLICABLE | CONFLICTED | UNSUPPORTED_CONTEXT | SUPPORTED_WITH_CAUTION | STRONGLY_SUPPORTED
+  reasons: string[]
+  hasUnresolvedGenuineContradiction, regimeCompatibility, mtfCompatibility, hasAlternativeScenario
+  alternativeIsActiveOpposition: boolean
+  caveat: string | null
+}
+```
+
+**Precedence (checked in this exact order, per spec):**
+1. `assessment.grade === "NO_TRADE"` → `NOT_APPLICABLE`.
+2. `contradictions.hasUnresolvedGenuineContradiction` → `CONFLICTED` — wins even when regime/MTF/scenario are otherwise fully compatible (fixture 9).
+3. Missing `regime`/`mtf`/`scenarios`, or `regimeCompatibility` `DEGRADED`/unavailable, or `mtfCompatibility` `UNAVAILABLE` → `UNSUPPORTED_CONTEXT`.
+4. `regimeCompatibility === "REQUIRES_STRONGER_EVIDENCE"`, or `mtfCompatibility === "MIXED"`, or an alternative scenario exists **and is active opposition** → `SUPPORTED_WITH_CAUTION`.
+5. Otherwise → `STRONGLY_SUPPORTED`.
+
+**Adjustment implemented — contingency vs. active-opposition alternatives:** `scenarios.alternative !== null` does **not** automatically downgrade alignment. `isActiveOpposition()` reuses only fields `scenario.ts` already computed — each `ScenarioEvidenceRef.source` on the alternative's own `supportingEvidence` (the exact opposing signals that seeded it) plus `mtf.relationship`:
+- If every seeding signal came from `mtf` **and** the relationship is an ordinary pullback (`PULLBACK_IN_UPTREND`/`PULLBACK_IN_DOWNTREND`) → **contingency**, does not downgrade (fixture 7: `STRONGLY_SUPPORTED` despite a live alternative).
+- Any confluence-contradiction-sourced signal, any liquidityOrderFlow-sourced signal, or an `mtf`-sourced signal that is `HTF_THESIS_THREATENED_*` (already Phase 7.6's own `HIGH`/`GENUINE` case) → **active opposition**, downgrades to `SUPPORTED_WITH_CAUTION` (fixtures 5 and 6).
+
+No new opposing-signal detector was written — this is purely a classification of which existing evidence type produced the alternative.
+
+### Oracle response wiring
+`app/api/elvoid-pro/oracle/route.ts`: calls `arbitrateDecision(assessment, regime, mtf, scenarios, contradictions)` after all four are already computed, wrapped in try/catch (falls back to `null`, same pattern as every prior sub-phase), returned as a new sibling `arbitration` field. `execute.ts`'s Execute Signal path is untouched — it still reads `OracleAssessment` directly, exactly as before.
+
+### Files changed / added
+- **New:** `lib/ai/oracle/arbitration.ts`
+- **New:** `scripts/phase7/arbitration-fixtures.ts`
+- `app/api/elvoid-pro/oracle/route.ts` — added the wiring block above.
+
+No changes to `grading.ts`, `confluence.ts`, `gradingTypes.ts`, `risk.ts`, `execute.ts`, `insight.ts`, `mtf.ts`, `regime.ts`, `liquidityOrderFlow.ts`, `scenario.ts`, `contradiction.ts`, `lib/elvoid/engine.ts`, or `/api/ai-signals`.
+
+### Tests (`scripts/phase7/arbitration-fixtures.ts`, pure/offline, hand-typed fixtures) — 10/10 passed
+`NO_TRADE` → `NOT_APPLICABLE`; unresolved genuine contradiction → `CONFLICTED`; missing regime / `DEGRADED` regimeCompatibility → `UNSUPPORTED_CONTEXT`; `REQUIRES_STRONGER_EVIDENCE`/`MIXED` → `SUPPORTED_WITH_CAUTION`; active-opposition alternative (confluence-sourced, and separately HTF-threatened-sourced) → `SUPPORTED_WITH_CAUTION`; **ordinary-pullback-only alternative → `STRONGLY_SUPPORTED`, confirming the adjustment**; fully aligned with no alternative → `STRONGLY_SUPPORTED`; precedence check (`CONFLICTED` wins over an otherwise-compatible context); and a direct mutation check confirming `assessment` is byte-identical before/after.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/arbitration-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline: identical.
+- Phase 7.2 MTF fixtures: 7/7 unchanged.
+- Phase 7.3B regime fixtures: 8/8 unchanged.
+- Phase 7.4 liquidity/order-flow fixtures: 16/16 unchanged.
+- Phase 7.5 scenario fixtures: 12/12 unchanged.
+- Phase 7.6 contradiction fixtures: 8/8 unchanged.
+- Diff check: only `app/api/elvoid-pro/oracle/route.ts` modified among existing files, plus the new file above. `lib/elvoid/engine.ts` and `/api/ai-signals` confirmed untouched.
+
+### Standard Elvoid AI
+Untouched — `arbitration.ts` only imports from other `lib/ai/oracle/*` modules; `execute.ts`'s Execute Signal path was not modified.
+
+### Performance
+Zero new network requests. Pure over `assessment`/`regime`/`mtf`/`scenarios`/`contradictions`, all already computed once per request.
+
+### Known limitations
+- `alignment` is a 5-tier descriptive readout, not a numeric confidence-of-confidence score — deliberately, per the spec's own emphasis on annotation over a second scoring engine.
+- The contingency-vs-active-opposition rule currently only distinguishes by evidence *source type* (mtf-pullback-only vs. everything else) — it does not weigh how many opposing signals exist or their individual strength; documented as a binary classification, not a graded one.
+- As with prior 7.x sub-phases, `tsc --noEmit`/`next build` could not run against a fully installed `node_modules` in this sandbox (no network for `npm install`) — recommend a live smoke-test of `/api/elvoid-pro/oracle` before considering 7.7 fully verified in production.
+
+---
+
+## Phase 7.8 — Risk Intelligence
+
+**Descriptive annotation only. Does NOT change the risk plan or grading** — `gradeConfluence()`, `assessment.side`/`.grade`/`.confidence`/`.riskStatus`, `risk.ts`, and `execute.ts` are all unmodified. `overall` is a plain `RiskSeverity` readout, never an execution gate, confidence adjustment, or hidden second grading engine. Fixture 11 directly asserts every input object is byte-identical before/after.
+
+### Audit summary (from the prior approved audit turn)
+- The only existing risk gate anywhere is `evaluateRisk()` in `grading.ts` (R:R `< 1` → `"invalid"`), consumed solely by `execute.ts`'s `riskStatus !== "valid"` check. No volatility classification, invalidation-distance measurement, or liquidity-proximity check existed anywhere.
+- **Scope discrepancy flagged and resolved per your instruction**: the Phase 7.3B `CHANGES.md` planning note described a heavier TP1/TP2/TP3 + entry-range redesign of `OracleRiskPlan` itself — explicitly deferred, **not** implemented here. This phase is the additive interpretation layer only, consistent with constraint 9.
+- No literal "Phase 7.8" forward-reference existed in code (unlike 7.6/7.7) beyond that self-authored planning note.
+
+### New file: `lib/ai/oracle/riskIntelligence.ts`
+`buildRiskIntelligence(context, risk, side, regime?, scenarios?, contradictions?, arbitration?, liquidityOrderFlow?): RiskIntelligence` — pure, read-only, zero new fetch.
+
+```
+RiskFactor { kind: STRUCTURAL|VOLATILITY|LIQUIDITY_PROXIMITY|CONTRADICTION|SCENARIO|CONTEXT, severity: LOW|MODERATE|HIGH, evidence, quality: real|proxy|unavailable, source }
+RiskIntelligence {
+  overall: RiskSeverity            // descriptive only — never an execution gate
+  factors: RiskFactor[]
+  invalidationDistanceAtr: number | null
+  liquidityProximity: { nearestOpposingZone, withinRiskZone } | null
+  contextQuality: real | mixed | degraded | insufficient
+}
+```
+
+**Two new calculations, both reusing the existing 0.5x ATR convention** already established twice in `liquidityOrderFlow.ts` (zone-dedup radius, "meaningful price move" cutoff) — no new threshold invented:
+- `invalidationDistanceAtr = |entry - stopLoss| / ATR(14)`. `< 0.5x` → `STRUCTURAL` `HIGH`; `< 1x` → `STRUCTURAL` `MODERATE`.
+- `liquidityProximity`: checks whether `risk.stopLoss`/`.takeProfit` sits within `0.5x ATR` of a **real-quality, opposing-side** `LiquidityZone` (Phase 7.4) — only real zones count, proxy zones never produce this factor (fixture 9).
+
+**One additional reused-not-invented convention added this phase**: `MIN_CANDLES_FOR_RELIABLE_ATR = 29`, the exact same `period*2+1` minimum already established as `MIN_CANDLES_FOR_ADX` in `regime.ts` (both `atr()` and `calcAdx()` are `EMA(14)`-based) — needed because `atr()`'s own EMA still returns a non-zero number well before it has enough samples to be reliable, so `atrValue <= 0` alone can't detect "insufficient history" (caught by fixture 3 on first run, fixed by reusing this precedent rather than inventing a new number).
+
+**Everything else is a reclassification of already-computed verdicts, zero new detection**:
+- `CONTRADICTION` factor ← `contradictions.hasUnresolvedGenuineContradiction` + the report's own `GENUINE`/non-`LOW` entries and their severities.
+- `SCENARIO` factor ← `arbitration.alternativeIsActiveOpposition` (Phase 7.7) — only produced when the alternative is real active opposition, not a mere contingency, fixed `MODERATE`.
+- `CONTEXT` factor ← `arbitration.alignment`: `CONFLICTED` → `HIGH`; `UNSUPPORTED_CONTEXT` → `MODERATE`, `quality: "unavailable"` (missing context is never treated as confirmed danger); `SUPPORTED_WITH_CAUTION`/`STRONGLY_SUPPORTED` → no `CONTEXT` factor (fixture 8 confirms a merely-cautious-but-not-conflicted arbitration doesn't manufacture one).
+
+**Aggregation rule (`overall`)**: only `REAL`-quality factors can drive `overall` to `HIGH`; a `proxy`/`unavailable`-quality factor is capped at contributing `MODERATE` at most — per constraint 7, missing/proxy data never manufactures confirmed risk.
+
+### Oracle response wiring
+`app/api/elvoid-pro/oracle/route.ts`: calls `buildRiskIntelligence(context, risk, assessment.side, regime, scenarios, contradictions, arbitration, liquidityOrderFlow)` **after `arbitration`** (its natural dependency, per constraint 3), wrapped in try/catch (falls back to `null`, same pattern as every prior sub-phase), returned as a new sibling `riskIntelligence` field.
+
+### Files changed / added
+- **New:** `lib/ai/oracle/riskIntelligence.ts`
+- **New:** `scripts/phase7/risk-intelligence-fixtures.ts`
+- `app/api/elvoid-pro/oracle/route.ts` — added the wiring block above.
+
+No changes to `grading.ts`, `gradingTypes.ts`, `risk.ts`, `execute.ts`, `confluence.ts`, `mtf.ts`, `regime.ts`, `liquidityOrderFlow.ts`, `scenario.ts`, `contradiction.ts`, `arbitration.ts`'s own logic, `lib/elvoid/engine.ts`, or `/api/ai-signals`.
+
+### Tests (`scripts/phase7/risk-intelligence-fixtures.ts`, pure/offline, real ATR via synthetic candles) — 11/11 passed
+Clean low-risk setup → `LOW`, no factors; tight SL (`<0.5x ATR`) → `STRUCTURAL` `HIGH`, overall `HIGH`; insufficient candle history for ATR → honestly `quality: "unavailable"`, capped `LOW` overall (not fabricated); TP near a real opposing liquidity zone → `LIQUIDITY_PROXIMITY` factor; genuine unresolved contradiction → `CONTRADICTION` `HIGH`; fully-missing context (regime/scenarios/contradictions/arbitration/liquidityOrderFlow all `null`) → `contextQuality: "degraded"`, zero fabricated factors from the missing pieces; active-opposition alternative scenario → `SCENARIO` `MODERATE`; merely-cautious (mixed MTF, not conflicted) arbitration → no `CONTEXT` factor manufactured; **proxy-quality liquidity zone → never counted as a proximity risk** (constraint 7 directly verified); no risk plan/side → `contextQuality: "insufficient"`, empty factors; and a full mutation-safety check across all 7 input objects.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/risk-intelligence-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline: identical.
+- Phase 7.2 MTF fixtures: 7/7 unchanged.
+- Phase 7.3B regime fixtures: 8/8 unchanged.
+- Phase 7.4 liquidity/order-flow fixtures: 16/16 unchanged.
+- Phase 7.5 scenario fixtures: 12/12 unchanged.
+- Phase 7.6 contradiction fixtures: 8/8 unchanged.
+- Phase 7.7 arbitration fixtures: 10/10 unchanged.
+- Diff check: only `app/api/elvoid-pro/oracle/route.ts` modified among existing files, plus the new file above. `risk.ts`, `execute.ts`, `lib/elvoid/engine.ts`, and `/api/ai-signals` confirmed untouched.
+
+### Standard Elvoid AI
+Untouched — `riskIntelligence.ts` only imports from other `lib/ai/oracle/*` modules and `lib/elvoid/indicators.ts`'s already-shared `atr()` (same function `risk.ts` and `regime.ts` already both import read-only).
+
+### Performance
+Zero new network requests. Pure over `context.candles` (already fetched), `risk` (already computed), and the five already-computed 7.2–7.7 context objects.
+
+### Known limitations
+- `liquidityProximity` only checks `risk.stopLoss`/`.takeProfit` against zones from Phase 7.4's `buildLiquidityZones()` — it does not check the entry price itself, since entry proximity to a zone isn't a risk concern the same way SL/TP proximity is.
+- The TP1/TP2/TP3 + entry-range risk-plan redesign remains explicitly deferred (per constraint 9) — `overall`/`factors` here describe risk around the existing single-TP `OracleRiskPlan`, not a richer multi-target plan.
+- `MIN_CANDLES_FOR_RELIABLE_ATR` reuses `regime.ts`'s precedent exactly, but is technically a second copy of that same constant rather than an imported shared one — documented as intentional (keeps each module's honesty threshold self-contained and independently auditable) rather than introducing a cross-module dependency for a single primitive number.
+- As with every prior 7.x sub-phase, `tsc --noEmit`/`next build` could not run against a fully installed `node_modules` in this sandbox (no network for `npm install`) — recommend a live smoke-test of `/api/elvoid-pro/oracle` before considering 7.8 fully verified in production.
+
+---
+
+## Phase 7.9 — LLM Reasoning
+
+**Narrative/interpretation layer only. NEVER a decision engine.** `gradeConfluence()`, `assessment.side`/`.grade`/`.confidence`/`.riskStatus`/`.invalidation`, and every price level (`entry`/`stopLoss`/`takeProfit`) always come directly from `assessment`/`risk` — the model is never asked for them, they are structurally absent from the schema it's allowed to return (`RawReasoningResponse` has no such fields), and fixture E explicitly proves that even when a response volunteers them anyway, the assembled `OracleReasoning` never carries them.
+
+### Audit summary (from the prior approved audit turn)
+- No LLM reasoning layer existed anywhere in `lib/ai/oracle/`.
+- `lib/ai/core/modules/oracle.ts` (**Standard's** own AI Oracle narrative module, used only by `/api/ai-signals`) already solved this exact class of problem for the deterministic ElVoid AI signal — used strictly as a **behavioral template**, never modified or imported.
+- The underlying `callAiCore()`/`lib/ai/core/router.ts`/`lib/ai/core/llm.ts` are generic, already-reusable infrastructure — imported read-only.
+- `/api/ai-signals` gates its optional LLM call behind `reserveEnergy("ai_reasoning")`/`settleEnergy`; the Pro Oracle route had zero AI Energy involvement. **Per your explicit decision, Pro Oracle reasoning is bundled into Pro membership — no AI Energy consumption added, `reserveEnergy()`/`settleEnergy()` untouched for Standard.**
+
+### New file: `lib/ai/oracle/reasoning.ts`
+`buildOracleReasoning(assessment, confluence, regime?, mtf?, liquidityOrderFlow?, scenarios?, contradictions?, arbitration?, riskIntelligence?): Promise<OracleReasoning>` — never throws, always resolves.
+
+```
+OracleReasoning {
+  summary, thesis, supportingEvidence[], opposingEvidence[], riskAssessment, scenarioAssessment
+  uncertainty: string | null
+  caveats: string[]
+  sourceRefs: string[]          // filtered to only identifiers that genuinely exist in the payload
+  quality: real | mixed | degraded | unavailable   // clamped to a payload-derived ceiling, never model-claimed
+  generatedBy: "ai" | "fallback"
+}
+```
+
+- **New prompt constant** `ORACLE_PRO_REASONING_PROMPT` appended to `lib/ai/core/prompts.ts` (additive — `ORACLE_PROMPT`, `TECHNICAL_ANALYST_PROMPT`, and every other existing prompt untouched), explicitly instructing the model never to invent price levels, to respect `real`/`proxy`/`unavailable` quality tags, to only use source identifiers that exist in the data, and to express insufficient evidence via `uncertainty`/`caveats`.
+- **Payload**: assembled from already-computed `assessment`/`regime`/`mtf`/`liquidityOrderFlow`/`scenarios`/`contradictions`/`arbitration`/`riskIntelligence` — **never `context.candles`** (fixture I verifies no `"candles"` key exists anywhere in the serialized payload). `liquidityOrderFlow.zones` trimmed to the **5 nearest** using the existing `distanceFromPrice` ordering `buildLiquidityZones()` already applies — sliced, not resorted (fixture H).
+- **Strict type guard** (`isValidReasoningShape`) validates every required field/type before any response is trusted — malformed JSON, wrong field types, or a missing field all fail completely and fall back (fixtures B/C/D), never partially trusted.
+- **Provenance validation**: `sourceRefs` returned by the model are filtered (`filterKnownSourceRefs`) against the actual set of `source`/`origin` identifiers present in the payload (`ScenarioEvidenceRef.source`, `ClassifiedContradiction.origin`, `RiskFactor.source`, plus the fixed top-level module names) — invented identifiers are silently dropped rather than trusted (fixture J).
+- **Quality ceiling**: `computePayloadQualityCeiling()` derives the maximum honest `quality` from the payload itself (missing context → `degraded`; any non-`real` regime/zone/event/priceResponse/riskIntelligence quality → `mixed`; otherwise `real`). `clampQuality()` then caps whatever the model claims at this ceiling — a model claiming `"real"` over a payload containing a `proxy` zone is clamped down (fixture F), directly implementing "never let the model upgrade proxy/unavailable to real."
+- **Deterministic fallback** (`deterministicFallback()`): built entirely from already-computed fields (gradeReason, primary/alternative scenario theses, riskIntelligence factors, arbitration caveat) — complete and correct with zero LLM involvement, `generatedBy: "fallback"`.
+
+### Oracle response wiring
+`app/api/elvoid-pro/oracle/route.ts`: calls `buildOracleReasoning(...)` **after `riskIntelligence`** (its natural dependency), `await`ed, wrapped in try/catch (falls back to `null` at the route level on top of `buildOracleReasoning()`'s own internal fallback — belt and suspenders, same pattern as every prior sub-phase), returned as a new sibling `reasoning` field. No AI Energy gating added to this route.
+
+### Files changed / added
+- **New:** `lib/ai/oracle/reasoning.ts`
+- **New:** `scripts/phase7/reasoning-fixtures.ts`
+- `lib/ai/core/prompts.ts` — added `ORACLE_PRO_REASONING_PROMPT` (additive only).
+- `app/api/elvoid-pro/oracle/route.ts` — added the wiring block above.
+
+No changes to `lib/ai/core/modules/oracle.ts`, `lib/ai/core/llm.ts`, `lib/ai/core/router.ts`, `ORACLE_PROMPT`/`TECHNICAL_ANALYST_PROMPT`/any other existing prompt, `lib/energyGate.ts`, `grading.ts`'s decision logic, `risk.ts`, `execute.ts`, `lib/elvoid/engine.ts`, or `/api/ai-signals`.
+
+### Tests (`scripts/phase7/reasoning-fixtures.ts`, pure/offline where possible) — all cases A–L passed
+**A** valid AI response → `generatedBy: "ai"`, fields copied through. **B** malformed (non-object) JSON → shape validation fails. **C** invalid schema (wrong field type) → fails. **D** missing required field → fails. **E** model volunteers `side`/`grade`/`confidence`/`entry`/`stopLoss`/`takeProfit`/`riskStatus`/`invalidation` → shape validation still passes (extra fields ignored, not required) **but the assembled `OracleReasoning` provably never carries any of them** (explicit key-absence check). **F** proxy-quality zone in payload → quality ceiling capped below `"real"`, and a model dishonestly claiming `"real"` is clamped back down. **G** fully missing context → fallback `quality: "degraded"` with a non-null `uncertainty`. **H** 12 zones in → trimmed to exactly 5, existing nearest-first order preserved. **I** payload serialization contains no `"candles"` key anywhere. **J** `sourceRefs` filtered to only identifiers that actually exist in the payload; an invented identifier is dropped. **K** all 8 deterministic input objects left byte-identical after both `assembleFromAiResult()` and `deterministicFallback()` run. **L** full end-to-end `buildOracleReasoning()` call — since no `GROQ_API_KEY`/`OPENROUTER_API_KEY` is configured in this sandbox, this naturally exercises the real `callAiCore()` → `null` → fallback path live, proving LLM unavailability never breaks the response.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase7/reasoning-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline: identical.
+- Phase 7.2 MTF fixtures: 7/7 unchanged.
+- Phase 7.3B regime fixtures: 8/8 unchanged.
+- Phase 7.4 liquidity/order-flow fixtures: 16/16 unchanged.
+- Phase 7.5 scenario fixtures: 12/12 unchanged.
+- Phase 7.6 contradiction fixtures: 8/8 unchanged.
+- Phase 7.7 arbitration fixtures: 10/10 unchanged.
+- Phase 7.8 risk intelligence fixtures: 11/11 unchanged.
+- Diff check: only `app/api/elvoid-pro/oracle/route.ts` and `lib/ai/core/prompts.ts` (additive) modified among existing files, plus the two new files above. `execute.ts`, `lib/elvoid/engine.ts`, `/api/ai-signals`, `lib/ai/core/modules/oracle.ts`, and `lib/energyGate.ts` confirmed untouched.
+
+### Standard Elvoid AI
+Untouched — `reasoning.ts` only imports the generic `callAiCore()` and the new (additive-only) prompt constant; `lib/ai/core/modules/oracle.ts` was used purely as a design reference, never modified or imported.
+
+### Performance / cost
+No new AI Energy accounting introduced (per explicit decision — bundled into Pro membership). Rate limiting/abuse protection explicitly deferred as a future concern, per your instruction. No caching introduced this phase, also per instruction. Zero new fetches beyond the single optional LLM call itself; no raw candles ever transmitted.
+
+### Known limitations
+- No caching/deduplication — every Oracle request that reaches this stage makes a fresh LLM attempt when a provider is configured. Flagged in the audit as a future cost concern, explicitly deferred per this turn's instructions.
+- No AI Energy accounting and no execution gating — both explicitly out of scope per this turn's instructions.
+- `sourceRefs` filtering is exact-string-match against known identifiers — a model that paraphrases a real source name slightly differently will have that ref dropped rather than fuzzy-matched; treated as the safer failure mode (silently losing a citation vs. accepting an unverifiable one).
+- As with every prior 7.x sub-phase, `tsc --noEmit`/`next build` could not run against a fully installed `node_modules` in this sandbox (no network for `npm install`) — this was NOT claimed as production verification; recommend a live smoke-test of `/api/elvoid-pro/oracle` (both with and without an `AI_CHAT_PROVIDER`/`GROQ_API_KEY`/`OPENROUTER_API_KEY` configured) before considering 7.9 fully verified in production.

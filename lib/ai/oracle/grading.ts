@@ -64,14 +64,25 @@ function unavailableCriticalCount(factors: ConfluenceFactor[]): number {
   return factors.filter((f) => CRITICAL_SOURCES.includes(f.source) && f.quality === "unavailable").length;
 }
 
+/**
+ * Exported so Phase 7.6's Contradiction Classifier can reuse this exact
+ * per-contradiction magnitude computation (rather than building a
+ * competing severity calculation) when tagging severity on top of the
+ * same underlying `confluence.contradictions` list this grading gate
+ * already consumes.
+ */
+export function contradictionMagnitude(confluence: ConfluenceResult, c: ConfluenceResult["contradictions"][number]): number {
+  if (c.sources.length < 2) return 0; // internal single-factor ambiguity, handled separately
+  const involved = confluence.factors.filter((f) => c.sources.includes(f.source));
+  if (involved.length === 0) return 0;
+  return Math.min(...involved.map((f) => Math.max(f.longWeight, f.shortWeight)));
+}
+
 /** True cross-source contradiction magnitude — the strongest opposing pair among the confluence's own `contradictions` list that isn't just one factor internally ambiguous. */
 function crossSourceContradictionStrength(confluence: ConfluenceResult): number {
   let strongest = 0;
   for (const c of confluence.contradictions) {
-    if (c.sources.length < 2) continue; // internal single-factor ambiguity, handled separately
-    const involved = confluence.factors.filter((f) => c.sources.includes(f.source));
-    const magnitude = Math.min(...involved.map((f) => Math.max(f.longWeight, f.shortWeight)));
-    strongest = Math.max(strongest, magnitude);
+    strongest = Math.max(strongest, contradictionMagnitude(confluence, c));
   }
   return strongest;
 }
