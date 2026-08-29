@@ -837,3 +837,122 @@ Confirmed unchanged — `git diff --stat` returned no output for `lib/elvoid/eng
 NEW: `lib/ai/cognitive/types.ts`, `lib/ai/cognitive/contracts.ts`, `lib/ai/cognitive/observation.ts`, `scripts/phase8/cognitive-observation-fixtures.ts`.
 MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
 No other files changed.
+
+---
+
+## Phase 8.0.2 — Cognitive Working Memory
+
+### Objective
+Build a minimal, request-scoped Cognitive Working Memory layer: a deterministic, in-process state container that exists only during a single Oracle request lifecycle, so a future Hypothesis Engine (8.0.3) can read the current `CognitiveObservation`/evidence without re-deriving or re-fetching it. Explicitly NOT persistent memory, long-term memory, vector memory, RAG, caching, or a database.
+
+### Architecture
+```
+cognitiveObservation (Phase 8.0.1)
+        v
+createWorkingMemory(observation)  -> { observation, notes: [] }
+        v
+appendMemoryEntry(memory, entry)  -> new { observation, notes: [...notes, entry] }   (0+ times, none yet in 8.0.2)
+        v
+[internal only — not returned in the API response]
+        v
+request handler returns -> memory goes out of scope, nothing persisted
+```
+
+### New file: `lib/ai/cognitive/memory.ts`
+```
+CognitiveMemoryEntry { text: string; relatedEvidenceSources?: readonly ConfluenceSource[] }
+CognitiveWorkingMemory { observation: CognitiveObservation; notes: readonly CognitiveMemoryEntry[] }
+
+createWorkingMemory(observation): CognitiveWorkingMemory        // pure — { observation, notes: [] }
+appendMemoryEntry(memory, entry): CognitiveWorkingMemory        // pure — returns a NEW memory value; carries `observation` through by reference (already immutable-by-contract from 8.0.1), only `notes` gets a new array
+```
+- **No class, no mutation methods** (`update()`/`remove()` deliberately absent) — immutable, append-only functional style, matching every existing Phase 7/8.0.1 module.
+- **No module-level `Map`/`Set`/singleton anywhere** — both exported functions are plain, synchronous, take/return data only. Confirmed structurally (fixture 11: the module's only exports are `createWorkingMemory`/`appendMemoryEntry`) and by direct source review — no `import` of `lib/supabase.ts`, no `fetch`, no LLM call.
+- **Evidence is never re-collected** — `memory.observation.evidence` is the exact same array `buildCognitiveObservation()` (8.0.1) produced; `memory.ts` never imports `evidence.ts` or reconstructs a `NormalizedEvidence[]`.
+- **No IDs, no timestamps, no `kind` union, no `content: any`, no `getEvidenceSnapshot()`/`getCanonicalSnapshot()` accessors** — per the approved minimal contract, direct field access (`memory.observation.evidence`, `memory.observation.sourceAssessment`) is sufficient and was used throughout the fixture suite.
+- **No second quality calculation** — `quality` is reachable only via `memory.observation.quality` (and per-entry via `memory.observation.evidence[].quality`); `CognitiveWorkingMemory` itself has no `quality` field (fixture 8).
+- **Canonical authority preserved** — `memory.observation.sourceAssessment` is the same read-only copy 8.0.1 already produced; `memory.ts` never renames or duplicates it into `cognitiveSide`/`cognitiveGrade`/`cognitiveConfidence`/`cognitiveRiskStatus` or any other shadow field (fixture 7).
+
+### Route wiring
+`app/api/elvoid-pro/oracle/route.ts`:
+- Added `createWorkingMemory(cognitiveObservation)`, placed **after `cognitiveObservation`, before Phase 7.9 Reasoning** — only called `if (cognitiveObservation)` is truthy, since Working Memory has nothing to wrap around a failed observation.
+- Wrapped in the same `try { ... } catch { = null }` pattern as every prior 7.x/8.x sub-phase — a bug here can never break the existing Oracle response.
+- **`workingMemory` is deliberately NOT added to the JSON response.** It has no external consumer yet (Hypothesis Engine is Phase 8.0.3); returning `{ observation: {...repeats cognitiveObservation...}, notes: [] }` as a permanent response field would be redundant. The local variable is simply left unread past its `try` block — a plain function-local value, never assigned to any module-level store, so it is garbage-collected with the rest of the request's locals once the handler returns.
+
+### Evidence reuse confirmation
+`memory.ts` never imports `lib/ai/oracle/evidence.ts` and never constructs a `NormalizedEvidence`/`CognitiveEvidenceRef` itself — evidence is exposed exclusively through `memory.observation.evidence`, which is the identical array reference `cognitiveObservation.evidence` already held (fixture 2: `memory.observation.evidence === obs.evidence`).
+
+### Canonical authority preservation
+Fixture 7 asserts `side`/`grade`/`confidence`/`riskStatus`/`invalidation` values are unchanged after `createWorkingMemory`/`appendMemoryEntry`, and that no `cognitiveSide`/`cognitiveGrade`/`cognitiveConfidence`/`cognitiveRiskStatus` key exists anywhere on the resulting memory object or its `sourceAssessment`.
+
+### Immutable append-only design — verified
+- Fixture 3: `appendMemoryEntry()` returns a new object (`nextMemory !== memory`); the original memory's `notes` stays empty; the new memory contains the appended entry.
+- Fixture 4: `memory.notes !== nextMemory.notes` (new array identity on every append).
+- Fixture 5: `memory.observation === nextMemory.observation` (carried through unchanged — no re-copy needed since it was already immutable-by-contract from 8.0.1).
+- Fixture 9: two independently created memory values (different observations) never share a `notes` array; appending to one never affects the other.
+- Fixture 10: same observation + same append sequence run twice → byte-identical `JSON.stringify` output.
+
+### Request-scoped lifecycle / no persistence
+- No module-level `Map`/`Set`/`let`/`const` holds request data anywhere in `memory.ts` (fixture 11).
+- `workingMemory` in `route.ts` is a plain local variable inside the `GET` handler — never assigned to anything outside that function's scope, so nothing survives past the request the way `lib/cache.ts` or `lib/ai/insights/history.ts`'s module-level `Map`s deliberately do (those are explicitly NOT reused here — see Phase 8.0.2 audit turn for the full comparison).
+- No Supabase import, no `fetch`, no LLM call anywhere in `memory.ts` (fixture 11 + direct source review).
+
+### Mutation safety
+- Fixture 6: `JSON.stringify(observation)` unchanged after both `createWorkingMemory()` and `appendMemoryEntry()`.
+- Fixture 12: the original `memory` value's `JSON.stringify` output is unchanged after calling `appendMemoryEntry(memory, entry)` on it (the call produces a new value; it never touches the one passed in).
+
+### Files changed / added
+- **New:** `lib/ai/cognitive/memory.ts`
+- **New:** `scripts/phase8/cognitive-memory-fixtures.ts`
+- `app/api/elvoid-pro/oracle/route.ts` — added the wiring block above (import + `try/catch` block only; `workingMemory` not added to the response object).
+- `README.md` — expanded the "Cognitive Layer" section to document Phase 8.0.2 (kept 8.0.1's content, updated the pipeline diagram, added a Working Memory paragraph).
+- `CHANGES.md` — this entry.
+
+No changes to `lib/ai/oracle/evidence.ts`, `lib/ai/oracle/grading.ts`, `lib/ai/oracle/confluence.ts`, `lib/ai/oracle/risk.ts`, `lib/ai/oracle/execute.ts`, `lib/ai/oracle/reasoning.ts`, `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, `lib/ai/core/llm.ts`, `lib/ai/core/router.ts`, `/api/ai-signals`, `lib/supabase.ts`, or any Phase 8.0.1 file (`lib/ai/cognitive/types.ts`, `lib/ai/cognitive/contracts.ts`, `lib/ai/cognitive/observation.ts` — all locked, untouched).
+
+### Tests (`scripts/phase8/cognitive-memory-fixtures.ts`) — 12/12 passed
+1. Creation preserves observation (`memory.observation === obs`), notes initially empty.
+2. Evidence provenance preservation — `memory.observation.evidence === obs.evidence`, no re-normalization.
+3. Append-only behavior — new object returned, original memory/notes untouched, new memory contains the entry.
+4. Notes array identity — `memory.notes !== nextMemory.notes`.
+5. Observation identity preservation — `memory.observation === nextMemory.observation`.
+6. Source observation mutation safety — `JSON.stringify(observation)` unchanged across creation + append.
+7. Canonical authority safety — values unchanged, no `cognitiveSide`/`cognitiveGrade`/alternative decision fields anywhere.
+8. Quality inheritance — no second quality calculation; `quality` reachable only via `observation.quality`/`evidence[].quality`.
+9. Independent memory instances — two memories never share `notes`; appending to one never affects the other.
+10. Deterministic output — same observation + same append sequence, run twice, byte-identical JSON.
+11. Structural safety — only `createWorkingMemory`/`appendMemoryEntry` exported, both synchronous plain functions; no `Map`/`Set`/Supabase/`fetch`/LLM surface.
+12. Input immutability — original memory's JSON unchanged after `appendMemoryEntry()` is called on it.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/cognitive-memory-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline script: ran clean, output shape unchanged.
+- Phase 7.2 MTF fixtures: 7/7.
+- Phase 7.3B regime fixtures: 8/8.
+- Phase 7.4 liquidity/order-flow fixtures: 16/16.
+- Phase 7.5 scenario fixtures: 13/13.
+- Phase 7.6 contradiction fixtures: 8/8.
+- Phase 7.7 arbitration fixtures: 12/12.
+- Phase 7.8 risk intelligence fixtures: 11/11.
+- Phase 7.9 reasoning fixtures: 14/14.
+- Phase 8.0.1 cognitive observation fixtures: 10/10.
+- Diff scope check (`git status --porcelain`, after reverting `npm install`'s incidental `package-lock.json`/`tsconfig.tsbuildinfo` churn from this turn's typecheck/build run): only `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md` modified among existing tracked files, plus the two new files above. `git diff --stat` against every forbidden/protected file (`lib/ai/oracle/evidence.ts`, `grading.ts`, `confluence.ts`, `risk.ts`, `execute.ts`, `reasoning.ts`, `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, `lib/ai/core/llm.ts`, `lib/ai/core/router.ts`, `lib/supabase.ts`, and all three Phase 8.0.1 files) returned empty.
+
+### Standard Elvoid AI
+Confirmed unchanged — `git diff --stat` returned no output for `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, and everything under `/api/ai-signals`. `memory.ts` imports only from `lib/ai/cognitive/contracts.ts` and `lib/ai/cognitive/types.ts`.
+
+### Typecheck / build
+- `npx tsc --noEmit` — **clean, zero errors.**
+- `npx next build` — reached the webpack compile stage (past typecheck) but failed on `next/font`'s Google Fonts fetch (`fonts.googleapis.com` not in this sandbox's allowed egress list) — the same pre-existing, unrelated sandbox network constraint documented in the Phase 8.0.1 entry, not a regression introduced by this phase. Not claimed as a passing production build.
+
+### Known limitations
+- `next build` could not fully complete in this sandbox due to blocked Google Fonts egress (same limitation as Phase 8.0.1) — recommend a live build check before deploying.
+- "No module-level memory state" and "no cross-request persistence" are verified structurally (source review + fixture 11's export-surface check) rather than via a live multi-request integration test, since this offline sandbox has no way to simulate two concurrent Next.js requests against a warm server instance.
+- `workingMemory` currently has zero real callers (Hypothesis Engine is Phase 8.0.3) — its API is exercised only by `scripts/phase8/cognitive-memory-fixtures.ts` until then, by design.
+- `npm install` was re-run in this sandbox to enable typecheck/build; its incidental `package-lock.json`/`tsconfig.tsbuildinfo` diffs were reverted via `git checkout` before finalizing the change set — the delivered ZIP does not include `node_modules/`, `.next/`, or any lockfile change.
+
+### Scope check
+NEW: `lib/ai/cognitive/memory.ts`, `scripts/phase8/cognitive-memory-fixtures.ts`.
+MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
+No other files changed. `workingMemory` confirmed absent from the API's JSON response.

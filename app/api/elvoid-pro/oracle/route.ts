@@ -13,6 +13,7 @@ import { arbitrateDecision } from "@/lib/ai/oracle/arbitration";
 import { buildRiskIntelligence } from "@/lib/ai/oracle/riskIntelligence";
 import { buildOracleReasoning } from "@/lib/ai/oracle/reasoning";
 import { buildCognitiveObservation } from "@/lib/ai/cognitive/observation";
+import { createWorkingMemory } from "@/lib/ai/cognitive/memory";
 import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 /**
@@ -149,6 +150,28 @@ export async function GET(req: Request) {
     } catch {
       cognitiveObservation = null;
     }
+
+    // Phase 8.0.2 — Cognitive Working Memory. Request-scoped, in-process
+    // state container built from cognitiveObservation only — no new fetch,
+    // no recomputation, never mutates cognitiveObservation/assessment.
+    // Internal infrastructure for the future Hypothesis Engine (8.0.3):
+    // deliberately NOT included in the JSON response below (no external
+    // consumer yet). Wrapped defensively, same pattern as every prior
+    // 7.x/8.x sub-phase, so a bug here can never break the existing Oracle
+    // response. `workingMemory` itself is a plain local variable — never
+    // assigned to a module-level store, so it is garbage-collected with
+    // the rest of this request's locals once the handler returns.
+    let workingMemory: ReturnType<typeof createWorkingMemory> | null = null;
+    try {
+      if (cognitiveObservation) {
+        workingMemory = createWorkingMemory(cognitiveObservation);
+      }
+    } catch {
+      workingMemory = null;
+    }
+    // `workingMemory` is intentionally unread past this point in 8.0.2 —
+    // reserved for Phase 8.0.3 Hypothesis Engine — and intentionally not
+    // part of the response object below.
 
     // Phase 7.9 — LLM Reasoning. Narrative/interpretation layer only, never
     // a decision engine — side/grade/confidence/riskStatus/invalidation/

@@ -323,7 +323,7 @@ data. ElVoid AI Paper Trader's signal engine follows the same rules-first
 philosophy and is untouched by this phase: plain, explainable rules over
 live data, no black box.
 
-## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1)
+## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1 / 8.0.2)
 
 `app/api/elvoid-pro/oracle/route.ts` runs a deterministic pipeline — real
 market data in, a canonical trading decision out:
@@ -335,9 +335,11 @@ Deterministic Oracle Analysis (confluence -> risk plan -> grading)
         v
 Canonical Oracle Decision (OracleAssessment: side/grade/confidence/riskStatus)
         v
-Cognitive Observation (NEW, Phase 8.0.1 — read-only)
+Cognitive Observation (Phase 8.0.1 — read-only)
         v
-Future Working Memory / Hypothesis / Planning / Meta Evaluation
+Cognitive Working Memory (NEW, Phase 8.0.2 — request-scoped, internal-only)
+        v
+Future Hypothesis / Planning / Meta Evaluation
         v
 Optional LLM Narrative (Phase 7.9 Reasoning)
 ```
@@ -347,15 +349,29 @@ context-only observer of that pipeline. It never overrides, mutates, or
 duplicates the canonical decision, never fetches data or calls an LLM
 itself, and its failure never breaks the Oracle route.
 
-- **Phase 8.0.1 — Cognitive Observation** is the first (and so far only)
-  capability. A `CognitiveObservation` is an immutable snapshot answering
-  one question: *"what does the Oracle already know right now?"* — it is
-  a copy of the canonical assessment's key fields, the same normalized
-  evidence the pipeline already computed, which context modules
-  (MTF/regime/liquidity/scenarios/contradictions/arbitration/risk
-  intelligence) were actually available, and an honest aggregate quality
-  (`real` / `mixed` / `degraded` / `unavailable`). It is not a trading
-  signal, not a second decision engine, and not an LLM opinion.
+- **Phase 8.0.1 — Cognitive Observation.** A `CognitiveObservation` is an
+  immutable snapshot answering one question: *"what does the Oracle
+  already know right now?"* — it is a copy of the canonical assessment's
+  key fields, the same normalized evidence the pipeline already computed,
+  which context modules (MTF/regime/liquidity/scenarios/contradictions/
+  arbitration/risk intelligence) were actually available, and an honest
+  aggregate quality (`real` / `mixed` / `degraded` / `unavailable`). It is
+  not a trading signal, not a second decision engine, and not an LLM
+  opinion.
+- **Phase 8.0.2 — Cognitive Working Memory** (`lib/ai/cognitive/memory.ts`).
+  A minimal, **request-scoped**, in-process state container built from a
+  `CognitiveObservation` — nothing more. Purely functional and
+  immutable/append-only: `createWorkingMemory(observation)` builds an
+  initial `{ observation, notes: [] }` value, and `appendMemoryEntry(memory,
+  entry)` returns a brand-new memory value with the entry appended, never
+  mutating the one passed in. It exists **only** for the duration of a
+  single Oracle request — there is no module-level `Map`/`Set`/singleton
+  anywhere in `memory.ts`, no persistence, no database, no cache, and no
+  sharing across requests or users. It is currently **internal-only
+  infrastructure**: `route.ts` builds it defensively after
+  `cognitiveObservation`, but it is deliberately **not** included in the
+  API's JSON response, since it has no external consumer yet. Its intended
+  consumer is the future Hypothesis Engine (Phase 8.0.3).
 
 ## Setup
 
