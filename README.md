@@ -323,7 +323,7 @@ data. ElVoid AI Paper Trader's signal engine follows the same rules-first
 philosophy and is untouched by this phase: plain, explainable rules over
 live data, no black box.
 
-## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1 / 8.0.2 / 8.0.3)
+## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1 / 8.0.2 / 8.0.3 / 8.0.4)
 
 `app/api/elvoid-pro/oracle/route.ts` runs a deterministic pipeline — real
 market data in, a canonical trading decision out:
@@ -341,9 +341,11 @@ Cognitive Observation (Phase 8.0.1 — read-only)
         v
 Cognitive Working Memory (Phase 8.0.2 — request-scoped, internal-only)
         v
-Cognitive Hypothesis Engine (NEW, Phase 8.0.3 — deterministic reframing, public)
+Cognitive Hypothesis Engine (Phase 8.0.3 — deterministic reframing, public)
         v
-Future Planning / Meta Evaluation
+Cognitive Conflict Resolution (NEW, Phase 8.0.4 — coherence classification, public summary)
+        v
+Future Decision Context
         v
 Optional LLM Narrative (Phase 7.9 Reasoning)
 ```
@@ -398,6 +400,39 @@ itself, and its failure never breaks the Oracle route.
   untouched and does not read hypotheses in this phase. Unlike Working
   Memory, `hypotheses` **is** included in the API's JSON response — it has
   a plausible frontend audience Working Memory doesn't.
+- **Phase 8.0.4 — Cognitive Conflict Resolution** (`lib/ai/cognitive/conflict.ts`).
+  A **meta-resolution layer**, not a decision engine — it answers *"how
+  coherent is the intelligence system's own interpretation right now,"*
+  never *"which market direction is correct."* `resolveCognitiveConflict()`
+  classifies the current cycle into exactly one of four bounded states —
+  `INSUFFICIENT_CONTEXT` / `CONFLICTED` / `CAUTIOUS` / `CONSISTENT` — via a
+  deterministic, first-match-wins precedence table (no weighted scoring, no
+  voting, no confidence averaging). It reuses
+  `contradictions.hasUnresolvedGenuineContradiction` and
+  `arbitration.alignment`/`.alternativeIsActiveOpposition` **directly**,
+  never rescanning raw contradiction/evidence data and never re-deriving
+  arbitration's own logic. **Conflict is not risk**: `riskIntelligence.overall`
+  and `.factors` are never read here at all — only
+  `riskIntelligence.contextQuality` (for the `INSUFFICIENT_CONTEXT` tier).
+  A `HIGH`-risk, contradiction-free, strongly-supported cycle correctly
+  resolves to `CONSISTENT`, not `CONFLICTED` — volatility/invalidation-
+  distance danger and internal intelligence disagreement are different
+  questions and are kept strictly separate. **Conflict is not per-hypothesis
+  uncertainty**: `CognitiveHypothesisSet` is accepted for architectural
+  completeness but is never counted or voted on — three hypotheses existing
+  does not by itself imply conflict. `CognitiveWorkingMemory` is likewise
+  accepted but carries no independent authority — it is pure transport, per
+  Phase 8.0.2's own design. `CONFLICTED` specifically requires a
+  **conjunction**: a genuine unresolved contradiction *and* either a
+  `CONFLICTED` arbitration alignment or active opposition from the
+  alternative scenario — a lone weak signal on either side is deliberately
+  insufficient. `arbitration.alignment === "NOT_APPLICABLE"` (no canonical
+  side to evaluate coherence around) resolves to `INSUFFICIENT_CONTEXT` by
+  explicit design, never `CAUTIOUS`. Pure, synchronous, zero LLM/network/
+  database calls, zero mutation of any input. Only a summarized
+  `{ state, reasons }` shape is exposed in the API response — the internal
+  `contributingFactors` field-level detail stays internal-only, matching
+  Working Memory's own "don't expose raw internal taxonomy" precedent.
 
 ## Setup
 

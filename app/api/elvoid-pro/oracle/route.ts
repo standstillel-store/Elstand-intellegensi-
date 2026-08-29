@@ -15,6 +15,7 @@ import { buildOracleReasoning } from "@/lib/ai/oracle/reasoning";
 import { buildCognitiveObservation } from "@/lib/ai/cognitive/observation";
 import { createWorkingMemory } from "@/lib/ai/cognitive/memory";
 import { buildHypotheses } from "@/lib/ai/cognitive/hypothesis";
+import { resolveCognitiveConflict } from "@/lib/ai/cognitive/conflict";
 import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 /**
@@ -193,16 +194,37 @@ export async function GET(req: Request) {
       hypotheses = null;
     }
 
+    // Phase 8.0.4 — Cognitive Conflict Resolution. Meta-resolution layer
+    // over already-computed scenarios/contradictions/arbitration/risk
+    // context-quality/cognitiveObservation — reuses
+    // contradictions.hasUnresolvedGenuineContradiction and
+    // arbitration.alignment/.alternativeIsActiveOpposition directly, never
+    // rescans raw contradiction/evidence data, never reads
+    // riskIntelligence.overall/.factors (risk != conflict guardrail — see
+    // lib/ai/cognitive/conflict.ts). Wrapped defensively, same pattern as
+    // every prior 7.x/8.x sub-phase, so a bug here can never break the
+    // existing Oracle response. Only a summarized `{ state, reasons }`
+    // shape is exposed publicly below — `contributingFactors` stays
+    // internal-only, same reasoning as workingMemory staying fully
+    // internal in 8.0.2/8.0.3.
+    let cognitiveConflictInternal: ReturnType<typeof resolveCognitiveConflict> | null = null;
+    try {
+      cognitiveConflictInternal = resolveCognitiveConflict({ scenarios, contradictions, arbitration, riskIntelligence, observation: cognitiveObservation, hypotheses, workingMemory });
+    } catch {
+      cognitiveConflictInternal = null;
+    }
+    const cognitiveConflict = cognitiveConflictInternal ? { state: cognitiveConflictInternal.state, reasons: cognitiveConflictInternal.reasons } : null;
+
     // Phase 7.9 — LLM Reasoning. Narrative/interpretation layer only, never
     // a decision engine — side/grade/confidence/riskStatus/invalidation/
     // entry/SL/TP are never asked of the model and never read back (see
-    // reasoning.ts). Deliberately does NOT receive `hypotheses` in this
-    // phase — reasoning.ts stays untouched (see CHANGES.md Phase 8.0.3
-    // entry for the audit rationale). No AI Energy charged (bundled into
-    // Pro membership per explicit decision). Never fails the request:
-    // buildOracleReasoning() always resolves, degrading to a deterministic
-    // fallback (`generatedBy: "fallback"`) on any LLM/parse/validation
-    // failure.
+    // reasoning.ts). Deliberately does NOT receive `hypotheses` or
+    // `cognitiveConflict` in this phase — reasoning.ts stays untouched
+    // (see CHANGES.md Phase 8.0.3/8.0.4 entries for the audit rationale).
+    // No AI Energy charged (bundled into Pro membership per explicit
+    // decision). Never fails the request: buildOracleReasoning() always
+    // resolves, degrading to a deterministic fallback
+    // (`generatedBy: "fallback"`) on any LLM/parse/validation failure.
     let reasoning: Awaited<ReturnType<typeof buildOracleReasoning>> | null = null;
     try {
       reasoning = await buildOracleReasoning(assessment, confluence, regime, mtf, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence);
@@ -210,7 +232,7 @@ export async function GET(req: Request) {
       reasoning = null;
     }
 
-    return NextResponse.json({ assessment, confluence, insight, risk, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence, cognitiveObservation, hypotheses, reasoning });
+    return NextResponse.json({ assessment, confluence, insight, risk, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence, cognitiveObservation, hypotheses, cognitiveConflict, reasoning });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Gagal menjalankan ELVOID PRO ORACLE." }, { status: 500 });
   }

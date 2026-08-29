@@ -1071,3 +1071,78 @@ Confirmed unchanged — `git diff --stat` returned no output for `lib/elvoid/eng
 NEW: `lib/ai/cognitive/hypothesis.ts`, `scripts/phase8/cognitive-hypothesis-fixtures.ts`.
 MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
 No other files changed. `hypotheses` confirmed present in the API's JSON response; `workingMemory` confirmed still absent.
+
+---
+
+## Phase 8.0.4 — Cognitive Conflict Resolution
+
+### Added
+- `lib/ai/cognitive/conflict.ts` — `CognitiveCoherenceState`, `CognitiveConflictFactorSource`, `CognitiveConflictFactor`, `CognitiveConflictState`, `CognitiveConflictInputs`, `resolveCognitiveConflict()`.
+- `scripts/phase8/cognitive-conflict-fixtures.ts` — 18 deterministic, offline fixture checks (15 required + 3 additional edge cases).
+
+### Modified
+- `app/api/elvoid-pro/oracle/route.ts` — one additive `try/catch` block placed after `hypotheses`, before Phase 7.9 Reasoning; a summarized `cognitiveConflict: { state, reasons }` field added to `NextResponse.json(...)`. `workingMemory` remains absent from the response (unchanged from 8.0.2/8.0.3).
+- `README.md` — Cognitive Layer section extended with a Phase 8.0.4 paragraph and an updated pipeline diagram.
+- `CHANGES.md` — this entry.
+
+No other files modified. `reasoning.ts` untouched — `buildOracleReasoning()`'s call signature and arguments are unchanged from Phase 8.0.3.
+
+### Architecture
+`lib/ai/cognitive/conflict.ts` is a **meta-resolution layer over already-computed Phase 7 aggregates**, not a second intelligence engine:
+```
+Scenario (7.5) ──────────┐
+Contradiction (7.6) ─────┤
+Arbitration (7.7) ───────┼──→ resolveCognitiveConflict() ──→ CognitiveConflictState
+Risk Intelligence (7.8) ─┤        (contextQuality only)
+Cognitive Observation ───┤        (quality only)
+Hypotheses / WorkingMem ─┘        (accepted, unused — see Guardrails)
+```
+Pure, synchronous, deterministic, first-match-wins precedence — no weighted scoring, no voting, no confidence averaging. Zero I/O, zero `Date.now()`/`Math.random()`, zero module-level state. Answers *"how coherent is the intelligence system's own interpretation"* — never *"which market direction is correct."* No `side`/`direction`/`BUY`/`SELL`/`execute`/`reject` field exists anywhere in the module's output.
+
+### Resolution States
+Exactly four bounded states (`CognitiveCoherenceState`), evaluated via 6 precedence rules in this exact order — no reordering, no weighted scoring:
+
+1. **RULE 1 — hard context blocker.** `scenarios === null || contradictions === null || arbitration === null` → `INSUFFICIENT_CONTEXT`.
+2. **RULE 2 — insufficient quality.** `scenarios.contextQuality === "insufficient"` OR `riskIntelligence?.contextQuality === "insufficient"` OR `observation?.quality === "unavailable"` → `INSUFFICIENT_CONTEXT`. (A `null` `observation` alone does *not* trigger this rule — handled defensively via optional chaining, never throws, per the approved spec.)
+3. **RULE 3 — genuine system conflict.** `contradictions.hasUnresolvedGenuineContradiction === true` **AND** (`arbitration.alignment === "CONFLICTED"` **OR** `arbitration.alternativeIsActiveOpposition === true`) → `CONFLICTED`. Deliberately a conjunction — neither signal alone is sufficient (see Guardrails).
+4. **RULE 4 — caution.** `arbitration.alignment` is `SUPPORTED_WITH_CAUTION`, `UNSUPPORTED_CONTEXT`, **or** `CONFLICTED` (the last only reachable here when Rule 3's conjunction did *not* confirm a genuine system conflict — arbitration reads `CONFLICTED` but the contradiction aggregate/active-opposition flags don't corroborate it; the approved four-state model has no fifth state for this narrow edge case, so it lands in `CAUTIOUS` rather than being dropped) → `CAUTIOUS`.
+5. **RULE 5 — consistent.** `arbitration.alignment === "STRONGLY_SUPPORTED"` AND `!hasUnresolvedGenuineContradiction` AND `!alternativeIsActiveOpposition` → `CONSISTENT`.
+6. **RULE 6 — NOT_APPLICABLE.** `arbitration.alignment === "NOT_APPLICABLE"` → `INSUFFICIENT_CONTEXT`. **Explicit, locked Phase 8.0.4 architectural decision** — there is no canonical decision to evaluate coherence around, so this is never reinterpreted as `CAUTIOUS`.
+
+A final structurally-unreachable fallback (`INSUFFICIENT_CONTEXT`) closes out the function for type-safety, since `DecisionAlignment` is a closed 5-value union already fully covered by rules 3–6.
+
+**State semantics:**
+- `INSUFFICIENT_CONTEXT` — not enough reliable pipeline context exists to judge coherence. About missing/low-quality knowledge, never about disagreement.
+- `CONFLICTED` — positive, jointly-corroborated evidence that important intelligence components genuinely disagree.
+- `CAUTIOUS` — not fully coherent, but genuine unresolved conflict has not been jointly established.
+- `CONSISTENT` — strongly aligned: clean arbitration, no genuine unresolved contradiction, no active opposition.
+
+### Guardrails
+- **Risk ≠ Conflict**: `riskIntelligence.overall` and `riskIntelligence.factors` are **never read** anywhere in `conflict.ts` — only `riskIntelligence.contextQuality`, and only for `INSUFFICIENT_CONTEXT`. Verified: fixture 6 confirms `riskIntelligence.overall = "HIGH"` alone, with clean contradiction/arbitration, resolves to `CONSISTENT`, never `CONFLICTED`.
+- **Contradiction detection reused, not recreated**: `contradictions.hasUnresolvedGenuineContradiction` (already aggregated by `contradiction.ts`) is read directly; `contradictions.contradictions[]` is never rescanned to independently re-determine whether conflict exists.
+- **Arbitration logic reused, not recreated**: `arbitration.alignment` and `arbitration.alternativeIsActiveOpposition` are read directly from the already-computed `DecisionArbitration`; no regime/MTF-compatibility re-derivation happens in this file.
+- **Hypotheses are not a voting system**: `CognitiveHypothesisSet` is accepted in `CognitiveConflictInputs` for architectural completeness but is never read, counted, or iterated anywhere inside `resolveCognitiveConflict()`. Verified: fixture 7 confirms three hypotheses (including a `REJECTED` one) present alongside an otherwise-clean arbitration/contradiction state still resolves to `CONSISTENT`.
+- **Working Memory carries no independent authority**: `CognitiveWorkingMemory` is accepted in the input type but never read inside the resolution logic — pure transport, consistent with its Phase 8.0.2 design.
+- **Genuine contradiction alone is insufficient**: fixture 13 confirms `hasUnresolvedGenuineContradiction = true` with `arbitration.alignment = STRONGLY_SUPPORTED` and `alternativeIsActiveOpposition = false` does **not** resolve to `CONFLICTED` — the Rule 3 conjunction is enforced exactly as specified, preventing the conflict engine from becoming over-sensitive to a single weak signal.
+- **`NOT_APPLICABLE` is locked to `INSUFFICIENT_CONTEXT`**: implemented exactly as the explicit Phase 8.0.4 decision states — not reinterpreted as `CAUTIOUS` (fixture 12).
+- **No forbidden execution/direction fields**: no `side`/`direction`/`entry`/`stopLoss`/`takeProfit`/`order`/`positionSize`/`BUY`/`SELL` anywhere in `CognitiveConflictState`/`CognitiveConflictFactor`.
+- **Explainability without invention**: every `reasons[]`/`contributingFactors[].detail` string is a deterministic template referencing an actual upstream field and its actual value (e.g. `"arbitration.alignment = CONFLICTED"`, `"contradictions.hasUnresolvedGenuineContradiction = true"`) — no LLM, no generated prose, no speculative explanation. Verified structurally by fixture 18.
+
+### Verification
+- **Fixtures**: `scripts/phase8/cognitive-conflict-fixtures.ts` — **18/18 passed** (all 15 required cases: fully aligned→CONSISTENT, cautious→CAUTIOUS, genuine contradiction+conflicted arbitration→CONFLICTED, missing scenarios→INSUFFICIENT_CONTEXT, scenario-insufficient-quality→INSUFFICIENT_CONTEXT, HIGH-risk-alone guardrail→CONSISTENT, three-hypotheses guardrail→CONSISTENT, active-opposition+contradiction→CONFLICTED, determinism, input immutability, no-infrastructure-dependency, NOT_APPLICABLE→INSUFFICIENT_CONTEXT, genuine-contradiction-alone guardrail, UNSUPPORTED_CONTEXT→CAUTIOUS, observation-unavailable→INSUFFICIENT_CONTEXT — plus 3 additional cases: risk-context-quality-insufficient, contradictions/arbitration-individually-null, and contributingFactors traceability).
+- **Regression**: Phase 7.2 MTF 7/7, 7.3B Regime 8/8, 7.4 Liquidity/OrderFlow 16/16, 7.5 Scenario 13/13, 7.6 Contradiction 8/8, 7.7 Arbitration 12/12, 7.8 Risk Intelligence 11/11, 7.9 Reasoning 14/14; Phase 8.0.1 Cognitive Observation 10/10, 8.0.2 Working Memory 12/12, 8.0.3 Hypothesis 24/24. Baseline snapshot script ran clean, output shape unchanged. All counts identical to the Phase 8.0.3 report — no regressions introduced.
+- **Typecheck**: `npx tsc --noEmit` — **clean, zero errors** on the first pass (no fixture or production fixes needed this phase).
+- **Build**: `npx next build` — reached the webpack compile stage (past typecheck) but failed on `next/font`'s Google Fonts fetch (`fonts.googleapis.com` not in this sandbox's allowed egress list) — the same pre-existing, unrelated sandbox network constraint documented in every prior Phase 8 entry, not a regression introduced by this phase. Not claimed as a passing production build.
+- **Protected files**: `git diff --stat` returned empty for every file in the hard-protected list (`lib/ai/oracle/scenario.ts`, `contradiction.ts`, `arbitration.ts`, `riskIntelligence.ts`, `grading.ts`, `confluence.ts`, `risk.ts`, `execute.ts`, `evidence.ts`, `reasoning.ts`, `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, `lib/ai/core/llm.ts`, `lib/ai/core/router.ts`, `app/api/ai-signals/*`, `lib/supabase.ts`, and all five locked Cognitive Layer files `types.ts`/`contracts.ts`/`observation.ts`/`memory.ts`/`hypothesis.ts`).
+- **API response**: confirmed `cognitiveConflict: { state, reasons }` (summarized shape only — `contributingFactors` stays internal) present in `NextResponse.json(...)`; `workingMemory` confirmed still absent.
+- **Diff scope**: after reverting `npm install`'s incidental `package-lock.json`/`tsconfig.tsbuildinfo` churn from this turn's typecheck/build run, `git status --porcelain` shows only `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md` modified among existing tracked files, plus the two new files above.
+
+### Known limitations
+- `next build` could not fully complete in this sandbox due to blocked Google Fonts egress (same limitation as every prior Phase 8 entry) — recommend a live build check before deploying.
+- Rule 4's inclusion of `CONFLICTED`-without-contradiction-corroboration as a `CAUTIOUS` fallback (rather than a fifth state) is a documented interpretive choice for an edge case the approved 6-rule hierarchy does not explicitly address on its own — flagged in the audit's Risks & Open Questions and implemented as the most conservative reading (never silently dropped, never upgraded to CONSISTENT).
+- `npm install` was re-run in this sandbox to enable typecheck/build; its incidental `package-lock.json`/`tsconfig.tsbuildinfo` diffs were reverted via `git checkout` before finalizing the change set — the delivered ZIP does not include `node_modules/`, `.next/`, or any lockfile change.
+
+### Scope check
+NEW: `lib/ai/cognitive/conflict.ts`, `scripts/phase8/cognitive-conflict-fixtures.ts`.
+MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
+No other files changed. `cognitiveConflict` confirmed present (summarized shape) in the API's JSON response; `workingMemory` confirmed still absent.
