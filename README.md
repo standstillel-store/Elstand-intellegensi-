@@ -323,7 +323,7 @@ data. ElVoid AI Paper Trader's signal engine follows the same rules-first
 philosophy and is untouched by this phase: plain, explainable rules over
 live data, no black box.
 
-## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1 / 8.0.2)
+## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1 / 8.0.2 / 8.0.3)
 
 `app/api/elvoid-pro/oracle/route.ts` runs a deterministic pipeline — real
 market data in, a canonical trading decision out:
@@ -335,11 +335,15 @@ Deterministic Oracle Analysis (confluence -> risk plan -> grading)
         v
 Canonical Oracle Decision (OracleAssessment: side/grade/confidence/riskStatus)
         v
+Scenario (7.5) / Contradiction (7.6) / Arbitration (7.7) / Risk Intelligence (7.8)
+        v
 Cognitive Observation (Phase 8.0.1 — read-only)
         v
-Cognitive Working Memory (NEW, Phase 8.0.2 — request-scoped, internal-only)
+Cognitive Working Memory (Phase 8.0.2 — request-scoped, internal-only)
         v
-Future Hypothesis / Planning / Meta Evaluation
+Cognitive Hypothesis Engine (NEW, Phase 8.0.3 — deterministic reframing, public)
+        v
+Future Planning / Meta Evaluation
         v
 Optional LLM Narrative (Phase 7.9 Reasoning)
 ```
@@ -367,11 +371,33 @@ itself, and its failure never breaks the Oracle route.
   mutating the one passed in. It exists **only** for the duration of a
   single Oracle request — there is no module-level `Map`/`Set`/singleton
   anywhere in `memory.ts`, no persistence, no database, no cache, and no
-  sharing across requests or users. It is currently **internal-only
+  sharing across requests or users. It remains **internal-only
   infrastructure**: `route.ts` builds it defensively after
   `cognitiveObservation`, but it is deliberately **not** included in the
-  API's JSON response, since it has no external consumer yet. Its intended
-  consumer is the future Hypothesis Engine (Phase 8.0.3).
+  API's JSON response.
+- **Phase 8.0.3 — Cognitive Hypothesis Engine** (`lib/ai/cognitive/hypothesis.ts`).
+  A **thin, deterministic reframing layer** over the Scenario (7.5),
+  Contradiction (7.6), and Arbitration (7.7) modules — not a second
+  confluence/grading/signal engine, and not an LLM. `buildHypotheses()`
+  reuses `Scenario.thesis`/`direction`/`supportingEvidence`/
+  `opposingEvidence` verbatim, reuses `arbitration.alignment` to derive
+  each hypothesis's `status` (`ACTIVE`/`SUPPORTED`/`CHALLENGED`/
+  `REJECTED`), and reuses `firingClustersFor()` (evidence.ts) plus
+  `contradictions.hasUnresolvedGenuineContradiction` to derive each
+  hypothesis's `uncertainty` (`LOW`/`MEDIUM`/`HIGH` — deliberately never a
+  number, and never a reuse or rename of `assessment.confidence`). At most
+  **3 hypotheses** are ever produced, from exactly 3 possible generation
+  paths (`scenario_primary`, `scenario_alternative`, and an optional
+  `contradiction`-origin hypothesis for a genuinely unresolved, non-
+  duplicate contradiction) — never one per evidence item, never a ranked-
+  and-truncated pool. Proxy/unavailable-quality backing evidence can only
+  ever push `uncertainty` toward `HIGH`, never `LOW`. No hypothesis ever
+  carries an `entry`/`stopLoss`/`takeProfit`/`order`/`positionSize` field —
+  a hypothesis is an interpretation, never an execution instruction. Pure,
+  synchronous, zero LLM/network/database calls; `reasoning.ts` stays
+  untouched and does not read hypotheses in this phase. Unlike Working
+  Memory, `hypotheses` **is** included in the API's JSON response — it has
+  a plausible frontend audience Working Memory doesn't.
 
 ## Setup
 

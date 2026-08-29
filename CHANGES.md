@@ -956,3 +956,118 @@ Confirmed unchanged — `git diff --stat` returned no output for `lib/elvoid/eng
 NEW: `lib/ai/cognitive/memory.ts`, `scripts/phase8/cognitive-memory-fixtures.ts`.
 MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
 No other files changed. `workingMemory` confirmed absent from the API's JSON response.
+
+---
+
+## Phase 8.0.3 — Cognitive Hypothesis Engine
+
+### Architecture
+Thin, deterministic reframing layer over already-computed Scenario (7.5), Contradiction (7.6), and Arbitration (7.7) output:
+```
+Scenario / Contradiction / Arbitration
+        v
+Cognitive Hypothesis Engine (buildHypotheses)
+        v
+CognitiveHypothesisSet  (at most 3 hypotheses: scenario_primary / scenario_alternative / contradiction)
+```
+Not a second confluence engine, not a second grading engine, not a signal/execution engine, not an LLM engine. Every field on `CognitiveHypothesis` is either copied verbatim from an existing Phase 7 object or a pure derivation over already-computed values — nothing here re-derives supporting/opposing evidence, contradiction severity, scenario direction, regime/MTF compatibility, or confidence.
+
+### Authority
+- No canonical decision changes: `hypothesis.ts` never imports `OracleAssessment` or `gradeConfluence()` — it only ever touches `memory.observation.evidence`/`.sourceAssessment` (read-only, inherited from Phase 8.0.1/8.0.2) plus the `Scenario`/`ContradictionReport`/`DecisionArbitration` objects passed in.
+- No second confluence/grading engine: zero calls to `computeConfluence()`, `gradeConfluence()`, `buildOracleRiskPlan()`, or any Phase 7 builder function — only their already-produced *output types* are imported.
+- No execution authority: no `entry`/`stopLoss`/`takeProfit`/`order`/`positionSize` field exists anywhere in `CognitiveHypothesis`/`CognitiveHypothesisSet`.
+- No forbidden field names: `cognitiveSide`/`cognitiveGrade`/`hypothesisSignal`/`recommendedTrade`/`alternativeSignal`/`hypothesisConfidence` do not appear anywhere in the module or its output (verified by fixture 13's explicit absence check).
+
+### New file: `lib/ai/cognitive/hypothesis.ts`
+```
+HypothesisStatus = "ACTIVE" | "SUPPORTED" | "CHALLENGED" | "REJECTED"
+HypothesisUncertainty = "LOW" | "MEDIUM" | "HIGH"
+HypothesisOrigin = "scenario_primary" | "scenario_alternative" | "contradiction"
+
+CognitiveHypothesis {
+  id: string                                       // deterministic — from Scenario.id or contradiction sources, never random/timestamp
+  statement: string                                 // = Scenario.thesis, or a fixed-template sentence embedding a contradiction's own description
+  hypothesisDirection: "LONG" | "SHORT" | null       // null for the non-directional contradiction-origin hypothesis
+  supportingEvidence: readonly ScenarioEvidenceRef[]  // = Scenario.supportingEvidence, same reference — never rebuilt
+  opposingEvidence: readonly ScenarioEvidenceRef[]    // = Scenario.opposingEvidence, same reference — never rebuilt
+  status: HypothesisStatus                           // DERIVED from arbitration.alignment — never mutated
+  uncertainty: HypothesisUncertainty                  // DERIVED from evidence quality + cluster count + contradiction aggregate — never mutated
+  origin: HypothesisOrigin
+}
+
+CognitiveHypothesisSet {
+  hypotheses: readonly CognitiveHypothesis[]          // length <= 3, always
+  generatedFrom: { hasScenarios, hasContradictions, hasArbitration: boolean }
+}
+
+buildHypotheses(memory: CognitiveWorkingMemory, scenarios: ScenarioContext | null, contradictions: ContradictionReport | null, arbitration: DecisionArbitration | null): CognitiveHypothesisSet
+```
+Types adjusted (from the audit's proposed contract) only to match actual repository exports exactly — `ScenarioEvidenceRef`, `ScenarioDirection`, `DecisionAlignment`, `ContradictionSeverity`/`ContradictionOrigin`, `CognitiveWorkingMemory`, `CognitiveEvidenceRef` all imported from their real, existing source files. No `any`, no unsafe casts, no `HypothesisEvidence`/`CognitiveEvidenceV2`/`AlternativeEvidence`/`EvidenceSnapshot`.
+
+### Scenario reuse confirmation
+`scenario_primary`/`scenario_alternative` hypotheses copy `Scenario.thesis` → `statement`, `Scenario.direction` → `hypothesisDirection`, and `Scenario.supportingEvidence`/`.opposingEvidence` → the hypothesis's own fields **by reference**, never rebuilt (fixtures 4/5: `primary.supportingEvidence === s.supportingEvidence`). `id` is `hyp-${scenario.id}` — deterministic, derived from the already-existing `Scenario.id` (e.g. `primary-long`), never random.
+
+### Contradiction reuse confirmation
+The optional `contradiction`-origin hypothesis only fires when `contradictions.hasUnresolvedGenuineContradiction` (already aggregated by `contradiction.ts`) is true, filtered to `genuineness === "GENUINE" && severity !== "LOW"` candidates (both fields read directly off the existing `ClassifiedContradiction`, never reclassified), and deduplicated against the alternative hypothesis's own evidence via description-text identity (the same text-identity approach `contradiction.ts` itself already uses for its own dedup). No second contradiction detector.
+
+### Arbitration reuse confirmation
+`status` for the `scenario_primary` hypothesis is derived directly from `arbitration.alignment` (`STRONGLY_SUPPORTED`→`SUPPORTED`, `SUPPORTED_WITH_CAUTION`→`SUPPORTED`/`CHALLENGED` depending on whether the scenario's own `opposingEvidence` is non-empty, `CONFLICTED`→`CHALLENGED`, `UNSUPPORTED_CONTEXT`/`NOT_APPLICABLE`→`ACTIVE`). `status` for `scenario_alternative` reuses `arbitration.alternativeIsActiveOpposition` (`true`→`CHALLENGED`) and, narrowly, `STRONGLY_SUPPORTED` + not-active-opposition→`REJECTED` — the only path to `REJECTED` in this implementation, and it is entirely derived from already-computed `DecisionArbitration` fields, never a new invalidation rule (confirmed reachable and exercised by fixture 23).
+
+### Evidence reuse confirmation
+`supportingEvidence`/`opposingEvidence` are `ScenarioEvidenceRef[]` throughout — the exact type `scenario.ts` already produces — never translated into `NormalizedEvidence`/`CognitiveEvidenceRef` or any new shape (fixture 6). `CognitiveObservation.evidence` (`CognitiveEvidenceRef[]`, via `memory.observation.evidence`) is used **only** as a lookup pool for `firingClustersFor()` (evidence.ts, unmodified, reused as-is) when computing `uncertainty` — it is never re-exposed as a second hypothesis evidence list.
+
+### Hypothesis generation bound
+Exactly 3 possible generation paths (`scenario_primary`, `scenario_alternative`, `contradiction`), each contributing at most 1 hypothesis — `hypotheses.length <= 3` by construction, with a defensive `.slice(0, 3)` on the return value as an additional structural guarantee (fixtures 18/19: bound respected under a maximal-fixture case, and exactly 3 produced — one per origin — when all three paths genuinely apply simultaneously).
+
+### Status behavior
+Derived once, purely, inside `buildHypotheses()` via `derivePrimaryStatus()`/`deriveAlternativeStatus()` — no `hypothesis.status = ...` anywhere, no class, no state machine (fixture 14: same inputs → same status, run twice). `REJECTED` is deliberately the narrowest branch and is expected to be rare (per the approved audit) — confirmed reachable via one explicit, narrow, deterministic rule (fixture 23) rather than never exercised.
+
+### Uncertainty behavior
+`LOW`/`MEDIUM`/`HIGH` enum, never a number, never reused/renamed from `assessment.confidence`. Derived from: (a) whether the hypothesis's direction-aligned backing evidence in `memory.observation.evidence` is entirely `real`-quality, (b) whether at least 2 independent clusters back that direction (via `firingClustersFor()`, same `>=2` convention `OracleAssessment.independentConfirmationClusters` already uses elsewhere in this pipeline), and (c) `contradictions.hasUnresolvedGenuineContradiction`. Proxy/unavailable-quality backing evidence or a meaningful unresolved genuine contradiction can only push uncertainty toward `HIGH`, **never** toward `LOW` (fixture 16, and fixture 16b as the positive-path sanity check that `LOW` is still reachable under genuinely clean evidence). The `contradiction`-origin hypothesis's own uncertainty is `HIGH` for a `HIGH`-severity backing contradiction, `MEDIUM` for `MODERATE` — never `LOW`, since by construction it only exists for a non-`LOW`-severity genuine contradiction (fixture 17).
+
+### Canonical authority confirmation
+`hypothesis.ts` never imports `OracleAssessment` at all — the only canonical-decision-adjacent data it ever touches is `memory.observation.sourceAssessment`, read-only, inherited unchanged from Phase 8.0.1 (fixture 12: unchanged before/after). No `cognitiveSide`/`cognitiveGrade`/`hypothesisSignal`/`recommendedTrade`/`alternativeSignal`/`hypothesisConfidence` anywhere (fixture 13).
+
+### Input immutability
+`Scenario`/`ScenarioContext` (fixture 7), `ContradictionReport` (fixture 8), `DecisionArbitration` (fixture 9), `CognitiveObservation` (fixture 10), and the full `CognitiveWorkingMemory` including `notes` (fixture 11) are all confirmed byte-identical (`JSON.stringify`) before and after every `buildHypotheses()` call. Fixture 22 additionally confirms two independently built hypothesis sets never share an evidence array reference.
+
+### Files changed / added
+- **New:** `lib/ai/cognitive/hypothesis.ts`
+- **New:** `scripts/phase8/cognitive-hypothesis-fixtures.ts`
+- `app/api/elvoid-pro/oracle/route.ts` — one additive `try { if (workingMemory) hypotheses = buildHypotheses(...) } catch { hypotheses = null }` block placed after the existing `workingMemory` block and before Phase 7.9 Reasoning; `hypotheses` added to `NextResponse.json(...)`; `workingMemory` confirmed still absent from that response object. `reasoning.ts` itself untouched — `buildOracleReasoning()`'s call signature and arguments are unchanged from Phase 8.0.2.
+- `README.md` — Cognitive Layer section extended with a Phase 8.0.3 paragraph and updated pipeline diagram.
+- `CHANGES.md` — this entry.
+
+No changes to `lib/ai/oracle/evidence.ts`, `lib/ai/oracle/grading.ts`, `lib/ai/oracle/confluence.ts`, `lib/ai/oracle/risk.ts`, `lib/ai/oracle/execute.ts`, `lib/ai/oracle/reasoning.ts`, `lib/ai/oracle/scenario.ts`, `lib/ai/oracle/contradiction.ts`, `lib/ai/oracle/arbitration.ts`, `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, `lib/ai/core/llm.ts`, `lib/ai/core/router.ts`, `/api/ai-signals`, `lib/supabase.ts`, or any Phase 8.0.1/8.0.2 Cognitive Layer file (`types.ts`, `contracts.ts`, `observation.ts`, `memory.ts` — all remain locked, untouched).
+
+No `runCognitiveCycle()` orchestrator introduced and no route refactor performed — route growth (now 11 inlined `try/catch` blocks) is acknowledged but explicitly out of scope for this phase, per the approved audit.
+
+### Testing (`scripts/phase8/cognitive-hypothesis-fixtures.ts`) — 24/24 checks passed
+1. Deterministic generation succeeds on a plausible fixture set. 2. Primary scenario → exactly one hypothesis. 3. Alternative hypothesis appears only when `scenarios.alternative` is provided. 4–5. Supporting/opposing evidence preserved by reference. 6. Evidence stays `ScenarioEvidenceRef`-shaped (no re-normalization). 7–11. No mutation of `Scenario`/`ContradictionReport`/`DecisionArbitration`/`CognitiveObservation`/`CognitiveWorkingMemory`. 12. `sourceAssessment` unchanged. 13. No forbidden keys anywhere. 14–15. Status/uncertainty deterministic. 16/16b. Proxy evidence forces `HIGH`, never `LOW`; clean evidence reaches `LOW`. 17. Meaningful genuine contradiction → `CHALLENGED` + `HIGH` uncertainty. 18. `length <= 3` under a maximal case. 19. All 3 paths simultaneously → exactly 3, one per origin. 20. Byte-identical output on identical inputs. 21. Only `buildHypotheses` is a runtime export (no fetch/LLM/DB surface). 22. Independent hypothesis sets share no array references. 23. `REJECTED` reachable via its one narrow, deterministic rule.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/cognitive-hypothesis-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline: ran clean, output shape unchanged.
+- Phase 7.2 MTF 7/7, 7.3B Regime 8/8, 7.4 Liquidity/OrderFlow 16/16, 7.5 Scenario 13/13, 7.6 Contradiction 8/8, 7.7 Arbitration 12/12, 7.8 Risk Intelligence 11/11, 7.9 Reasoning 14/14.
+- Phase 8.0.1 Cognitive Observation 10/10, Phase 8.0.2 Cognitive Working Memory 12/12.
+- All unchanged from prior baselines.
+- Diff scope check (after reverting `npm install`'s incidental `package-lock.json`/`tsconfig.tsbuildinfo` churn): only `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md` modified among existing tracked files, plus the two new files above. `git diff --stat` against every forbidden/protected file (all Phase 7.x source modules, `lib/elvoid/engine.ts`, `lib/ai/core/*`, `/api/ai-signals`, `lib/supabase.ts`, and all four existing `lib/ai/cognitive/*` files) returned empty.
+
+### Typecheck / build
+- `npx tsc --noEmit` — **clean, zero errors** after one fixture-only fix (an initial fixture used a non-existent `ConfluenceSource` value, `"funding_rate"`; corrected to the real `"macro"` — no production code was affected).
+- `npx next build` — reached the webpack compile stage (past typecheck) but failed on `next/font`'s Google Fonts fetch (`fonts.googleapis.com` not in this sandbox's allowed egress list) — the same pre-existing, unrelated sandbox network constraint documented in the Phase 8.0.1/8.0.2 entries, not a regression introduced by this phase. Not claimed as a passing production build. Font configuration was not modified to force a passing build.
+
+### Standard Elvoid AI
+Confirmed unchanged — `git diff --stat` returned no output for `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, `lib/ai/core/llm.ts`, `lib/ai/core/router.ts`, and everything under `/api/ai-signals`. `hypothesis.ts` imports only from `lib/ai/oracle/scenario.ts`, `lib/ai/oracle/contradiction.ts`, `lib/ai/oracle/arbitration.ts`, `lib/ai/oracle/evidence.ts` (type/function reuse only — no `gradeConfluence`/`computeConfluence` import), and the local `lib/ai/cognitive/memory.ts`/`types.ts`.
+
+### Known limitations
+- `next build` could not fully complete in this sandbox due to blocked Google Fonts egress (same limitation as Phase 8.0.1/8.0.2) — recommend a live build check before deploying.
+- `REJECTED` status, by design, occurs through exactly one narrow deterministic rule and may be rare or absent in real traffic depending on how often arbitration reaches a clean `STRONGLY_SUPPORTED` alongside a merely-contingency alternative scenario — this is intentional, not a gap, per the approved audit ("correctness is more important than exercising every enum value").
+- The `contradiction`-origin hypothesis's dedup against the alternative hypothesis is a description-text equality check — sufficient given how `contradiction.ts`/`scenario.ts` already propagate text verbatim across modules, but it would not catch two contradictions describing the same underlying issue in differently-worded text (no such case exists in the current pipeline, since all text is copied verbatim from a single origin, never reworded per-module).
+- `npm install` was re-run in this sandbox to enable typecheck/build; its incidental `package-lock.json`/`tsconfig.tsbuildinfo` diffs were reverted via `git checkout` before finalizing the change set — the delivered ZIP does not include `node_modules/`, `.next/`, or any lockfile change.
+
+### Scope check
+NEW: `lib/ai/cognitive/hypothesis.ts`, `scripts/phase8/cognitive-hypothesis-fixtures.ts`.
+MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
+No other files changed. `hypotheses` confirmed present in the API's JSON response; `workingMemory` confirmed still absent.
