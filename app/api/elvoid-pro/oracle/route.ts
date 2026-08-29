@@ -12,6 +12,7 @@ import { classifyContradictions } from "@/lib/ai/oracle/contradiction";
 import { arbitrateDecision } from "@/lib/ai/oracle/arbitration";
 import { buildRiskIntelligence } from "@/lib/ai/oracle/riskIntelligence";
 import { buildOracleReasoning } from "@/lib/ai/oracle/reasoning";
+import { buildCognitiveObservation } from "@/lib/ai/cognitive/observation";
 import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 /**
@@ -133,6 +134,22 @@ export async function GET(req: Request) {
       riskIntelligence = null;
     }
 
+    // Phase 8.0.1 — Cognitive Observation. Downstream/read-only snapshot of
+    // everything already computed above (confluence/assessment/mtf/regime/
+    // liquidityOrderFlow/scenarios/contradictions/arbitration/
+    // riskIntelligence) — zero new fetch, zero new confluence/grading
+    // recomputation, never mutates any input, never overrides canonical
+    // side/grade/confidence/riskStatus (see lib/ai/cognitive/contracts.ts).
+    // Not a prerequisite for the canonical assessment: wrapped defensively,
+    // same pattern as every prior 7.x sub-phase, so a bug here can never
+    // break the existing Oracle response.
+    let cognitiveObservation: ReturnType<typeof buildCognitiveObservation> | null = null;
+    try {
+      cognitiveObservation = buildCognitiveObservation({ symbol, assessment, confluence, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence });
+    } catch {
+      cognitiveObservation = null;
+    }
+
     // Phase 7.9 — LLM Reasoning. Narrative/interpretation layer only, never
     // a decision engine — side/grade/confidence/riskStatus/invalidation/
     // entry/SL/TP are never asked of the model and never read back (see
@@ -147,7 +164,7 @@ export async function GET(req: Request) {
       reasoning = null;
     }
 
-    return NextResponse.json({ assessment, confluence, insight, risk, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence, reasoning });
+    return NextResponse.json({ assessment, confluence, insight, risk, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence, cognitiveObservation, reasoning });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Gagal menjalankan ELVOID PRO ORACLE." }, { status: 500 });
   }

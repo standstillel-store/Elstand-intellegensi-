@@ -721,3 +721,119 @@ No new AI Energy accounting introduced (per explicit decision — bundled into P
 - No AI Energy accounting and no execution gating — both explicitly out of scope per this turn's instructions.
 - `sourceRefs` filtering is exact-string-match against known identifiers — a model that paraphrases a real source name slightly differently will have that ref dropped rather than fuzzy-matched; treated as the safer failure mode (silently losing a citation vs. accepting an unverifiable one).
 - As with every prior 7.x sub-phase, `tsc --noEmit`/`next build` could not run against a fully installed `node_modules` in this sandbox (no network for `npm install`) — this was NOT claimed as production verification; recommend a live smoke-test of `/api/elvoid-pro/oracle` (both with and without an `AI_CHAT_PROVIDER`/`GROQ_API_KEY`/`OPENROUTER_API_KEY` configured) before considering 7.9 fully verified in production.
+
+---
+
+## Phase 8.0.1 — Cognitive Observation Layer
+
+### Objective
+Implement the first Cognitive Layer primitive — **Cognitive Observation**: a deterministic, immutable, read-only snapshot describing what the ELVOID PRO ORACLE already knows at a single point in time. Strictly downstream of the canonical Oracle decision; never a new trading signal, never a second decision engine.
+
+### Architecture
+```
+Market/Data Layer
+        v
+Deterministic Oracle Analysis
+        v
+Canonical Oracle Decision
+        v
+Cognitive Observation (NEW — READ ONLY)
+        v
+Future Cognitive Modules
+        v
+Optional LLM Narrative
+```
+
+### New files
+- **`lib/ai/cognitive/types.ts`** — `CognitiveEvidenceRef`, a plain type alias to the existing `NormalizedEvidence` (`lib/ai/oracle/evidence.ts`). No duplicate evidence schema.
+- **`lib/ai/cognitive/contracts.ts`** — the `CognitiveObservation` interface:
+  ```
+  CognitiveObservation {
+    generatedAt: string            // ISO — only naturally time-dependent field
+    symbol: string
+    sourceAssessment: Readonly<Pick<OracleAssessment, "side"|"grade"|"confidence"|"riskStatus"|"invalidation">>
+    evidence: readonly CognitiveEvidenceRef[]
+    context: {
+      confluenceAvailable, mtfAvailable, regimeAvailable, liquidityAvailable,
+      scenariosAvailable, contradictionsAvailable, arbitrationAvailable,
+      riskIntelligenceAvailable: boolean
+    }
+    quality: "real" | "mixed" | "degraded" | "unavailable"   // reuses ReasoningQuality from reasoning.ts, not a new union
+  }
+  ```
+  Carries an explicit top-of-file authority comment: downstream/read-only, never mutates `OracleAssessment`, never overrides canonical side/grade/confidence/riskStatus, never executes trades, not a trading signal.
+- **`lib/ai/cognitive/observation.ts`** — `buildCognitiveObservation(input: BuildCognitiveObservationInput): CognitiveObservation`:
+  - **Evidence**: calls the *existing* `normalizeEvidence(confluence, mtf?.anchorInterval)` (`evidence.ts`) — the only already-computed collection that is honestly `NormalizedEvidence`-shaped without fabricating `direction`/`strength`/`quality`/`cluster`. A defensive, order-preserving `dedupeEvidence()` pass (keyed on `source::evidence` text) guards against duplicate factors without ever sorting or mutating the source array. Scenario evidence refs / contradiction sources / risk factors are **not** forced into this schema — left in their own module's shape, per spec.
+  - **Context availability**: `input.mtf/regime/liquidityOrderFlow/scenarios/contradictions/arbitration/riskIntelligence` each map `null`/`undefined` → `false`, `!!value` → `true`. Missing context is never interpreted as agreement.
+  - **Quality aggregation** (deterministic, documented in-code):
+    - `unavailable` — zero meaningful (non-`"unavailable"`-quality) evidence **and** zero context modules available.
+    - `degraded` — any of the 8 context modules unavailable and no `"real"`-quality evidence exists, **or** all 8 modules available but no `"real"`-quality evidence exists.
+    - `mixed` — some context missing but at least one `"real"`-quality evidence entry exists, **or** all context available with a mix of `"real"` and `"proxy"/"unavailable"` evidence.
+    - `real` — all 8 context modules available **and** every evidence entry is `"real"`-quality (at least one entry).
+    - Quality is never upgraded past what the actual evidence/context supports.
+  - **Immutability**: `sourceAssessment` and `evidence` are freshly constructed objects/arrays — never live references into `assessment`/`confluence`. No input is ever written to.
+  - **No recomputation**: takes only already-computed results as plain data; has no import path to `computeConfluence`/`gradeConfluence`/`buildOracleRiskPlan`/`buildMtfContext`/`classifyMarketRegime`/`buildLiquidityOrderFlowContext`/`buildScenarios`/`classifyContradictions`/`arbitrateDecision`/`buildRiskIntelligence`/`buildOracleReasoning`.
+  - **No LLM**: zero import of `lib/ai/core/llm.ts`, zero call to `callAiCore()`.
+  - Synchronous, pure, throws only on genuinely malformed input (caught defensively at the route level, same pattern as every 7.x sub-phase).
+- **`scripts/phase8/cognitive-observation-fixtures.ts`** — dev-only, offline, no network/DB/LLM. 10 cases (see Tests below).
+
+### Route wiring
+`app/api/elvoid-pro/oracle/route.ts`:
+- Added `buildCognitiveObservation({ symbol, assessment, confluence, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence })`, placed **after `riskIntelligence`, before Phase 7.9 Reasoning** (all intended deterministic inputs already exist at that point).
+- Wrapped in the same `try { ... } catch { = null }` pattern as every prior 7.x sub-phase — `cognitiveObservation` becomes `null` on any internal failure and the rest of the pipeline (assessment/grading/risk/execution eligibility/existing reasoning/API response) is completely unaffected.
+- Added `cognitiveObservation` as a new, additive sibling field in the JSON response. No existing response field renamed, removed, or restructured.
+
+### Evidence reuse confirmation
+`buildCognitiveObservation()` never redefines evidence detection — it exclusively consumes `normalizeEvidence()`'s output, which is itself `NormalizedEvidence[]` (`evidence.ts`, Phase 7.1, unmodified). Confirmed by fixture 5 (shape compatibility check) and fixture 9 (verbatim pass-through of a custom confluence factor's `source`/`evidence`/`strength`).
+
+### Canonical authority preservation
+`sourceAssessment` only ever copies `side`/`grade`/`confidence`/`riskStatus`/`invalidation` — no `cognitiveSide`/`cognitiveGrade`/`cognitiveConfidence`/`cognitiveRiskStatus` exists anywhere in the Cognitive Layer's types or output (fixture 8, explicit key-absence check on both the top-level observation and `sourceAssessment`). The original `assessment` object is provably unchanged after the call (fixture 8 + fixture 7).
+
+### Input immutability verification
+Fixture 7: all 9 inputs (`assessment`, `confluence`, `mtf`, `regime`, `liquidityOrderFlow`, `scenarios`, `contradictions`, `arbitration`, `riskIntelligence`) snapshotted via `JSON.stringify` before the call and re-compared byte-for-byte after — identical.
+
+### Context degradation behavior
+Fixture 2: all 6 optional context modules set to `null` → every corresponding `*Available` flag is `false`, `confluenceAvailable` stays `true` (it's a required input), and `quality` degrades honestly (`mixed` or `degraded`, never `real`). Fixture 4: only-`"unavailable"`-quality evidence plus all optional context missing → `quality === "degraded"`.
+
+### Tests (`scripts/phase8/cognitive-observation-fixtures.ts`) — 10/10 passed
+1. Complete real observation → created, canonical fields copied correctly, all context flags true, evidence collected, `quality === "real"`.
+2. Missing optional context → no crash, flags false, quality degrades honestly.
+3. Proxy evidence present alongside real → aggregate quality never upgrades to `"real"`.
+4. Only unavailable-quality evidence + missing context → `quality === "degraded"`.
+5. Evidence stays structurally compatible with `NormalizedEvidence` (no duplicate incompatible schema).
+6. Determinism — same inputs called twice produce byte-identical output (ignoring `generatedAt`).
+7. Input mutation safety — all 9 inputs byte-identical after the call.
+8. Canonical authority safety — no forbidden `cognitive*` keys anywhere; original `assessment` unchanged.
+9. No recomputation side effects — observation reflects exactly the supplied confluence factor, not an independently re-derived value.
+10. Context-only resilience — documented as impractical to exercise at the true route level in this offline sandbox (the route also depends on a live Binance fetch via `assembleOracleContext`, unavailable here); function-level null-safety across every optional input is covered by cases 2 and 4 instead. Documented honestly rather than faked.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/cognitive-observation-fixtures.ts`
+
+### Regression
+- Phase 7.1 baseline script: ran clean, output unchanged in shape (`dominantSide`/`grade`/`side`/`confidence`/etc. identical to before this phase).
+- Phase 7.2 MTF fixtures: 7/7.
+- Phase 7.3B regime fixtures: 8/8.
+- Phase 7.4 liquidity/order-flow fixtures: 16/16.
+- Phase 7.5 scenario fixtures: 13/13.
+- Phase 7.6 contradiction fixtures: 8/8.
+- Phase 7.7 arbitration fixtures: 12/12.
+- Phase 7.8 risk intelligence fixtures: 11/11.
+- Phase 7.9 reasoning fixtures: 14/14 (fallback path exercised live — no LLM key configured in this sandbox).
+- Diff scope check (`git status --porcelain` after reverting `npm install`'s incidental `package-lock.json`/`tsconfig.tsbuildinfo` churn): only `app/api/elvoid-pro/oracle/route.ts` modified among existing tracked files, plus the new `lib/ai/cognitive/` directory, `scripts/phase8/`, and this README/CHANGES update. `git diff --stat` against every forbidden file (`grading.ts`, `confluence.ts`, `risk.ts`, `execute.ts`, `reasoning.ts`, `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, `lib/ai/core/llm.ts`, `lib/ai/core/router.ts`, `lib/supabase.ts`) returned empty.
+
+### Standard Elvoid AI
+Confirmed unchanged — `git diff --stat` returned no output for `lib/elvoid/engine.ts`, `lib/ai/core/modules/oracle.ts`, and everything under `/api/ai-signals`. The Cognitive Layer imports only from `lib/ai/oracle/*` and `lib/ai/cognitive/*`; it never imports anything from Standard Elvoid AI's module tree.
+
+### Typecheck / build
+- `npx tsc --noEmit` — **clean, zero errors** (this sandbox had network access for `npm install`, unlike prior 7.x phases where this was previously unavailable — 624 packages installed successfully).
+- `npx next build` — reached the webpack compile stage (past typecheck) but failed on `next/font`'s Google Fonts fetch (`fonts.googleapis.com` not in this sandbox's allowed egress list) — an unrelated, pre-existing sandbox network constraint on `app/layout.tsx`'s font imports, not a regression introduced by this phase. Not claimed as a passing production build.
+
+### Known limitations
+- `next build` could not fully complete in this sandbox due to blocked Google Fonts egress — recommend a live build check before deploying.
+- Fixture case 10 (route-level failure isolation) is documented, not executed, since the route's other dependency (`assembleOracleContext`'s live Binance fetch) has no offline path in this sandbox.
+- `npm install` was run in this sandbox to enable typecheck; its incidental `package-lock.json`/`tsconfig.tsbuildinfo` diffs were reverted via `git checkout` before finalizing the change set — the delivered ZIP does not include `node_modules/`, `.next/`, or any lockfile change.
+
+### Scope check
+NEW: `lib/ai/cognitive/types.ts`, `lib/ai/cognitive/contracts.ts`, `lib/ai/cognitive/observation.ts`, `scripts/phase8/cognitive-observation-fixtures.ts`.
+MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
+No other files changed.

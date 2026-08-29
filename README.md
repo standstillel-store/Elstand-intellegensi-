@@ -323,6 +323,40 @@ data. ElVoid AI Paper Trader's signal engine follows the same rules-first
 philosophy and is untouched by this phase: plain, explainable rules over
 live data, no black box.
 
+## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1)
+
+`app/api/elvoid-pro/oracle/route.ts` runs a deterministic pipeline — real
+market data in, a canonical trading decision out:
+
+```
+Market/Data Layer
+        v
+Deterministic Oracle Analysis (confluence -> risk plan -> grading)
+        v
+Canonical Oracle Decision (OracleAssessment: side/grade/confidence/riskStatus)
+        v
+Cognitive Observation (NEW, Phase 8.0.1 — read-only)
+        v
+Future Working Memory / Hypothesis / Planning / Meta Evaluation
+        v
+Optional LLM Narrative (Phase 7.9 Reasoning)
+```
+
+The **Cognitive Layer** (`lib/ai/cognitive/`) is a downstream,
+context-only observer of that pipeline. It never overrides, mutates, or
+duplicates the canonical decision, never fetches data or calls an LLM
+itself, and its failure never breaks the Oracle route.
+
+- **Phase 8.0.1 — Cognitive Observation** is the first (and so far only)
+  capability. A `CognitiveObservation` is an immutable snapshot answering
+  one question: *"what does the Oracle already know right now?"* — it is
+  a copy of the canonical assessment's key fields, the same normalized
+  evidence the pipeline already computed, which context modules
+  (MTF/regime/liquidity/scenarios/contradictions/arbitration/risk
+  intelligence) were actually available, and an honest aggregate quality
+  (`real` / `mixed` / `degraded` / `unavailable`). It is not a trading
+  signal, not a second decision engine, and not an LLM opinion.
+
 ## Setup
 
 ```bash
