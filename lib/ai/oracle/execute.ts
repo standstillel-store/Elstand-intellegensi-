@@ -31,6 +31,8 @@ import type { AiSignal, OrderType } from "../../elvoid/types";
 import type { OracleAssessment, OracleRiskPlan } from "./gradingTypes";
 import { detectPatterns } from "./insight";
 import type { ConfluenceResult } from "./confluenceTypes";
+import { captureDecisionExperience } from "../decisionOutcome/repository";
+import type { LearningContextSnapshot } from "../decisionOutcome/contracts";
 
 export interface ExecuteOracleSignalResult {
   success: true;
@@ -90,11 +92,39 @@ function buildReasonText(assessment: OracleAssessment, setup: string): string {
  * validated OracleRiskPlan (assessment.riskStatus === "valid"); this
  * function itself computes nothing price-related.
  */
+/**
+ * Phase 8.1.0 — best-effort, fire-and-forget Decision Experience capture
+ * into the isolated ELVOID Learning Database. Never awaited by the
+ * caller's success path, never allowed to affect the trading result:
+ * any failure (Learning DB unconfigured, network error, etc.) is caught
+ * and swallowed here. This function does not read back its own result —
+ * it exists purely so a capture failure can never surface as an
+ * execute-signal failure.
+ */
+function captureDecisionExperienceBestEffort(row: AiSignal, learningContext: LearningContextSnapshot | null | undefined): void {
+  captureDecisionExperience(row, learningContext ?? null).catch(() => {
+    // Intentionally swallowed — Learning DB capture must never affect the
+    // canonical trading result. See lib/ai/decisionOutcome/repository.ts
+    // for the typed (non-throwing) result this call already produces on
+    // its own; this catch only guards against an unexpected rejection.
+  });
+}
+
 export async function executeOracleSignal(
   assessment: OracleAssessment,
   risk: OracleRiskPlan,
   confluence?: ConfluenceResult,
-  orderType: OrderType = "market"
+  orderType: OrderType = "market",
+  /**
+   * Phase 8.1.0 — optional, additive. The client-submitted, already-
+   * normalized `LearningContextSnapshot` from this same assessment's
+   * `/api/elvoid-pro/oracle` response (see that route's `learningContext`
+   * field). `undefined`/`null` is valid and expected for every request
+   * from a client that predates this field, and for every normal
+   * AI_SIGNAL-sourced decision, which never has one — this function
+   * never fabricates a context when none is supplied.
+   */
+  learningContext?: LearningContextSnapshot | null
 ): Promise<ExecuteOracleSignalResult | ExecuteOracleSignalError> {
   if (assessment.grade === "NO_TRADE" || !assessment.side) {
     return { success: false, error: "Sinyal ini NO_TRADE — tidak ada setup untuk dieksekusi." };
@@ -118,6 +148,7 @@ export async function executeOracleSignal(
       // the job via the normal path instead of creating a duplicate row.
       const result = await executeExistingSignal(row.id, orderType);
       if ("error" in result) return { success: false, error: result.error };
+      captureDecisionExperienceBestEffort(row, learningContext);
       return { success: true, signalId: oracleSignalId, source: "ELVOID_PRO_ORACLE", grade: assessment.grade, paperTradeId: result.signal.id, premium: true, alreadyExecuted: false };
     }
     return { success: true, signalId: oracleSignalId, source: "ELVOID_PRO_ORACLE", grade: assessment.grade, paperTradeId: row.id, premium: true, alreadyExecuted: true };
@@ -162,6 +193,7 @@ export async function executeOracleSignal(
       if (row.status !== "new") return { success: true, signalId: oracleSignalId, source: "ELVOID_PRO_ORACLE", grade: assessment.grade, paperTradeId: row.id, premium: true, alreadyExecuted: true };
       const result = await executeExistingSignal(row.id, orderType);
       if ("error" in result) return { success: false, error: result.error };
+      captureDecisionExperienceBestEffort(row, learningContext);
       return { success: true, signalId: oracleSignalId, source: "ELVOID_PRO_ORACLE", grade: assessment.grade, paperTradeId: result.signal.id, premium: true, alreadyExecuted: false };
     }
     return { success: false, error: insertError?.message ?? "Gagal membuat PaperTrade record untuk sinyal Premium." };
@@ -170,6 +202,7 @@ export async function executeOracleSignal(
   const row = inserted as AiSignal;
   const result = await executeExistingSignal(row.id, orderType);
   if ("error" in result) return { success: false, error: result.error };
+  captureDecisionExperienceBestEffort(row, learningContext);
 
   return { success: true, signalId: oracleSignalId, source: "ELVOID_PRO_ORACLE", grade: assessment.grade, paperTradeId: result.signal.id, premium: true, alreadyExecuted: false };
 }

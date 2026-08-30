@@ -1220,3 +1220,194 @@ None. The implementation follows the approved contract and route-wiring instruct
 NEW: `lib/ai/cognitive/context.ts`, `scripts/phase8/cognitive-context-fixtures.ts`.
 MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
 No other files changed. Confirmed: no database table, no LLM call, no persistence, and no new API response field were added in this phase.
+
+---
+
+## Phase 8.1.0 — Decision Outcome Capture (ELVOID Learning Database)
+
+### Baseline correction
+This implementation was preceded by three audit-only turns in this conversation, the last of which confirmed against the actual uploaded repository (not assumed from any prior report) that: Phase 8.0.0–8.0.5 are complete and unmodified in this snapshot; `lib/ai/decisionOutcome/` did not yet exist; `CognitiveDecisionContext` was built in `app/api/elvoid-pro/oracle/route.ts` but discarded before the JSON response (never reaching `execute-signal`); and no prior Phase 8.1 code existed anywhere in this repository. This implementation proceeds from that confirmed baseline.
+
+### Purpose
+Phase 8.1 ("Self-Evaluation & Adaptive Learning") begins here. This phase establishes the minimal capture boundary — Decision + Context-at-decision-time + Action → Outcome — using a **new, isolated ELVOID Learning Database** (a separate Supabase project), while Main Supabase remains the sole canonical authority for `ai_signals`/`ai_journal`. It does **not** evaluate decision quality, does not classify good/bad decisions, does not detect patterns, and does not learn — those are explicitly deferred to Phase 8.1.1+.
+
+### Files created
+- `lib/ai/learning/db.ts` — isolated Supabase client for the ELVOID Learning Database. Reads only `ELVOID_LEARNING_SUPABASE_URL`/`ELVOID_LEARNING_SERVICE_ROLE_KEY`; returns `null` (never falls back to `lib/supabase.ts`'s Main DB client) when unconfigured.
+- `supabase/learning/schema.sql` — isolated schema for the **separate** Learning Database project (does NOT touch `supabase/schema.sql`, the Main DB schema). Defines `decision_experiences` with `UNIQUE(source_signal_id)` — see Identifier strategy below — RLS enabled, zero public policies (mirrors `ai_signals`/`ai_journal`'s own service-role-only convention).
+- `lib/ai/decisionOutcome/contracts.ts` — `DecisionSource` (reused directly from `AiSignal["source"]`, no duplicate enum), `LearningContextSnapshot`, `DecisionExperienceInput`, `DecisionExperienceOutcomePatch`, `DecisionExperienceRecord`.
+- `lib/ai/decisionOutcome/capture.ts` — pure functions only: `normalizeLearningContext()`, `buildDecisionExperienceInput()`, `buildDecisionExperienceOutcome()`. Zero database/network/LLM imports.
+- `lib/ai/decisionOutcome/repository.ts` — persistence adapters only: `getSignalById()`/`getJournalEntryBySignalId()` (Main DB, read-only), `persistDecisionExperience()`/`persistDecisionOutcome()` (Learning DB, idempotent writes), plus two orchestration helpers (`captureDecisionExperience()`, `captureAndPersistOutcome()`) that compose the pure functions with the adapters — no domain logic inlined here.
+- `scripts/phase8/decision-outcome-fixtures.ts` — 22 deterministic, offline fixture checks.
+
+### Files modified
+- `app/api/elvoid-pro/oracle/route.ts` — one additive field. `normalizeLearningContext(decisionContext)` is computed defensively (try/catch) immediately after `decisionContext` itself, and the single new field `learningContext` is added to the existing `NextResponse.json(...)` call. Every previously-existing response field is unchanged.
+- `app/api/elvoid-pro/execute-signal/route.ts` — `ExecuteBody` gains one optional field, `learningContext?: LearningContextSnapshot | null`. A minimal shape check (`typeof === "object" && version === 1`) silently drops a malformed value rather than rejecting the request — a bad `learningContext` must never block a valid trade. Fully backward compatible: a client that never sends this field behaves exactly as before.
+- `lib/ai/oracle/execute.ts` — `executeOracleSignal()` gains one optional trailing parameter, `learningContext?: LearningContextSnapshot | null`. After every successful insert-and-execute path (fresh insert, and the pre-existing-row race-recovery path), a new `captureDecisionExperienceBestEffort()` call fires `captureDecisionExperience()` without awaiting its result and swallows any rejection — a Learning DB failure can never surface as a trade-execution failure. No existing logic in this file (idempotency check, `buildOracleSignalId()`, grading, insert shape) was changed.
+- `.env.example` — three new, secret-free variable names documented (`ELVOID_LEARNING_SUPABASE_URL`/`_ANON_KEY`/`_SERVICE_ROLE_KEY`), following the file's existing per-phase section convention. No existing entry altered.
+- `README.md` — pipeline diagram extended with the new capture step; new "Decision Outcome Capture & ELVOID Learning Database" section added before Setup.
+- `CHANGES.md` — this entry.
+
+### Learning Database architecture
+```
+MAIN SUPABASE (unchanged, canonical)         ELVOID LEARNING DATABASE (NEW, isolated project)
+ai_signals ──┐                               decision_experiences
+ai_journal ──┴── read-only, server-side ────→   source_signal_id  (logical reference to
+                 (lib/ai/decisionOutcome/         ai_signals.id — NO cross-project SQL FK)
+                 repository.ts)                  learning_context jsonb (frozen snapshot)
+                                                  outcome_* (written at most once)
+```
+No SQL foreign key crosses the two projects (not possible, and would wrongly couple two independently-resettable databases even if it were). The relationship is a logical `source_signal_id` string reference only.
+
+### Main DB vs Learning DB authority boundary
+- **Main DB (`ai_signals`/`ai_journal`)**: sole canonical authority for decision/action and outcome. Never duplicated, never recomputed, never written to by this phase's new code (only read).
+- **Learning DB (`decision_experiences`)**: a learning *projection*. Never trusted as a trading authority, never read by any trading/execution code path — `paperTrader.ts`, the Oracle grading pipeline, and the execute-signal request handler never query it.
+
+### Environment variables required
+```
+ELVOID_LEARNING_SUPABASE_URL=
+ELVOID_LEARNING_SUPABASE_ANON_KEY=
+ELVOID_LEARNING_SERVICE_ROLE_KEY=
+```
+No secrets committed anywhere; `.env.example` documents only the variable names, matching the file's existing convention. `ELVOID_LEARNING_SERVICE_ROLE_KEY` is read only by `lib/ai/learning/db.ts`, server-side, and is never returned in any API response or logged.
+
+### LearningContextSnapshot contract
+```ts
+interface LearningContextSnapshot {
+  readonly version: 1;
+  readonly grade: OracleGrade | null;              // "NO_TRADE"|"B+"|"A"|"A+" — the live Oracle-assessment scale, kept separate from ai_signals.trade_grade/oracle_grade
+  readonly confidence: number;
+  readonly hypotheses: readonly { status: HypothesisStatus; uncertainty: HypothesisUncertainty }[] | null;
+  readonly conflictState: CognitiveCoherenceState | null;
+  readonly riskOverall: RiskSeverity | null;
+  readonly riskContextQuality: RiskContextQuality | null;
+}
+```
+Every field reuses an existing repository enum/type — no duplicate or incompatible enum was introduced. Explicitly excluded (fixtures 4–5 assert these never appear in output): `CognitiveObservation` in full, `CognitiveWorkingMemory`, hypothesis `statement`/`supportingEvidence`/`opposingEvidence`, conflict `reasons`/`contributingFactors`, any raw market payload, any LLM output.
+
+### Context handoff implementation
+Chosen mechanism: browser/API round-trip — the client receives `learningContext` in the `GET /api/elvoid-pro/oracle` response and resubmits it verbatim in the `POST /api/elvoid-pro/execute-signal` body, identical in shape and trust level to how `assessment`/`risk`/`confluence` already work in this exact route pair. This was chosen over a server-side in-memory cache because this app deploys to a serverless platform (Vercel) where a module-level cache cannot reliably bridge two separate function invocations — not a style preference but a deployment-topology constraint identified during the audit. No new authentication/session mechanism, no cryptographic signing (evaluated and rejected as unjustified overhead — `assessment`/`risk` already cross this same boundary with the same trust model and no prior compensating control exists for them either), no server-side cache, no request token table.
+
+### Decision Experience lifecycle
+```
+executeOracleSignal(assessment, risk, confluence, orderType, learningContext)
+  -> ai_signals row inserted (Main DB, unchanged shape/logic)
+  -> captureDecisionExperienceBestEffort(row, learningContext)   [fire-and-forget]
+       -> buildDecisionExperienceInput(row, learningContext)      [pure]
+       -> persistDecisionExperience(input)                        [Learning DB, idempotent upsert]
+```
+
+### Outcome capture strategy
+`captureAndPersistOutcome(signalId)` and its building blocks (`getJournalEntryBySignalId()`, `buildDecisionExperienceOutcome()`, `persistDecisionOutcome()`) are implemented and fixture-tested, but **intentionally not wired into any automatic trigger in this phase** — `lib/elvoid/paperTrader.ts` (the only place a trade's close/outcome event actually fires) is a protected file this phase does not modify, and no cron/queue/scheduled job was introduced (explicitly prohibited). This is a deliberate, honest scope boundary, not an oversight: the capability exists and is tested against hand-built fixtures; wiring an automatic outcome-capture trigger is left to a future phase's explicit approval. Outcome data, when captured, is copied verbatim from `ai_journal` — never recomputed, never trusted from a client.
+
+### Idempotency strategy
+- **Decision capture**: `persistDecisionExperience()` uses a single atomic `upsert(..., { onConflict: "source_signal_id", ignoreDuplicates: true })` against the Learning DB's own `UNIQUE(source_signal_id)` constraint — not a check-then-insert race, no invented distributed lock. A retried/duplicated capture for the same `ai_signals.id` never creates a second row.
+- **Identifier strategy**: `source_signal_id` = the Main DB's `ai_signals.id`, which is already globally unique across both `AI_SIGNAL` and `ELVOID_PRO_ORACLE` rows (single shared table, per the Phase 8.1.0/8.1.1 audits already on record in this conversation) — so `UNIQUE(source_signal_id)` alone is correct; a composite `UNIQUE(source, source_signal_id)` was considered and rejected as redundant, not guessed.
+- **Outcome capture**: `persistDecisionOutcome()` uses a conditional `UPDATE ... WHERE outcome_result IS NULL`, mirroring `lib/bugHunter/store.ts`'s existing `WHERE used_at IS NULL` one-time-use pattern already in this repository. A repeated call after the outcome is already set matches zero rows and is reported as `updated: false` — never a second write, never an overwrite.
+
+### Immutability guarantees
+Decision-time fields (`grade`/`confidence`/`learning_context`/`decision_timestamp`/etc.) are written exactly once, at insert, and never updated by any code path in this phase. `learning_context` is a flat, frozen, versioned copy of already-computed values — never a live reference, so a future change to `hypothesis.ts`'s or `conflict.ts`'s classification rules cannot reinterpret an already-stored historical record (fixture 6 explicitly verifies that mutating the source object after normalization does not change an already-produced snapshot).
+
+### Security boundary
+`learningContext` crosses the same HTTP boundary, with the same trust level, as `assessment`/`risk` already do in this exact request — not a new risk category. Minimum-necessary validation only: presence + shape (`version === 1`), silently dropped (not request-rejecting) if malformed. No cryptographic signing was added — evaluated in the preceding audit turn and found unjustified by any existing repository precedent (the same trust model already governs `assessment`/`risk` with no signing). Service-role keys (`SUPABASE_SERVICE_ROLE_KEY` and the new `ELVOID_LEARNING_SERVICE_ROLE_KEY`) remain server-side only; neither is read, logged, or returned by any file touched in this phase.
+
+### Fixture results (`scripts/phase8/decision-outcome-fixtures.ts`) — 22/22 passed
+1. `normalizeLearningContext` deterministic. 2. Does not mutate input. 3. Snapshot contains exactly the 7 allowed fields. 4–5. No evidence/statement/contributingFactors/reasons leak into output. 6. Source mutation after normalization does not affect an already-produced snapshot. 7a–7d. `null` context/hypotheses/conflict/risk each map to `null`, never fabricated. 8. `version` stable at `1`. 9–10. Hypothesis/conflict values copied verbatim, never recomputed. 11/13/14/20. No LLM/Binance/persistence dependency inside the pure functions or the Learning DB client (verified by source inspection, documented as such rather than falsely claimed as a live-executed check). 12. Synchronous, no I/O. 15/17. `sourceSignalId` correctly references `ai_signals.id`, independent of `buildOracleSignalId()`'s own hash scheme. 16. Idempotent-upsert design verified structurally. 18. `AI_SIGNAL` source with `learningContext = null` is valid. 19. No forbidden duplicate-authority field names; canonical `side`/`grade`/`confidence` copied verbatim. 21. Outcome fields copied verbatim from `AiJournalEntry`. 22. Input objects byte-identical after `buildDecisionExperienceInput`/`Outcome`.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/decision-outcome-fixtures.ts`
+
+Note on scope: cases 11/13/14/16/20 are structural/source-inspection assertions rather than live-executed checks, because `lib/ai/decisionOutcome/repository.ts` and `lib/ai/learning/db.ts` transitively import `@supabase/supabase-js`, an external package not installable in this offline sandbox (no `node_modules`, no network egress) — documented honestly rather than silently skipped or falsely reported as executed.
+
+### Regression
+- `scripts/phase8/cognitive-observation-fixtures.ts` — re-ran unmodified, **10/10 passed**.
+- `scripts/phase8/cognitive-context-fixtures.ts` — re-ran unmodified, **22/22 passed**.
+- No other fixture suite in this repository snapshot touches `lib/ai/decisionOutcome/*`, `lib/ai/learning/*`, or the two modified API routes' new field.
+- `grep` across `lib/ai/cognitive/*`, `lib/ai/oracle/*` (excluding `execute.ts`'s new optional parameter itself), `lib/ai/core/*`, `lib/elvoid/paperTrader.ts`, `lib/elvoid/performance.ts`, `lib/elvoid/review.ts`, `app/api/ai-signals/*`, `app/api/ai-journal/*`, `app/api/ai-performance/*`, and the Binance `bn_*` subsystem confirms zero imports of `lib/ai/decisionOutcome/*` or `lib/ai/learning/*` from any of them — one-way dependency direction confirmed.
+
+### Typecheck / build
+- `npx tsc --noEmit` — whole-repo run fails with ~9,900 errors, all attributable to this sandbox having **no `node_modules`** and no network access to install them (a pre-existing environment restriction, confirmed by the fact that `lib/supabase.ts` — an untouched, protected file — throws the identical `@supabase/supabase-js`/`process` error pattern). Not caused by this phase.
+- Isolated check: filtering for the files this phase touched shows **zero logic errors** — `lib/ai/decisionOutcome/contracts.ts`, `capture.ts`, and `repository.ts` produce **no errors at all**. `lib/ai/learning/db.ts`, the two modified API routes, and the new fixture script show only the same `next/server`/`@supabase/supabase-js`/`process`-missing pattern every other file in the repo already exhibits (confirmed by direct comparison against `lib/supabase.ts` and `app/api/ai-signals/scan/route.ts`, both untouched).
+- `next build` was not attempted — same unavailable `node_modules`, plus the previously-documented blocked Google Fonts egress; this phase adds no new build-time dependency, so an attempt would only re-surface already-documented, unrelated restrictions.
+
+### Deviations from specification
+- Outcome-capture auto-triggering was **not** wired into `paperTrader.ts`'s close event, per the "Known limitations" note above — this is an explicit, reasoned scope boundary (protected file + no-cron rule), not an unnoticed gap.
+- `decision_experiences` uses `UNIQUE(source_signal_id)` rather than the task's fallback suggestion `UNIQUE(source, source_signal_id)`, because repository evidence (both prior audits in this conversation) established `ai_signals.id` is already globally unique across both sources — using the composite key would have been guessing where evidence already existed.
+
+### Known limitations
+- Outcome capture (`captureAndPersistOutcome`) exists and is tested but has no automatic trigger yet — see above. A future phase must decide how it's invoked (a new, explicitly-approved hook point, not a cron job).
+- `repository.ts` and `lib/ai/learning/db.ts` could not be exercised against a live (or mocked) Supabase instance in this sandbox — verified structurally and via the fixture suite's pure-function coverage instead; recommend a live smoke test against real Main DB + Learning DB instances before this reaches production traffic.
+- `learningContext` is only ever populated for `ELVOID_PRO_ORACLE`-sourced decisions today (the only path that builds a `CognitiveDecisionContext` at all) — `AI_SIGNAL`-sourced decisions are not currently wired to call `captureDecisionExperience()` at all (that flow never calls `executeOracleSignal()`), so **no Decision Experience is captured yet for normal AI Signal trades**. The underlying `capture.ts`/`repository.ts` functions are source-agnostic and ready for this, but wiring the normal AI Signal flow (`app/api/ai-signals/*`, a protected file) into decision-experience capture was left out of scope for this phase and would require separate, explicit approval.
+
+### Scope check
+NEW: `lib/ai/learning/db.ts`, `supabase/learning/schema.sql`, `lib/ai/decisionOutcome/contracts.ts`, `lib/ai/decisionOutcome/capture.ts`, `lib/ai/decisionOutcome/repository.ts`, `scripts/phase8/decision-outcome-fixtures.ts`.
+MODIFIED: `app/api/elvoid-pro/oracle/route.ts` (additive field only), `app/api/elvoid-pro/execute-signal/route.ts` (additive, backward-compatible optional field), `lib/ai/oracle/execute.ts` (additive, backward-compatible optional parameter + best-effort capture call), `.env.example`, `README.md`, `CHANGES.md`.
+MUST-REMAIN-UNTOUCHED confirmed clean: `supabase/schema.sql` (Main DB schema, not modified), `lib/supabase.ts`, `lib/elvoid/paperTrader.ts`, `lib/elvoid/performance.ts`, `lib/elvoid/review.ts`, `lib/elvoid/engine.ts`, `lib/ai/cognitive/*` (all five files), `lib/ai/core/*`, `app/api/ai-signals/*`, `app/api/ai-journal/*`, `app/api/ai-performance/*`, Binance Auto-Trader subsystem and all `bn_*` tables, Main Supabase auth architecture.
+No autonomous execution, no LLM call, no Phase 8.1.1+ logic (evaluation/scoring/pattern detection/adaptive constraints/learning validation) was implemented.
+
+---
+
+## Phase 8.1.0 — Learning Database Environment Finalization
+
+### Purpose
+A narrow correction, based on a completed audit turn in this conversation that compared the Phase 8.1.0 environment naming against this repository's own established second-Supabase-project precedent (`lib/supabaseData.ts`'s `DATA_SUPABASE_URL`/`DATA_SUPABASE_SERVICE_ROLE_KEY`). No learning logic, Cognitive Layer behavior, schema, or trading behavior was touched.
+
+### Old names removed
+- `ELVOID_LEARNING_SERVICE_ROLE_KEY` (missing `_SUPABASE_`, inconsistent with the `DATA_SUPABASE_*` pattern) — zero references remain anywhere in the repository outside this file's own historical entry above (intentionally preserved as an accurate record of what was implemented at the time).
+- `ELVOID_LEARNING_SUPABASE_ANON_KEY` (unused dead configuration — no code ever read it, and no legitimate browser-facing use case exists for a Learning DB anon key) — removed entirely, zero references remain.
+
+### Final names
+```
+ELVOID_LEARNING_SUPABASE_URL
+ELVOID_LEARNING_SUPABASE_SERVICE_ROLE_KEY
+```
+Exactly two variables — no anon key. Confirmed by direct comparison against `lib/supabaseData.ts`, this repo's only other second-Supabase-project client, which also uses URL + service-role-only, no anon key, anywhere.
+
+### Files modified
+- `lib/ai/learning/db.ts` — `isLearningSupabaseConfigured()` and `getLearningSupabase()` now read `ELVOID_LEARNING_SUPABASE_SERVICE_ROLE_KEY` instead of `ELVOID_LEARNING_SERVICE_ROLE_KEY`. No other logic changed — same null-on-missing-config behavior, same no-fallback guarantee, same server-only scope.
+- `.env.example` — Learning Database section reduced from three lines to two (`ELVOID_LEARNING_SUPABASE_ANON_KEY=` removed), header comment updated to explicitly note the URL+service-role-only pattern and cross-reference `DATA_SUPABASE_*`'s identical precedent.
+- `README.md` — the "Decision Outcome Capture & ELVOID Learning Database" section's env var block and surrounding prose updated to the two final names; explicitly states no anon key exists for this project.
+- `scripts/phase8/decision-outcome-fixtures.ts` — one comment (case 20) updated to reference the correct variable name; no test logic changed.
+
+### Files inspected, left unmodified
+`lib/ai/decisionOutcome/contracts.ts`, `capture.ts`, `repository.ts` (no direct `process.env.ELVOID_LEARNING_*` reference exists in any of them — only `lib/ai/learning/db.ts` reads these vars, confirmed by repository-wide grep before making any change), `supabase/learning/schema.sql` (no env var name appears in SQL), `lib/supabase.ts`, `lib/supabaseData.ts`, `lib/auth/*`, `middleware.ts`, all Cognitive Layer files, all Phase 7 Oracle modules, `lib/elvoid/paperTrader.ts`/`performance.ts`/`review.ts`, all Binance/`bn_*` files, `app/api/ai-signals/*`/`ai-journal/*`/`ai-performance/*` — none reference the Learning DB env vars at all, confirmed by the same grep.
+
+### Historical record note
+This CHANGES.md's own Phase 8.1.0 entry above (the original implementation report) is left as-is — an accurate record of what was implemented at that time, including the now-superseded variable names. This new entry is the authoritative correction; the two together form the complete history.
+
+### Server-only boundary confirmation
+- `lib/ai/learning/db.ts` has no `"use client"` directive; its only consumer, `lib/ai/decisionOutcome/repository.ts`, also has none (confirmed by fixture 10 below).
+- Repository-wide grep confirms only `lib/ai/decisionOutcome/repository.ts` (and, in a doc-comment only, `contracts.ts`) reference `lib/ai/learning/db.ts` at all — no route handler, Server Component, or client component imports it directly.
+- No credential is returned by any API response or written to any log line anywhere in `lib/ai/learning/db.ts` (confirmed by fixture 9 below — zero `console.*` calls in the file).
+
+### Fallback confirmation
+`lib/ai/learning/db.ts` contains zero references to `process.env.NEXT_PUBLIC_SUPABASE_URL`, `process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY`, `process.env.SUPABASE_SERVICE_ROLE_KEY` (Main DB), or `process.env.DATA_SUPABASE_URL`/`process.env.DATA_SUPABASE_SERVICE_ROLE_KEY` (Data DB) — confirmed by fixtures 6–7 below. Its only failure path is `return null`, never a silent redirect to another project.
+
+### Timeout hardening decision: not added
+`lib/supabaseData.ts`'s `timeoutFetch` (8s abort) exists because its Data DB read is **awaited synchronously on the request-response path** — a hang there is "indistinguishable from an RPC hang from the outside," directly blocking the user-facing response. `lib/ai/learning/db.ts`'s only caller, `lib/ai/oracle/execute.ts`'s `captureDecisionExperienceBestEffort()`, is explicitly **fire-and-forget** — `captureDecisionExperience(...).catch(() => {})`, never `await`ed by `executeOracleSignal()`. A hang inside the Learning DB write therefore cannot delay or block the trade-execution response at all; it can only leave a dangling promise, which Vercel's Node serverless runtime already bounds by the function's own execution lifetime regardless. Given the call is already non-blocking, adding a timeout wrapper would add complexity without a corresponding user-facing benefit — the specific failure mode `lib/supabaseData.ts`'s timeout protects against (a hung *awaited* read) does not exist on this code path. **Decision: not added**, per the "do not invent complexity" instruction; documented here rather than silently applied or silently skipped.
+
+### Fixture results
+
+**New: `scripts/phase8/learning-db-env-fixtures.ts` — 12/12 passed.** Static source-scan verification (no live Supabase connection): 1/1b. New var names present in `db.ts`. 2/2b. Old service-role name absent (with a sanity check that the old name isn't a false-positive substring of the new one). 3a/3b. Anon key name absent from both `db.ts` and `.env.example`. 4/5. Neither var is ever prefixed `NEXT_PUBLIC_`. 6/7. `db.ts` reads no Main DB or Data DB credential. 8. The missing-config guard returns `null`, never throws (verified structurally, since live execution would require `@supabase/supabase-js`, unavailable in this offline sandbox). 9. Zero `console.*` calls in `db.ts`. 10. Neither `db.ts` nor its only consumer `repository.ts` is a `"use client"` module.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/learning-db-env-fixtures.ts`
+
+### Regression — full Phase 8 suite, all re-run this pass
+- `scripts/phase8/cognitive-observation-fixtures.ts` (8.0.1) — passed.
+- `scripts/phase8/cognitive-memory-fixtures.ts` (8.0.2) — passed.
+- `scripts/phase8/cognitive-hypothesis-fixtures.ts` (8.0.3) — passed.
+- `scripts/phase8/cognitive-conflict-fixtures.ts` (8.0.4) — passed.
+- `scripts/phase8/cognitive-context-fixtures.ts` (8.0.5) — passed.
+- `scripts/phase8/decision-outcome-fixtures.ts` (8.1.0) — **22/22 passed**, unmodified except the one comment fix noted above.
+
+### Typecheck
+`npx tsc --noEmit` — whole-repo run still fails only on the same pre-existing missing-`node_modules` pattern documented in every prior Phase 8 entry (confirmed identical on untouched `lib/supabase.ts`). Filtering for every file touched this pass (`lib/ai/learning/db.ts`, `scripts/phase8/learning-db-env-fixtures.ts`) shows only that same `@supabase/supabase-js`/`node:fs/promises`/`process`-missing pattern — zero logic errors introduced. `lib/ai/decisionOutcome/{contracts,capture,repository}.ts` remain untouched by this pass and were re-confirmed to show zero errors.
+
+### Build
+Not attempted — same unavailable `node_modules`, plus the previously-documented blocked Google Fonts egress; this pass changes no build-time dependency.
+
+### Confirmation
+No Cognitive Layer, trading, or authentication behavior changed — this pass touched exactly `lib/ai/learning/db.ts` (two variable-name references), `.env.example`, `README.md`, one comment in `scripts/phase8/decision-outcome-fixtures.ts`, and added one new fixture file. `git status --porcelain` confirms no protected file (`lib/ai/cognitive/*`, `lib/ai/core/*`, `lib/ai/oracle/*` other than the untouched `execute.ts` from the prior pass, `lib/elvoid/paperTrader.ts`/`performance.ts`/`review.ts`, `lib/supabase.ts`, `lib/supabaseData.ts`, `lib/auth/*`, `middleware.ts`, `app/api/ai-signals/*`/`ai-journal/*`/`ai-performance/*`, Binance/`bn_*`) appears in the diff for this pass.
+
+### Scope check
+NEW: `scripts/phase8/learning-db-env-fixtures.ts`.
+MODIFIED: `lib/ai/learning/db.ts`, `.env.example`, `README.md`, `scripts/phase8/decision-outcome-fixtures.ts` (one comment), `CHANGES.md`.
+No schema change. No new table. No architecture redesign. No Cognitive/Oracle/Trading/Auth file touched.

@@ -345,7 +345,10 @@ Cognitive Hypothesis Engine (Phase 8.0.3 — deterministic reframing, public)
         v
 Cognitive Conflict Resolution (Phase 8.0.4 — coherence classification, public summary)
         v
-Cognitive Decision Context (NEW, Phase 8.0.5 — internal assembly only)
+Cognitive Decision Context (Phase 8.0.5 — internal assembly only)
+        v
+Decision Outcome Capture (NEW, Phase 8.1.0 — decision-time snapshot into
+                           the isolated ELVOID Learning Database)
         v
 Future Evaluation / Learning / Agent layers
         v
@@ -457,6 +460,98 @@ itself, and its failure never breaks the Oracle route.
   elsewhere in that same response. Its purpose is solely to save a future
   downstream consumer (evaluation/learning/agent layers, not yet built)
   from having to re-thread four separate parameters itself.
+
+## Decision Outcome Capture & ELVOID Learning Database (Phase 8.1.0)
+
+Phase 8.1 ("Self-Evaluation & Adaptive Learning") begins here, with the
+smallest correct first step: **capturing** a decision's context alongside
+its eventual outcome. It does **not** evaluate whether a decision was
+good or bad, does not score correctness, does not detect failure
+patterns, and does not learn anything — those are explicitly deferred to
+Phase 8.1.1 onward.
+
+### Why a separate database
+
+```
+MAIN SUPABASE                          ELVOID LEARNING DATABASE (NEW)
+├── Authentication / Users             (a SEPARATE Supabase project)
+├── Wallet / Earn / Rewards            │
+├── ai_signals  ←── canonical ─────────┼──┐
+├── ai_journal  ←── decision/action    │  │  logical reference only —
+├── Paper Trading    & outcome         │  │  NEVER a SQL foreign key
+└── Application Operational Data       │  │  across projects
+                                        │  v
+                                        └── decision_experiences
+                                              (source_signal_id = ai_signals.id)
+```
+
+Main Supabase remains the **sole canonical authority** for `ai_signals`
+(decision/action) and `ai_journal` (outcome) — nothing about this phase
+changes that, duplicates it, or reinterprets it. The **ELVOID Learning
+Database** is a dedicated, isolated Supabase project that stores a
+learning *projection* of that history — never a replacement, never a
+second trading authority. Keeping it in its own project means a future
+Phase 8.1.2+ pattern-detection workload, a learning-data schema change, or
+even a full reset of learning data can never touch operational, financial,
+or auth tables, and vice versa.
+
+Required environment variables (server-side only — see `.env.example`):
+```
+ELVOID_LEARNING_SUPABASE_URL=
+ELVOID_LEARNING_SUPABASE_SERVICE_ROLE_KEY=
+```
+No anon key exists for this project — only server-side code ever connects
+to it, matching `lib/supabaseData.ts`'s own `DATA_SUPABASE_URL`/
+`DATA_SUPABASE_SERVICE_ROLE_KEY` precedent for a second Supabase project
+in this repo. `ELVOID_LEARNING_SUPABASE_SERVICE_ROLE_KEY` must never reach
+a `"use client"` component, an API response, or a log line — identical
+rule to `SUPABASE_SERVICE_ROLE_KEY`. `lib/ai/learning/db.ts`'s client
+reads *only* these two vars and **never** falls back to the Main Supabase
+or Data Supabase clients if they're unset — it returns `null` and every
+caller degrades gracefully (the capture is skipped; trading is never
+affected).
+
+### Decision Experience lifecycle
+
+```
+GET /api/elvoid-pro/oracle
+   -> CognitiveDecisionContext (Phase 8.0.5, internal)
+   -> normalizeLearningContext() -> LearningContextSnapshot (small, flat, frozen)
+   -> included in the response as `learningContext` (additive field only)
+
+client round-trips `learningContext` alongside the existing `assessment`/
+`risk`/`confluence` fields (same mechanism, same trust level as today)
+
+POST /api/elvoid-pro/execute-signal
+   -> executeOracleSignal(..., learningContext)
+   -> ai_signals row inserted (Main DB, unchanged)
+   -> best-effort, fire-and-forget: captureDecisionExperience()
+        -> decision_experiences row (Learning DB) — idempotent on
+           UNIQUE(source_signal_id); never blocks or fails the trade
+```
+
+A `LearningContextSnapshot` is intentionally small and flat — grade,
+confidence, hypothesis statuses/uncertainty, conflict state, risk
+severity/context quality — never the raw evidence arrays, internal
+conflict factors, or full nested Cognitive Layer objects. It is `null`
+whenever the originating decision has no Cognitive Layer context, which
+is true today for every normal AI Signal-sourced decision (only the
+ELVOID PRO Oracle path currently builds a `CognitiveDecisionContext` at
+all) — this is a valid, expected state, never fabricated.
+
+**Immutability:** once written, a `decision_experiences` row's decision
+fields (`grade`/`confidence`/`learning_context`/etc.) are never updated.
+Outcome fields are written **at most once**, later, via a conditional
+`UPDATE ... WHERE outcome_result IS NULL` — so a future change to
+`hypothesis.ts`'s or `conflict.ts`'s classification rules can never
+silently reinterpret a historical decision. A record always represents
+*what ELVOID knew at decision time*, never *what current ELVOID would
+think about that old decision*.
+
+**Not yet implemented (explicitly deferred):** decision-quality scoring,
+good-vs-bad-decision classification, failure pattern detection, decision
+memory retrieval, adaptive constraints, learning validation, and any
+autonomous execution policy. This phase only captures; it does not judge.
 
 ## Setup
 

@@ -17,6 +17,7 @@ import { createWorkingMemory } from "@/lib/ai/cognitive/memory";
 import { buildHypotheses } from "@/lib/ai/cognitive/hypothesis";
 import { resolveCognitiveConflict } from "@/lib/ai/cognitive/conflict";
 import { buildDecisionContext } from "@/lib/ai/cognitive/context";
+import { normalizeLearningContext } from "@/lib/ai/decisionOutcome/capture";
 import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 /**
@@ -233,9 +234,23 @@ export async function GET(req: Request) {
     } catch {
       decisionContext = null;
     }
-    // `decisionContext` is intentionally unread past this point — reserved
-    // for a future downstream consumer (Phase 8.1+) — and intentionally
-    // not part of the response object below.
+
+    // Phase 8.1.0 — Decision Outcome Capture context handoff. The raw
+    // `decisionContext` above stays internal-only, exactly as before
+    // (never added to the response) — only a small, flat, normalized
+    // `learningContext` (grade/confidence/hypothesis statuses/conflict
+    // state/risk severity, see lib/ai/decisionOutcome/contracts.ts) is
+    // exposed, so this route's response is additive-only: every existing
+    // field is unchanged, this is the one new field. `normalizeLearningContext`
+    // is pure and does not recompute anything — it only copies/narrows
+    // values `decisionContext` already carries. Wrapped defensively, same
+    // pattern as every prior 7.x/8.x sub-phase.
+    let learningContext: ReturnType<typeof normalizeLearningContext> = null;
+    try {
+      learningContext = normalizeLearningContext(decisionContext);
+    } catch {
+      learningContext = null;
+    }
 
     // Phase 7.9 — LLM Reasoning. Narrative/interpretation layer only, never
     // a decision engine — side/grade/confidence/riskStatus/invalidation/
@@ -254,7 +269,7 @@ export async function GET(req: Request) {
       reasoning = null;
     }
 
-    return NextResponse.json({ assessment, confluence, insight, risk, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence, cognitiveObservation, hypotheses, cognitiveConflict, reasoning });
+    return NextResponse.json({ assessment, confluence, insight, risk, mtf, regime, liquidityOrderFlow, scenarios, contradictions, arbitration, riskIntelligence, cognitiveObservation, hypotheses, cognitiveConflict, reasoning, learningContext });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Gagal menjalankan ELVOID PRO ORACLE." }, { status: 500 });
   }
