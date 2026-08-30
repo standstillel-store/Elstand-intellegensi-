@@ -2,7 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { LiveDot } from "@/components/ui/LiveDot";
 import { DataStateBadge } from "@/components/ui/DataStateBadge";
 import { MarketIntelligenceStrip } from "@/components/dashboard/premium/MarketIntelligenceStrip";
-import { GlobalRiskRegimePanel } from "@/components/dashboard/premium/GlobalRiskRegimePanel";
+import { FuturesMicrostructurePanel } from "@/components/dashboard/premium/futures/FuturesMicrostructurePanel";
 import { AltcoinScreenerPro } from "@/components/dashboard/premium/AltcoinScreenerPro";
 import { FomcPanel } from "@/components/dashboard/premium/FomcPanel";
 import { MacroNewsPanel } from "@/components/dashboard/MacroNewsPanel";
@@ -53,7 +53,7 @@ export default async function ElstandPremiumPage() {
     >
       <MarketIntelligenceStrip snapshot={snapshot} />
 
-      <GlobalRiskRegimePanel sentiment={snapshot.sentiment} />
+      <FuturesMicrostructurePanel />
 
       <AltcoinScreenerPro
         pumpCandidates={snapshot.pumpCandidates}

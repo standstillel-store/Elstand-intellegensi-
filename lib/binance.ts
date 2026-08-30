@@ -317,6 +317,35 @@ export async function getOpenInterestHistory(
   });
 }
 
+export interface FundingRatePoint {
+  time: number;
+  fundingRate: number;
+}
+
+/**
+ * Historical funding-rate settlements — Binance Futures' public
+ * /fapi/v1/fundingRate endpoint (no key needed). Returns one point per
+ * actual settlement (Binance settles most USDT-M perps 3x/day, so `limit`
+ * is a settlement count, not a day count — a caller asking for "7D" should
+ * request roughly limit = 7 * 3 = 21, "1M" ~= 90, etc. This is a real
+ * historical series, not interpolated/synthesized — a period that doesn't
+ * map onto whole settlements just gets rounded to the nearest full one.
+ * ELSTAND PREMIUM Futures Microstructure module: single-exchange
+ * (Binance Futures) by design — see lib/intelligence/premiumMicrostructure.ts.
+ */
+export async function getFundingRateHistory(symbol: string, limit = 90): Promise<FundingRatePoint[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  const capped = Math.min(1000, Math.max(1, limit));
+  return cached(`bn:funding-hist:${pair}:${capped}`, 5 * 60_000, async () => {
+    const res = await fetch(`${BASE}/fapi/v1/fundingRate?symbol=${pair}&limit=${capped}`, {
+      next: { revalidate: 300 },
+    });
+    if (!res.ok) throw new Error(`Binance fundingRate history failed for ${pair}: ${res.status}`);
+    const raw = (await res.json()) as Array<{ fundingTime: number; fundingRate: string }>;
+    return raw.map((r) => ({ time: r.fundingTime, fundingRate: parseFloat(r.fundingRate) }));
+  });
+}
+
 /**
  * Global long/short account ratio — Binance Futures' public
  * /futures/data/globalLongShortAccountRatio endpoint. Returns the most
