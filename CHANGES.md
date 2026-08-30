@@ -1146,3 +1146,77 @@ A final structurally-unreachable fallback (`INSUFFICIENT_CONTEXT`) closes out th
 NEW: `lib/ai/cognitive/conflict.ts`, `scripts/phase8/cognitive-conflict-fixtures.ts`.
 MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
 No other files changed. `cognitiveConflict` confirmed present (summarized shape) in the API's JSON response; `workingMemory` confirmed still absent.
+
+---
+
+## Phase 8.0.5 — Cognitive Decision Context
+
+### Purpose
+A deterministic, immutable, **runtime-only** structured assembly of existing Cognitive Layer outputs (`CognitiveObservation`, `CognitiveHypothesisSet`, the internal `CognitiveConflictState`, and a narrowed read of `RiskIntelligence`) into one object for future downstream consumers (evaluation/learning/agent layers, not yet built). It answers *"what is the structured cognitive state of the system right now"* — never *"what should we trade / BUY / SELL / execute."* The core principle: **assemble, do not think again.**
+
+### Added
+- `lib/ai/cognitive/context.ts` — `CognitiveDecisionContext`, `buildDecisionContext()`.
+- `scripts/phase8/cognitive-context-fixtures.ts` — 22 deterministic, offline fixture checks.
+
+### Modified
+- `app/api/elvoid-pro/oracle/route.ts` — one additive `try/catch` block placed after `cognitiveConflict` (using the untrimmed `cognitiveConflictInternal`, not the trimmed public `{state, reasons}` shape), before Phase 7.9 Reasoning. `decisionContext` is built defensively and is **NOT** added to `NextResponse.json(...)` — the JSON response object is byte-for-byte unchanged from Phase 8.0.4.
+- `README.md` — Cognitive Layer section extended with a Phase 8.0.5 paragraph and an updated pipeline diagram.
+- `CHANGES.md` — this entry.
+
+No other files modified. `reasoning.ts` untouched — unchanged from Phase 8.0.4.
+
+### Architecture
+```
+CognitiveObservation (8.0.1) ─────────┐
+CognitiveHypothesisSet (8.0.3) ───────┼──→ buildDecisionContext() ──→ CognitiveDecisionContext
+CognitiveConflictState (8.0.4, internal) ┤        (pure, synchronous, no recomputation)
+RiskIntelligence (7.8, narrowed) ─────┘
+```
+`observation` anchors the context: `observation === null` ⇒ `buildDecisionContext()` returns `null` — no fabricated empty observation, no fake defaults for any other field. Every other input (`hypotheses`, `conflict`, `riskIntelligence`) is independently nullable and maps to a `null` field on the output when missing, never a fabricated default. Reference-vs-copy strategy: `observation`/`hypotheses`/`conflict` are carried through **by direct reference** (already immutable-by-contract Cognitive Layer outputs — nothing to clone, nothing to reinterpret); `risk` is a **freshly-constructed narrow copy** of exactly `{overall, contextQuality}` — `riskIntelligence.factors` never crosses this boundary. `CognitiveWorkingMemory` is deliberately excluded as a field — pure transport, no canonical intelligence beyond what `observation` already carries.
+
+### Input authority map
+| Field | Source | Strategy |
+|---|---|---|
+| `observation` | `cognitiveObservation` (8.0.1) | Direct reference; anchors the whole context |
+| `hypotheses` | `hypotheses` (8.0.3) | Direct reference; never re-ranked/re-counted/filtered |
+| `conflict` | `cognitiveConflictInternal` (8.0.4, untrimmed) | Direct reference; never recomputed/reclassified |
+| `risk` | `riskIntelligence` (7.8) | Narrow copy — `{overall, contextQuality}` only, `.factors` excluded |
+
+### Confirmation of excluded behavior
+- **No re-derivation**: `context.ts` imports no Phase 7/8 intelligence-producing function — types only (`RiskIntelligence`/`RiskSeverity`/`RiskContextQuality` from `riskIntelligence.ts`, `CognitiveObservation` from `contracts.ts`, `CognitiveHypothesisSet` from `hypothesis.ts`, `CognitiveConflictState` from `conflict.ts`). Verified structurally (fixture 21: source-text scan confirms none of `gradeConfluence`/`computeConfluence`/`buildOracleRiskPlan`/`buildMtfContext`/`classifyMarketRegime`/`buildLiquidityOrderFlowContext`/`buildScenarios`/`classifyContradictions`/`arbitrateDecision`/`buildRiskIntelligence`/`buildOracleReasoning`/`normalizeEvidence`/`buildHypotheses`/`resolveCognitiveConflict`/`createWorkingMemory`/`buildCognitiveObservation` appear anywhere in the file).
+- **No hypothesis re-ranking/re-counting/filtering**: fixtures 12/15 confirm order, count, and object reference are all preserved exactly.
+- **No conflict recomputation/reclassification**: fixtures 13/14 confirm `state`/`reasons` pass through exactly as given and the object reference itself is preserved (never rebuilt).
+- **`risk.factors` never leaks through**: fixture 17 confirms `context.risk` never contains a `factors` key.
+- **No timestamps**: fixture 19 confirms no `generatedAt`/`timestamp` field exists on `CognitiveDecisionContext` itself (only nested, pre-existing, inside `observation`, which already legitimately has one from 8.0.1).
+- **No persistence**: no Supabase import, no database, no cache, no module-level state anywhere in `context.ts` — confirmed by direct source grep (no `supabase`/`fetch(`/`callAiCore`/`openai`/`gemini`/`anthropic` string present) and fixture 20 (only `buildDecisionContext` is a runtime function export).
+- **No LLM/network/database dependency**: same evidence as above.
+- **No API response duplication**: `decisionContext` is confirmed absent from `NextResponse.json(...)` — the response object is identical to Phase 8.0.4's.
+- **No canonical authority override**: `context.ts` never imports `OracleAssessment` directly — canonical fields are only reachable one hop away via `observation.sourceAssessment` (already a read-only copy since 8.0.1). Fixture 11 confirms those values pass through unchanged.
+
+### Fixture results (`scripts/phase8/cognitive-context-fixtures.ts`) — 22/22 passed
+1. Basic construction succeeds. 2. Deterministic (same inputs -> deep-equal output). 3. `observation === null` -> `null`. 4–6. `hypotheses`/`conflict`/`riskIntelligence` each `null` -> corresponding field `null`. 7–10. Observation/hypotheses/conflict/riskIntelligence inputs unchanged after construction. 11. Canonical `sourceAssessment` values pass through unchanged. 12. Hypotheses order/count preserved exactly. 13. Conflict not recomputed. 14–15. Conflict/hypotheses object references preserved. 16. `risk` contains exactly `{overall, contextQuality}`. 17. `risk` never contains `factors`. 18. Context has exactly 4 top-level fields. 19. No timestamp generated. 20. No network/database/LLM dependency. 21. No Phase 7/8 intelligence-producing function imported. 22. Separately-constructed deep-equal inputs -> deep-equal output.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/cognitive-context-fixtures.ts`
+
+### Regression
+- Phase 7.2 MTF 7/7, 7.3B Regime 8/8, 7.4 Liquidity/OrderFlow 16/16, 7.5 Scenario 13/13, 7.6 Contradiction 8/8, 7.7 Arbitration 12/12, 7.8 Risk Intelligence 11/11, 7.9 Reasoning 14/14.
+- Phase 8.0.1 Cognitive Observation 10/10, 8.0.2 Working Memory 12/12, 8.0.3 Hypothesis 24/24, 8.0.4 Conflict Resolution 18/18.
+- Baseline snapshot script ran clean, output shape unchanged. All counts identical to the Phase 8.0.4 report — no regressions introduced.
+- Diff scope check (after reverting `npm install`'s incidental `package-lock.json`/`tsconfig.tsbuildinfo` churn): only `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md` modified among existing tracked files, plus the two new files above. `git diff --stat` against every protected file (all Phase 7 oracle modules, `lib/elvoid/engine.ts`, `lib/elvoid/performance.ts`, `lib/ai/core/modules/*`, `lib/ai/core/llm.ts`/`router.ts`, `app/api/ai-signals/*`, `app/api/ai-journal/*`, `app/api/ai-performance/*`, `app/api/paper-trader/journal/*`, `lib/supabase.ts`, `supabase/schema.sql`, and all five previously-locked Cognitive Layer files `types.ts`/`contracts.ts`/`observation.ts`/`memory.ts`/`hypothesis.ts`/`conflict.ts`) returned empty.
+
+### Typecheck / build
+- `npx tsc --noEmit` — **clean, zero errors** on the first pass.
+- `npx next build` — reached the webpack compile stage (past typecheck) but failed on `next/font`'s Google Fonts fetch (`fonts.googleapis.com` not in this sandbox's allowed egress list) — the same pre-existing, unrelated sandbox network constraint documented in every prior Phase 8 entry, not a regression introduced by this phase. Not claimed as a passing production build.
+
+### Deviations from specification
+None. The implementation follows the approved contract and route-wiring instructions exactly, including using the untrimmed `cognitiveConflictInternal` (not the trimmed public `cognitiveConflict`) as the conflict input.
+
+### Known limitations
+- `next build` could not fully complete in this sandbox due to blocked Google Fonts egress (same limitation as every prior Phase 8 entry) — recommend a live build check before deploying.
+- `decisionContext` currently has zero real callers (no Phase 8.1+ consumer exists yet) — per the approved audit, this is accepted forward-looking infrastructure, exercised only by its own fixture suite until a downstream consumer is built.
+- `npm install` was re-run in this sandbox to enable typecheck/build; its incidental `package-lock.json`/`tsconfig.tsbuildinfo` diffs were reverted via `git checkout` before finalizing the change set — the delivered ZIP does not include `node_modules/`, `.next/`, or any lockfile change.
+
+### Scope check
+NEW: `lib/ai/cognitive/context.ts`, `scripts/phase8/cognitive-context-fixtures.ts`.
+MODIFIED: `app/api/elvoid-pro/oracle/route.ts`, `README.md`, `CHANGES.md`.
+No other files changed. Confirmed: no database table, no LLM call, no persistence, and no new API response field were added in this phase.

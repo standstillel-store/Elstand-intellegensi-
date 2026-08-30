@@ -16,6 +16,7 @@ import { buildCognitiveObservation } from "@/lib/ai/cognitive/observation";
 import { createWorkingMemory } from "@/lib/ai/cognitive/memory";
 import { buildHypotheses } from "@/lib/ai/cognitive/hypothesis";
 import { resolveCognitiveConflict } from "@/lib/ai/cognitive/conflict";
+import { buildDecisionContext } from "@/lib/ai/cognitive/context";
 import { hasActiveMembership, MEMBERSHIP_REQUIRED_BODY } from "@/lib/membership";
 
 /**
@@ -214,6 +215,27 @@ export async function GET(req: Request) {
       cognitiveConflictInternal = null;
     }
     const cognitiveConflict = cognitiveConflictInternal ? { state: cognitiveConflictInternal.state, reasons: cognitiveConflictInternal.reasons } : null;
+
+    // Phase 8.0.5 — Cognitive Decision Context. Pure assembly boundary, not
+    // a thinking layer — bundles the already-computed cognitiveObservation/
+    // hypotheses/cognitiveConflictInternal/riskIntelligence into one
+    // structured internal object for future downstream consumers. Deliber-
+    // ately built from the untrimmed `cognitiveConflictInternal` (not the
+    // trimmed public `cognitiveConflict`), per the approved architecture —
+    // never reconstructs conflict state from the public response shape.
+    // Working Memory is deliberately excluded (see context.ts header).
+    // Internal infrastructure only: NOT added to the JSON response below,
+    // same reasoning as workingMemory staying fully internal since 8.0.2.
+    // Wrapped defensively, same pattern as every prior 7.x/8.x sub-phase.
+    let decisionContext: ReturnType<typeof buildDecisionContext> | null = null;
+    try {
+      decisionContext = buildDecisionContext(cognitiveObservation, hypotheses, cognitiveConflictInternal, riskIntelligence);
+    } catch {
+      decisionContext = null;
+    }
+    // `decisionContext` is intentionally unread past this point — reserved
+    // for a future downstream consumer (Phase 8.1+) — and intentionally
+    // not part of the response object below.
 
     // Phase 7.9 — LLM Reasoning. Narrative/interpretation layer only, never
     // a decision engine — side/grade/confidence/riskStatus/invalidation/

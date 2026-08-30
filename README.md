@@ -323,7 +323,7 @@ data. ElVoid AI Paper Trader's signal engine follows the same rules-first
 philosophy and is untouched by this phase: plain, explainable rules over
 live data, no black box.
 
-## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1 / 8.0.2 / 8.0.3 / 8.0.4)
+## ELVOID PRO ORACLE — Cognitive Layer (Phase 8.0.1 / 8.0.2 / 8.0.3 / 8.0.4 / 8.0.5)
 
 `app/api/elvoid-pro/oracle/route.ts` runs a deterministic pipeline — real
 market data in, a canonical trading decision out:
@@ -343,9 +343,11 @@ Cognitive Working Memory (Phase 8.0.2 — request-scoped, internal-only)
         v
 Cognitive Hypothesis Engine (Phase 8.0.3 — deterministic reframing, public)
         v
-Cognitive Conflict Resolution (NEW, Phase 8.0.4 — coherence classification, public summary)
+Cognitive Conflict Resolution (Phase 8.0.4 — coherence classification, public summary)
         v
-Future Decision Context
+Cognitive Decision Context (NEW, Phase 8.0.5 — internal assembly only)
+        v
+Future Evaluation / Learning / Agent layers
         v
 Optional LLM Narrative (Phase 7.9 Reasoning)
 ```
@@ -433,6 +435,28 @@ itself, and its failure never breaks the Oracle route.
   `{ state, reasons }` shape is exposed in the API response — the internal
   `contributingFactors` field-level detail stays internal-only, matching
   Working Memory's own "don't expose raw internal taxonomy" precedent.
+- **Phase 8.0.5 — Cognitive Decision Context** (`lib/ai/cognitive/context.ts`).
+  A pure **assembly boundary, not a thinking layer**: `buildDecisionContext()`
+  bundles the already-computed `CognitiveObservation`, `CognitiveHypothesisSet`,
+  the internal (untrimmed) `CognitiveConflictState`, and a narrow
+  `{overall, contextQuality}` read of `RiskIntelligence` into one structured
+  `CognitiveDecisionContext` object — nothing is recomputed, re-ranked,
+  re-counted, or reclassified. `observation` anchors the context: if it's
+  `null`, the whole function returns `null` rather than fabricating an
+  empty context; every other field is independently nullable. Hypotheses
+  and conflict are carried through **by reference**, unchanged — both are
+  already immutable-by-contract Phase 8.0.3/8.0.4 outputs. `riskIntelligence.factors`
+  never crosses this boundary — only `.overall`/`.contextQuality` are
+  copied. `CognitiveWorkingMemory` is deliberately excluded — it's pure
+  transport that adds no canonical intelligence beyond what `observation`
+  already carries. Pure, synchronous, zero timestamps, zero LLM/network/
+  database calls, zero persistence of any kind. **Internal infrastructure
+  only** — like Working Memory, `decisionContext` is built defensively in
+  `route.ts` but is deliberately **not** included in the API's JSON
+  response, since every field it carries is already independently exposed
+  elsewhere in that same response. Its purpose is solely to save a future
+  downstream consumer (evaluation/learning/agent layers, not yet built)
+  from having to re-thread four separate parameters itself.
 
 ## Setup
 
