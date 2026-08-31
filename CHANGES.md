@@ -1708,3 +1708,65 @@ Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs
 - Phase 8.1.2: Failure Pattern Detection — **COMPLETE**.
 - Phase 8.1.3: Decision Memory — **COMPLETE** (query-time retrieval layer only; `queryDecisionMemory()` is callable but not automatically triggered/wired from anywhere).
 - Future only, not started: Phase 8.1.4 Adaptive Constraint Engine (consuming `DecisionMemoryResult` to propose constraints — read-only relative to Oracle/canonical trading intelligence, no signal generation, no execution, no position sizing), and Phase "Learning Validation" beyond it — both explicitly out of scope until separately approved.
+
+---
+
+## Phase 8.1.4 — Adaptive Constraint Engine
+
+Adds a bounded, advisory-only learning layer that GENERATES AND STORES `AdaptiveConstraint` rows from already-qualified `failure_pattern_candidates` (Phase 8.1.2). This phase does not apply constraints to any future decision — that (plus constraint expiry/retirement/efficacy/recency enforcement) remains exclusively Phase 8.1.5's scope, not started.
+
+### Authority boundary (enforced structurally, not just documented)
+No file in `lib/ai/adaptiveConstraint/*` reads, imports, or writes `OracleAssessment`, `grading.ts`, any canonical `grade`/`confidence`/`score`/`riskStatus`/`entry`/`stopLoss`/`takeProfit` field, `execute.ts`, `paperTrader.ts`, `ai_signals`, or any decision-lifecycle/autonomous-execution path (fixture 13, static scan). `constraint_type` is a closed v1 enum — `FLAG_HISTORICAL_UNRELIABILITY` | `INCREASE_CAUTION` | `REQUIRE_STRONGER_CONFIRMATION` — explicitly excluding `BLOCK_AUTONOMOUS_EXECUTION`, any confidence/grade/risk-adjustment value, and any execution-blocking field (fixture 8).
+
+### Architecture (`{contracts, generate, repository}.ts` — same layering as 8.1.2/8.1.3)
+- `contracts.ts` — types/contracts only. `AdaptiveConstraintBasis` is a closed, numeric/timestamp-only record (`occurrenceCount`, `dominantClassShare`, `statisticalConfidence`, `firstObservedAt`, `lastObservedAt`) — no free-text/reason/explanation/narrative/causal-claim field anywhere (fixture 12).
+- `generate.ts` — pure, deterministic mapping only. Zero DB/network/LLM/randomness/`Date.now()`. Never reimplements or lowers `MIN_OCCURRENCE_COUNT` or the temporal-spread rule — both stay exclusively in `lib/ai/failurePatterns/detect.ts` (fixture 11, static scan). Every basis field is copied verbatim from its source `FailurePatternCandidate`; `statisticalConfidence` is `candidate.confidence` copied unchanged under a renamed field so it never reads as a new score this phase invents (fixtures 4–7).
+- `repository.ts` — Learning DB read (`failure_pattern_candidates`) / upsert (`adaptive_constraints`) / orchestrator (`recomputeAdaptiveConstraints()`) only, mirroring `lib/ai/failurePatterns/repository.ts`'s exact recompute-and-upsert model on `UNIQUE(source, evidence_tag)`. Its only write target is `adaptive_constraints` (fixture 16, static scan).
+
+### Constraint-type selection (deterministic, priority-ordered)
+1. `dominantClassShare >= HIGH_DOMINANCE_SHARE (0.8)` AND `confidence >= 0.35` -> `FLAG_HISTORICAL_UNRELIABILITY` (fixture 8b).
+2. Else `occurrenceCount >= HIGH_OCCURRENCE_COUNT (15)` -> `REQUIRE_STRONGER_CONFIRMATION` (fixture 8c).
+3. Else -> `INCREASE_CAUTION` (fixture 8d).
+These two constants (`HIGH_DOMINANCE_SHARE`, `HIGH_OCCURRENCE_COUNT`) are new, locally-scoped tiers for label selection only — never a substitute for, or reimplementation of, `detect.ts`'s own qualification thresholds, which have already been applied to every candidate this function receives.
+
+### Generation rules (implemented exactly as specified)
+- Input is already-qualified `FailurePatternCandidate[]`, read straight from `failure_pattern_candidates` — no re-qualification.
+- One logical constraint per input candidate; because `failure_pattern_candidates` already enforces `UNIQUE(source, evidence_tag)`, a well-formed input array naturally yields one constraint per group with no separate dedup pass (fixtures 1, 3).
+- Source isolation preserved — AI_SIGNAL and ELVOID_PRO_ORACLE constraints for the same evidence tag are never merged (fixture 2).
+- Deterministic output order (source, then evidenceTag, ascending) regardless of input array order (fixture 9); never mutates its input (fixture 10); empty input -> empty, valid output (fixture 18).
+
+### Persistence
+- New `adaptive_constraints` table, Learning DB only, `UNIQUE(source, evidence_tag)`, RLS enabled with no policies — same convention as every other Learning DB table. Recompute-and-upsert, no append-only event semantics.
+- `recomputeAdaptiveConstraints()` exists and is independently callable but is called from nowhere else in the codebase — no cron, no per-trade trigger, no lifecycle hook (fixture 17, static scan for zero external call sites).
+
+### Files changed
+- **NEW**: `lib/ai/adaptiveConstraint/contracts.ts`, `lib/ai/adaptiveConstraint/generate.ts`, `lib/ai/adaptiveConstraint/repository.ts`, `scripts/phase8/adaptive-constraint-fixtures.ts` (21 cases). `CHANGES.md` — this entry.
+- **MODIFIED**: `supabase/learning/schema.sql` — append-only addition of the new `adaptive_constraints` table (no existing table/column touched).
+- **UNTOUCHED**: `lib/ai/decisionOutcome/*`, `lib/ai/decisionEvaluation/*`, `lib/ai/failurePatterns/*`, `lib/ai/decisionMemory/*`, `lib/ai/decisionLearning/lifecycle.ts`, `lib/ai/cognitive/*`, `lib/ai/oracle/*`, `lib/ai/insights/*`, `lib/elvoid/paperTrader.ts`, `lib/elvoid/execute.ts`, `lib/supabase.ts`, Main DB schema, `app/api/*`, auth, Binance/`bn_*`, execution/order-placement logic.
+
+### Fixture results (`scripts/phase8/adaptive-constraint-fixtures.ts`) — 21/21 passed
+Offline, pure-layer only (same convention as `failure-pattern-fixtures.ts`/`decision-memory-fixtures.ts` — `repository.ts` requires a live Learning DB, unavailable in this sandbox, and is verified only by static-scan checks). Covers: 1 one-constraint-per-candidate. 2 source isolation. 3 distinct evidenceTag mapping. 4–7 verbatim basis field copies (occurrenceCount, dominantClassShare, statisticalConfidence, timestamps). 8/8b/8c/8d closed constraint-type enum + all three deterministic selection branches. 9 deterministic output under reversed input order. 10 input immutability. 11 no threshold reimplementation (static scan). 12 no causal-language field in `AdaptiveConstraintBasis`. 13 no protected canonical identifier referenced anywhere in the module (static scan). 14 no `oracle`/`cognitive` import anywhere. 15 no `DecisionMemory`/`CognitiveWorkingMemory` naming collision. 16 repository.ts writes only to `adaptive_constraints` (static scan). 17 `recomputeAdaptiveConstraints()` has zero external call sites (static scan). 18 empty input -> empty, valid output.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/adaptive-constraint-fixtures.ts`
+
+### Regression — full Phase 8 suite, all re-run this pass
+`cognitive-observation-fixtures.ts` (8.0.1), `cognitive-memory-fixtures.ts` (8.0.2), `cognitive-hypothesis-fixtures.ts` (8.0.3), `cognitive-conflict-fixtures.ts` (8.0.4), `cognitive-context-fixtures.ts` (8.0.5), `decision-outcome-fixtures.ts` (8.1.0, 33/33), `learning-db-env-fixtures.ts` (8.1.0, 12/12), `decision-evaluation-fixtures.ts` (8.1.1, 36/36), `decision-learning-lifecycle-fixtures.ts` (8.1.1.1, 21/21), `failure-pattern-fixtures.ts` (8.1.2, 16/16), `decision-memory-fixtures.ts` (8.1.3, 20/20) — **all still pass, zero regressions.** None of these suites' source files were modified this pass.
+
+### Typecheck
+`npx tsc --noEmit` — **not run**: `node_modules` is not installed in this sandbox and there is no network access to install it — same pre-existing environment limitation documented in every prior 8.x entry. In its place: (1) `node --experimental-strip-types --check` run individually against all four new files — clean, no syntax/parse errors; (2) the fixture script itself exercises `generate.ts` through Node's TS-stripping runtime end-to-end (21/21 passing is only possible if the module's types/imports/exports resolve and its logic executes without a runtime `TypeError`); (3) manual cross-check of every import in the four new files against the actual exported names in `lib/ai/failurePatterns/contracts.ts` and `lib/ai/learning/db.ts` (`FailurePatternCandidate`, `FailurePatternSource`, `FailurePatternEvidenceTag`, `getLearningSupabase` — all confirmed present). Recommend running `npx tsc --noEmit` in an environment with network access before considering this phase fully verified, same recommendation as every prior sandbox-limited entry.
+
+### Scope verification
+Explicit per-path check against every protected path (`lib/ai/decisionOutcome`, `lib/ai/decisionEvaluation`, `lib/ai/failurePatterns`, `lib/ai/decisionMemory`, `lib/ai/decisionLearning`, `lib/ai/cognitive`, `lib/ai/oracle`, `lib/ai/insights`, `lib/elvoid/paperTrader.ts`, `lib/elvoid/execute.ts`, `lib/supabase.ts`, Main DB schema, `app/api`) — none of these paths' files were opened for editing this pass; the only files touched are the four new `lib/ai/adaptiveConstraint/*` files, the one new fixture script, `supabase/learning/schema.sql` (append-only), and this `CHANGES.md` entry.
+
+### Limitations discovered
+- No live Learning DB is reachable in this sandbox, so `repository.ts`'s three functions (`getAdaptiveConstraintBasisCandidates`, `persistAdaptiveConstraints`, `recomputeAdaptiveConstraints`) are verified by static-scan/structural checks and manual import cross-referencing only, not by an end-to-end database round-trip — same limitation every prior 8.1.x `repository.ts` has carried.
+- The v1 constraint-type selection thresholds (`HIGH_DOMINANCE_SHARE = 0.8`, `HIGH_OCCURRENCE_COUNT = 15`) are a first deterministic cut for the closed 3-member enum; they are not specified anywhere upstream and should be revisited once real Learning DB population statistics exist, ideally as part of Phase 8.1.5.
+
+### Remaining roadmap status
+- Phase 8.1.0: Decision Capture + Learning DB + Outcome Lifecycle — **COMPLETE**.
+- Phase 8.1.1: Decision Evaluation Engine — **COMPLETE**.
+- Phase 8.1.1.1: Decision Evaluation Lifecycle Wiring — **COMPLETE**.
+- Phase 8.1.2: Failure Pattern Detection — **COMPLETE**.
+- Phase 8.1.3: Decision Memory — **COMPLETE**.
+- Phase 8.1.4: Adaptive Constraint Engine — **COMPLETE** (generation + storage only; `recomputeAdaptiveConstraints()` is callable but not automatically triggered/wired from anywhere; nothing consumes `adaptive_constraints` yet).
+- Future only, not started: Phase 8.1.5 — constraint application/consumption, expiry, retirement, efficacy, and recency enforcement, all read-only relative to Oracle/canonical trading intelligence — explicitly out of scope until separately approved.

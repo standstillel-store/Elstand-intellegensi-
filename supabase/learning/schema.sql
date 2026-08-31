@@ -193,3 +193,75 @@ create index if not exists failure_pattern_candidates_computed_at_idx on failure
 alter table failure_pattern_candidates enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.1.4 — Adaptive Constraint Engine
+--
+-- adaptive_constraints is ADVISORY METADATA ONLY, derived from an
+-- already-qualified failure_pattern_candidates row and copied verbatim —
+-- never a new source of decision/outcome/pattern truth, never a causal
+-- claim, and never behavior. This phase GENERATES AND STORES these rows
+-- only; nothing reads this table to influence a canonical decision yet
+-- (that remains a future, separately-approved Phase 8.1.5 "qualification
+-- consumer").
+--
+-- AUTHORITY BOUNDARY: no column here ever adjusts a canonical
+-- grade/confidence/score/riskStatus/entry/stopLoss/takeProfit value, and
+-- no column here is an execution-blocking flag — see constraint_type's
+-- closed, deliberately small v1 enum below.
+--
+-- Same recompute-and-upsert model as failure_pattern_candidates (Phase
+-- 8.1.2): a recompute (lib/ai/adaptiveConstraint/repository.ts::
+-- recomputeAdaptiveConstraints()) safely OVERWRITES the existing row for
+-- a (source, evidence_tag) group via UPSERT ... ON CONFLICT (source,
+-- evidence_tag) DO UPDATE — never accumulates/duplicates, never merges
+-- partial state, since the pure generator
+-- (lib/ai/adaptiveConstraint/generate.ts) always recomputes each
+-- constraint from scratch, from the current failure_pattern_candidates
+-- population. No append-only event semantics.
+-- ---------------------------------------------------------------------------
+
+create table if not exists adaptive_constraints (
+  id uuid primary key default gen_random_uuid(),
+
+  -- Group identity — inherited verbatim from the originating
+  -- failure_pattern_candidates row. AI_SIGNAL and ELVOID_PRO_ORACLE are
+  -- never merged into the same row; single evidence tag only.
+  source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  evidence_tag text not null,          -- one EvaluationEvidenceTag member, copied verbatim — see lib/ai/decisionEvaluation/contracts.ts.
+
+  version integer not null,
+
+  -- Closed v1 advisory label. Deliberately excludes
+  -- BLOCK_AUTONOMOUS_EXECUTION and any confidence/grade/risk-adjustment
+  -- or execution-blocking value — see
+  -- lib/ai/adaptiveConstraint/contracts.ts's AdaptiveConstraintType doc.
+  constraint_type text not null check (constraint_type in ('FLAG_HISTORICAL_UNRELIABILITY', 'INCREASE_CAUTION', 'REQUIRE_STRONGER_CONFIRMATION')),
+
+  -- basis.* — verbatim copies of the originating failure_pattern_candidates
+  -- row's own already-validated statistics. Never recomputed here; see
+  -- lib/ai/failurePatterns/detect.ts for where these values were
+  -- originally derived and qualified (MIN_OCCURRENCE_COUNT >= 5,
+  -- temporal-spread >= 2 distinct calendar days).
+  occurrence_count integer not null check (occurrence_count >= 5),
+  dominant_class_share numeric not null,
+  statistical_confidence numeric not null,  -- verbatim copy of failure_pattern_candidates.confidence, renamed here to make clear this is inherited observational confidence, never a new score this phase computes.
+
+  first_observed_at timestamptz not null,  -- copied verbatim from the originating failure_pattern_candidates row. Recency-window/expiry semantics belong to Phase 8.1.5, not modeled here.
+  last_observed_at timestamptz not null,   -- copied verbatim from the originating failure_pattern_candidates row.
+
+  generated_at timestamptz not null,       -- stamped once per recompute batch by repository.ts, shared across every constraint produced by that same recompute run — same "no separate updated_at column" convention as failure_pattern_candidates.computed_at.
+  created_at timestamptz not null default now(),
+
+  -- One row per (source, evidence_tag) group. A recompute UPSERTs this
+  -- key, safely replacing the previous advisory constraint for the same
+  -- group.
+  unique (source, evidence_tag)
+);
+
+create index if not exists adaptive_constraints_source_idx on adaptive_constraints (source);
+create index if not exists adaptive_constraints_generated_at_idx on adaptive_constraints (generated_at);
+
+alter table adaptive_constraints enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
