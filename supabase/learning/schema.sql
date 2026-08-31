@@ -77,3 +77,58 @@ alter table decision_experiences enable row level security;
 -- convention as ai_signals/ai_journal/ai_statistics/paper_wallet in the
 -- Main DB's supabase/schema.sql. There is intentionally zero public/anon
 -- access to this table.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.1.1 — Decision Evaluation Engine
+--
+-- decision_evaluations is a DERIVED INTERPRETATION of an already-frozen
+-- decision_experiences row — never a second source of decision/outcome
+-- truth. `source_signal_id` is the same logical reference
+-- decision_experiences itself uses (ultimately, the Main DB's
+-- `ai_signals.id`) — no cross-project SQL foreign key, same reasoning as
+-- decision_experiences above. grade/confidence/outcome_result/symbol/
+-- side/source are intentionally NOT duplicated here; a decision_evaluations
+-- row is only ever meaningful joined against its decision_experiences row
+-- by source_signal_id.
+--
+-- Append-only, one row per experience: UNIQUE(source_signal_id). No update
+-- path exists for this phase — a changed evaluation algorithm produces a
+-- new row in a future phase, never a mutation of an existing evaluation
+-- (matches decision_experiences' own "never reinterpret history" rule).
+-- ---------------------------------------------------------------------------
+
+create table if not exists decision_evaluations (
+  id uuid primary key default gen_random_uuid(),
+
+  source_signal_id text not null,
+  version integer not null,
+
+  decision_quality text not null check (decision_quality in ('GOOD', 'BAD', 'UNKNOWN')),
+  market_outcome text not null check (market_outcome in ('POSITIVE', 'NEGATIVE', 'NEUTRAL', 'UNKNOWN')),
+  evaluation_class text not null check (
+    evaluation_class in ('GOOD_DECISION_GOOD_OUTCOME', 'GOOD_DECISION_BAD_OUTCOME', 'BAD_DECISION_GOOD_OUTCOME', 'BAD_DECISION_BAD_OUTCOME', 'NEUTRAL_OUTCOME', 'INSUFFICIENT_EVIDENCE')
+  ),
+
+  confidence_alignment text not null check (confidence_alignment in ('ALIGNED', 'MISALIGNED', 'UNKNOWN')),
+  risk_alignment text not null check (risk_alignment in ('ALIGNED', 'MISALIGNED', 'NOT_APPLICABLE', 'UNKNOWN')),
+  conflict_alignment text not null check (conflict_alignment in ('ALIGNED', 'MISALIGNED', 'NOT_APPLICABLE', 'UNKNOWN')),
+  hypothesis_alignment text not null check (hypothesis_alignment in ('ALIGNED', 'MISALIGNED', 'NOT_APPLICABLE', 'UNKNOWN')),
+
+  -- Closed EvaluationEvidenceTag[] — see lib/ai/decisionEvaluation/contracts.ts.
+  -- Stored verbatim, never re-derived on read (same convention as
+  -- ai_signals.scans/extra_reasoning in the Main DB schema).
+  evidence jsonb not null,
+
+  evaluated_at timestamptz not null,
+  created_at timestamptz not null default now(),
+
+  -- Idempotency: one experience -> one evaluation for this phase. A
+  -- retried/duplicated evaluation attempt must never create a second row.
+  unique (source_signal_id)
+);
+
+create index if not exists decision_evaluations_evaluation_class_idx on decision_evaluations (evaluation_class);
+
+alter table decision_evaluations enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.

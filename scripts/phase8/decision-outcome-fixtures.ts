@@ -9,6 +9,7 @@
 //   node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/decision-outcome-fixtures.ts
 // ---------------------------------------------------------------------------
 
+import { readFile } from "node:fs/promises";
 import { normalizeLearningContext, buildDecisionExperienceInput, buildDecisionExperienceOutcome } from "@/lib/ai/decisionOutcome/capture";
 // NOTE: lib/ai/decisionOutcome/repository.ts is intentionally NOT imported
 // here — it transitively pulls in @supabase/supabase-js via lib/supabase.ts
@@ -355,6 +356,120 @@ function journal(overrides: Partial<AiJournalEntry> = {}): AiJournalEntry {
   buildDecisionExperienceInput(s, null);
   buildDecisionExperienceOutcome(j);
   check("22. buildDecisionExperienceInput/Outcome never mutate their inputs", JSON.stringify(s) === sBefore && JSON.stringify(j) === jBefore, "AiSignal or AiJournalEntry was mutated");
+}
+
+// ===========================================================================
+// Outcome Lifecycle Completion (writeClose() -> captureAndPersistOutcome())
+// Cases 23-33 below verify the wiring added to lib/elvoid/paperTrader.ts.
+// Cases 23-28 use the existing pure functions directly (real behavior,
+// not just inspection). Cases 29-33 are static source-scan checks of
+// paperTrader.ts itself, for the same reason repository.ts/db.ts are
+// source-scanned elsewhere in this file and in
+// scripts/phase8/learning-db-env-fixtures.ts: paperTrader.ts transitively
+// imports @supabase/supabase-js, unavailable in this offline sandbox.
+// ===========================================================================
+
+const paperTraderSource = await readFile(new URL("../../lib/elvoid/paperTrader.ts", import.meta.url), "utf-8");
+
+// ---------------------------------------------------------------------------
+// 23. Closed WIN outcome is captured (fields correct for a win).
+// ---------------------------------------------------------------------------
+{
+  const j = journal({ result: "win", rr: 2.5, profit_percent: 2.1, duration_minutes: 90, closed_at: "2026-02-01T00:00:00.000Z" });
+  const outcome = buildDecisionExperienceOutcome(j);
+  check("23. WIN outcome captured with correct result", outcome.outcomeResult === "win" && outcome.outcomeRr === 2.5 && outcome.outcomeProfitPercent === 2.1, `got ${JSON.stringify(outcome)}`);
+}
+
+// ---------------------------------------------------------------------------
+// 24. Closed LOSS outcome is captured (fields correct for a loss).
+// ---------------------------------------------------------------------------
+{
+  const j = journal({ result: "loss", rr: -1, profit_percent: -1.05, duration_minutes: 30, closed_at: "2026-02-02T00:00:00.000Z" });
+  const outcome = buildDecisionExperienceOutcome(j);
+  check("24. LOSS outcome captured with correct result", outcome.outcomeResult === "loss" && outcome.outcomeRr === -1 && outcome.outcomeProfitPercent === -1.05, `got ${JSON.stringify(outcome)}`);
+}
+
+// ---------------------------------------------------------------------------
+// 25. BREAKEVEN outcome is captured.
+// ---------------------------------------------------------------------------
+{
+  const j = journal({ result: "breakeven", rr: 0, profit_percent: 0, duration_minutes: 60, closed_at: "2026-02-03T00:00:00.000Z" });
+  const outcome = buildDecisionExperienceOutcome(j);
+  check("25. BREAKEVEN outcome captured with correct result", outcome.outcomeResult === "breakeven" && outcome.outcomeRr === 0 && outcome.outcomeProfitPercent === 0, `got ${JSON.stringify(outcome)}`);
+}
+
+// ---------------------------------------------------------------------------
+// 26-28. RR / profit percent / duration / closed_at all preserved exactly
+// (win, loss, and breakeven fixtures above already exercise these; this
+// case adds a distinguishing decimal/edge value to rule out any rounding
+// or truncation inside buildDecisionExperienceOutcome).
+// ---------------------------------------------------------------------------
+{
+  const j = journal({ result: "win", rr: 3.333, profit_percent: 0.0007, duration_minutes: 0, closed_at: "2026-02-04T12:34:56.789Z" });
+  const outcome = buildDecisionExperienceOutcome(j);
+  check("26. rr preserved exactly, no rounding", outcome.outcomeRr === 3.333, `got ${outcome.outcomeRr}`);
+  check("27. profit_percent preserved exactly, including sub-1 decimals", outcome.outcomeProfitPercent === 0.0007, `got ${outcome.outcomeProfitPercent}`);
+  check("28. duration (0 minutes, a falsy-but-valid value) and closed_at timestamp both preserved exactly", outcome.outcomeDurationMinutes === 0 && outcome.outcomeClosedAt === "2026-02-04T12:34:56.789Z", `got ${JSON.stringify(outcome)}`);
+}
+
+// ---------------------------------------------------------------------------
+// 29. Outcome capture is triggered only AFTER ai_journal insert succeeds
+//     (ordering requirement) — never before, never in place of it.
+//     Updated for Phase 8.1.1.1: the direct captureAndPersistOutcome()
+//     call inside writeClose() was replaced by a single call to the
+//     lib/ai/decisionLearning/lifecycle.ts orchestrator, which itself
+//     awaits captureAndPersistOutcome() before evaluating — see
+//     scripts/phase8/decision-learning-lifecycle-fixtures.ts for the
+//     orchestrator's own internal-ordering fixtures.
+// ---------------------------------------------------------------------------
+{
+  const journalInsertIdx = paperTraderSource.indexOf('.from("ai_journal")\n    .insert(');
+  const journalErrorGuardIdx = paperTraderSource.indexOf("if (error) {", journalInsertIdx);
+  const lifecycleCallIdx = paperTraderSource.indexOf("completeDecisionLearningLifecycle(signal.id)");
+  check(
+    "29. completeDecisionLearningLifecycle() call appears after the ai_journal insert and its error guard, inside writeClose()",
+    journalInsertIdx !== -1 && journalErrorGuardIdx !== -1 && lifecycleCallIdx !== -1 && lifecycleCallIdx > journalErrorGuardIdx,
+    `journalInsertIdx=${journalInsertIdx} journalErrorGuardIdx=${journalErrorGuardIdx} lifecycleCallIdx=${lifecycleCallIdx}`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 30. The lifecycle trigger is fire-and-forget (not awaited) — a slow/
+//     unreachable Learning DB cannot add latency to a trade close.
+// ---------------------------------------------------------------------------
+{
+  const notAwaited = /(?<!await\s{0,20})completeDecisionLearningLifecycle\(signal\.id\)\.catch/.test(paperTraderSource);
+  check("30. completeDecisionLearningLifecycle(...) is NOT awaited in writeClose() (fire-and-forget)", notAwaited, "expected an un-awaited `completeDecisionLearningLifecycle(signal.id).catch(...)` call");
+}
+
+// ---------------------------------------------------------------------------
+// 31. No duplicate outcome-normalization logic was added inside
+//     paperTrader.ts — it must delegate entirely to the existing Phase
+//     8.1.0 pipeline, never construct outcome_result/outcome_rr/etc. itself.
+// ---------------------------------------------------------------------------
+{
+  const forbiddenDuplicateFields = ["outcome_result", "outcome_rr", "outcome_profit_percent", "outcome_duration_minutes", "outcome_closed_at", "decision_experiences"];
+  const noneAppear = forbiddenDuplicateFields.every((f) => !paperTraderSource.includes(f));
+  check("31. paperTrader.ts contains no direct reference to decision_experiences or its outcome_* columns (all normalization stays in lib/ai/decisionOutcome/*)", noneAppear, `paperTraderSource contains one of: ${forbiddenDuplicateFields.join(", ")}`);
+}
+
+// ---------------------------------------------------------------------------
+// 32. Learning DB failure is isolated (caught) and does not propagate.
+// ---------------------------------------------------------------------------
+{
+  const hasCatchHandler = /completeDecisionLearningLifecycle\(signal\.id\)\.catch\(/.test(paperTraderSource);
+  check("32. completeDecisionLearningLifecycle(...) call has a .catch() handler in writeClose() — a Learning DB failure cannot throw out of writeClose()", hasCatchHandler, "no .catch() found on the lifecycle call");
+}
+
+// ---------------------------------------------------------------------------
+// 33. No Phase 8.1.1 evaluation logic/types were duplicated directly inside
+//     paperTrader.ts — only a single orchestrator call, per the
+//     decisionOutcome/decisionEvaluation/decisionLearning boundary.
+// ---------------------------------------------------------------------------
+{
+  const forbiddenPhase811Terms = ["DecisionEvaluation", "evaluateDecision(", "GOOD_DECISION", "BAD_DECISION", "decisionQuality:", "marketOutcome:", "persistDecisionEvaluation"];
+  const noneAppear = forbiddenPhase811Terms.every((t) => !paperTraderSource.includes(t));
+  check("33. No Phase 8.1.1 (Decision Evaluation Engine) logic/types appear directly in paperTrader.ts — only the single orchestrator call", noneAppear, `paperTraderSource contains one of: ${forbiddenPhase811Terms.join(", ")}`);
 }
 
 console.log(failures === 0 ? "\nAll Phase 8.1.0 decision outcome fixtures passed." : `\n${failures} Phase 8.1.0 fixture(s) FAILED.`);

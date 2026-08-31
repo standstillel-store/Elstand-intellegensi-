@@ -1411,3 +1411,145 @@ No Cognitive Layer, trading, or authentication behavior changed — this pass to
 NEW: `scripts/phase8/learning-db-env-fixtures.ts`.
 MODIFIED: `lib/ai/learning/db.ts`, `.env.example`, `README.md`, `scripts/phase8/decision-outcome-fixtures.ts` (one comment), `CHANGES.md`.
 No schema change. No new table. No architecture redesign. No Cognitive/Oracle/Trading/Auth file touched.
+
+---
+
+## Phase 8.1.0 — Outcome Lifecycle Completion
+
+### Purpose
+Closes the confirmed gap (identified in the Phase 8.1.1 pre-implementation audit earlier in this conversation): `captureAndPersistOutcome()` existed and was fixture-tested since the original Phase 8.1.0 implementation, but had zero production call sites — a closed paper trade updated `ai_journal` but never completed its corresponding `decision_experiences` row in the Learning DB. This entry wires the trigger. It does not touch Phase 8.1.1 (Decision Evaluation Engine) in any way.
+
+### Architecture: before vs after
+```
+BEFORE:
+executeOracleSignal() -> ai_signals INSERT -> decision_experiences INSERT (decision fields only)
+paperTrader.writeClose() -> ai_journal INSERT -> ai_signals.status update -> STOP (outcome_* stays null forever)
+
+AFTER:
+paperTrader.writeClose() -> ai_journal INSERT (confirmed successful)
+                          -> captureAndPersistOutcome(signal.id)  [fire-and-forget, non-blocking]
+                                -> getJournalEntryBySignalId() (Main DB read)
+                                -> buildDecisionExperienceOutcome() (pure, existing)
+                                -> persistDecisionOutcome() (Learning DB, conditional UPDATE ... WHERE outcome_result IS NULL)
+                          -> ai_signals.status update (unchanged, unaffected by the above)
+```
+
+### Files changed
+- `lib/elvoid/paperTrader.ts` — **+28 lines, 0 deletions, 0 modifications to existing logic** (confirmed via `git diff --stat`). One new import (`captureAndPersistOutcome` from `lib/ai/decisionOutcome/repository.ts`) and one new fire-and-forget call inside `writeClose()`, placed immediately after the existing `ai_journal` insert's error guard. All four existing call sites of `writeClose()` (manual close, stop-loss hit, TP2 hit, breakeven-stop hit) are covered automatically since the trigger lives inside the shared function, not duplicated at each call site.
+- `lib/ai/decisionOutcome/repository.ts` — doc-comment only: `captureAndPersistOutcome()`'s header comment updated to state it is now wired (was previously documented as "not wired into any automatic trigger in this phase"). No behavioral change to this file.
+- `scripts/phase8/decision-outcome-fixtures.ts` — 11 new fixture cases (23–33) appended; existing 22 cases unchanged.
+- `CHANGES.md` — this entry.
+
+### Trigger location
+Inside `writeClose()` (the single, already-centralized function that inserts into `ai_journal` for all four close paths), placed immediately after the `if (error) { ...; return null; }` guard on the `ai_journal` insert. This guarantees the required ordering: outcome capture can only fire after `ai_journal`'s insert has already returned successfully — never before, never in place of it, and never at all if the canonical insert failed (fixture 29 verifies this ordering by source position).
+
+### Authority confirmation
+- `ai_journal` remains the sole canonical outcome authority — `captureAndPersistOutcome()` only ever *reads* it (via the pre-existing `getJournalEntryBySignalId()`), never writes to it, and this pass adds no new write to `ai_journal` or `ai_signals` beyond what already existed.
+- The Learning DB's `decision_experiences.outcome_*` fields are populated strictly *after* and *from* that canonical read — a snapshot, never a second source of truth. `paperTrader.ts` still owns zero lines of outcome-normalization logic itself (fixture 31 explicitly asserts no `outcome_*`/`decision_experiences` literal appears in `paperTrader.ts`'s code) — normalization and persistence remain entirely inside `lib/ai/decisionOutcome/*`, exactly as before this change.
+
+### Failure isolation
+`captureAndPersistOutcome(signal.id).catch((err) => console.error(...))` — not awaited, so a slow or unreachable Learning Database adds zero latency to any of the four trade-close paths, and cannot delay the API response a user is waiting on (e.g. `closeSignalManually`). The `.catch()` ensures a rejection can never propagate out of `writeClose()` and never affects the `ai_signals` status update or wallet update that follow it in the same function — both already unconditional and already run today regardless of Learning DB state. Per the task's explicit "do not silently swallow programming errors without observability" instruction, the catch handler logs via `console.error`, the same convention already used two lines above for the `ai_journal` insert's own error path — so an unexpected exception (as opposed to the already-handled "Learning DB not configured" or "no outcome yet" cases, both of which resolve normally rather than reject) remains visible in logs.
+
+### Idempotency
+Unchanged, reused entirely from the existing Phase 8.1.0 pipeline: `persistDecisionOutcome()`'s conditional `UPDATE ... WHERE outcome_result IS NULL` (already implemented, already fixture-tested) means a duplicate/repeated call — e.g. if `writeClose()` were ever somehow invoked twice for the same signal — matches zero rows on the second attempt and is reported as `updated: false`, never overwriting an already-captured outcome. No new idempotency mechanism was added or needed.
+
+### Cross-database transaction boundary
+No distributed transaction, no two-phase commit, no cross-project foreign key. `ai_journal`'s insert is a complete, independent, already-committed write before `captureAndPersistOutcome()` is even invoked; the Learning DB write is a fully separate, independent-failure-domain operation on a different Supabase project, exactly as the existing decision-capture side (`captureDecisionExperienceBestEffort()` in `lib/ai/oracle/execute.ts`) already established as the repository's pattern for this.
+
+### AI_SIGNAL compatibility
+No change was needed: `captureAndPersistOutcome()` operates purely on `signalId` and reads `ai_journal`/`decision_experiences` by that ID, with no dependency on `learning_context` at all — it works identically whether the originating decision was `ELVOID_PRO_ORACLE` (with a populated `learning_context`) or `AI_SIGNAL` (with `learning_context = null`), since the outcome patch never reads or requires that field (fixtures 23–25 use the default `AI_SIGNAL`-shaped fixture signal already established in this file, exercising exactly this path).
+
+### Fixture results (`scripts/phase8/decision-outcome-fixtures.ts`) — 33/33 passed
+Cases 1–22 unchanged (see the original Phase 8.1.0 entry above). New this pass: 23. WIN outcome captured correctly. 24. LOSS outcome captured correctly. 25. BREAKEVEN outcome captured correctly. 26–28. `rr`/`profit_percent`/`duration_minutes`(including `0`)/`closed_at` all preserved exactly, no rounding or truncation. 29. `captureAndPersistOutcome()` call is positioned after the `ai_journal` insert's error guard (ordering, verified by source position). 30. The call is not `await`ed (fire-and-forget). 31. No `outcome_*`/`decision_experiences` literal appears anywhere in `paperTrader.ts` (no duplicated normalization logic). 32. The call has a `.catch()` handler (failure isolation). 33. No Phase 8.1.1 term (`decision_evaluations`, `DecisionEvaluation`, `evaluateDecision`, `GOOD_DECISION`/`BAD_DECISION`, `decisionQuality`, `marketOutcome`) appears anywhere in `paperTrader.ts`.
+
+Cases 29–33 are static source-scan checks (same reasoning as `learning-db-env-fixtures.ts`'s cases: `paperTrader.ts` transitively imports `@supabase/supabase-js`, unavailable in this offline sandbox, so its live behavior is verified structurally rather than by executing `writeClose()` against a real database).
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/decision-outcome-fixtures.ts`
+
+### Regression — full Phase 8 suite, all re-run this pass
+`cognitive-observation-fixtures.ts` (8.0.1), `cognitive-memory-fixtures.ts` (8.0.2), `cognitive-hypothesis-fixtures.ts` (8.0.3), `cognitive-conflict-fixtures.ts` (8.0.4), `cognitive-context-fixtures.ts` (8.0.5), `learning-db-env-fixtures.ts` — all passed, unmodified.
+
+### Typecheck
+Zero new logic errors. `lib/elvoid/paperTrader.ts` shows only the same pre-existing `@supabase/supabase-js`-missing pattern every other Supabase-importing file in this repo already exhibits (confirmed by comparison against `lib/supabase.ts` in prior entries). `lib/ai/decisionOutcome/{contracts,capture,repository}.ts` remain at zero errors.
+
+### Build
+Not attempted — same unavailable `node_modules`/blocked Google Fonts egress documented in every prior entry; this pass introduces no new build-time dependency.
+
+### Explicit scope check — Phase 8.1.1 NOT introduced
+No `decision_evaluations` table, no `DecisionEvaluation` type, no `evaluateDecision()` function, no decision-quality classification, no `GOOD_DECISION_*`/`BAD_DECISION_*` states, no pattern detection, no adaptive constraints, no LLM call — confirmed by fixture 33's explicit negative-term scan of `paperTrader.ts`, and by the fact that no file under a `lib/ai/decisionEvaluation/*` path (or any equivalent) was created this pass.
+
+### Remaining roadmap status
+- Decision Capture: **COMPLETE** (unchanged from original Phase 8.1.0 entry).
+- Learning DB: **COMPLETE** (unchanged).
+- Outcome Schema: **COMPLETE** (unchanged — `supabase/learning/schema.sql` was not modified this pass; the columns already existed, only the trigger to populate them was missing).
+- Outcome Lifecycle: **COMPLETE** — the gap identified in the Phase 8.1.1 pre-implementation audit is closed. A closed paper trade (via any of the four `writeClose()` call paths) now results in a best-effort, non-blocking attempt to populate `decision_experiences.outcome_*` for its corresponding decision, for both `AI_SIGNAL` and `ELVOID_PRO_ORACLE` sources.
+- **Phase 8.1.1 is now genuinely unblocked** at the data-availability level — real closed decision experiences with populated outcomes will exist going forward (not retroactively for trades closed before this change, since outcome capture is only triggered at close time, not backfilled). Phase 8.1.1's own architecture (a new `decision_evaluations` table, per the earlier audit's recommendation) remains unimplemented and awaits separate approval.
+
+### Scope check
+MODIFIED: `lib/elvoid/paperTrader.ts` (+28/-0), `lib/ai/decisionOutcome/repository.ts` (doc comment only, 0 behavioral change), `scripts/phase8/decision-outcome-fixtures.ts` (+11 fixture cases), `CHANGES.md`.
+NOT MODIFIED: Oracle grading, Phase 7 intelligence, Cognitive Layer, authentication, Main DB schema, `supabase/learning/schema.sql`, Binance Auto-Trader, `bn_*` tables, execution strategy, paper trade calculation logic (`computeCloseResult`/`computeUnrealized` untouched) — confirmed via `git status --porcelain` showing no protected file in the diff for this pass.
+
+---
+
+## Phase 8.1.1.1 — Decision Evaluation Lifecycle Wiring
+
+### Purpose
+Closes a race-condition hazard identified in a pre-implementation audit earlier in this conversation: `evaluateAndPersistDecision()` (Phase 8.1.1) had no production call site, and the naive way to add one — two independent fire-and-forget calls, `captureAndPersistOutcome(signalId); evaluateAndPersistDecision(signalId);` — could let evaluation race ahead of outcome persistence, reading `decision_experiences` before `outcome_result` was set, computing `INSUFFICIENT_EVIDENCE`, and persisting it under `decision_evaluations`' `UNIQUE(source_signal_id)` + `upsert(..., ignoreDuplicates: true)` — a combination that can **never** later be corrected by a subsequent, correct evaluation attempt. This entry wires the two Phase 8.1.0/8.1.1 pipelines together safely.
+
+### Architecture: the orchestrator
+```
+lib/ai/decisionLearning/lifecycle.ts :: completeDecisionLearningLifecycle(sourceSignalId)
+
+  await captureAndPersistOutcome(sourceSignalId)
+       -> if not `persisted: true`, THROW immediately — evaluation never runs
+  await getDecisionExperienceForEvaluation(sourceSignalId)
+  evaluateDecision(experience)   [pure]
+       -> if evaluationClass === "INSUFFICIENT_EVIDENCE": log + skip persistence (see guard below)
+       -> else: await persistDecisionEvaluation({...evaluation, evaluatedAt: new Date().toISOString()})
+            -> if not `persisted: true`, THROW
+```
+This is the **only** module that imports from both `lib/ai/decisionOutcome/*` and `lib/ai/decisionEvaluation/*` — dependency direction is strictly `decisionOutcome -> decisionLearning/lifecycle <- decisionEvaluation`; neither domain imports the other's behavioral (repository/capture/evaluate) modules directly (confirmed by fixtures 16–17 below; the one pre-existing exception — `decisionEvaluation/contracts.ts` importing the `DecisionExperienceRecord` *type* from `decisionOutcome/contracts.ts` — is a shared-shape type import, not a behavioral coupling, predates this task, and was left untouched per explicit scope).
+
+### Outcome return semantics (inspected before implementation, not assumed)
+`captureAndPersistOutcome()`'s actual return type is `Promise<{persisted: true; updated: boolean} | {persisted: false; reason: "not_configured"|"error"|"no_outcome_yet"; error?: string}>` — **it never throws or rejects**; every failure mode is a typed result. The orchestrator's correctness condition is `persisted === true` alone — `updated: false` (meaning the outcome was already present before this call) is treated identically to `updated: true` (this call just wrote it), since both mean "the canonical Learning DB row now reliably has an outcome." Any `persisted: false` result, of any reason, is converted into a thrown `Error` by the orchestrator itself, since the underlying function won't throw one on its own.
+
+### Failure isolation
+- **Case 1 — outcome capture does not confirm success**: the orchestrator throws before ever calling `getDecisionExperienceForEvaluation()`/`evaluateDecision()`. Evaluation never runs. Verified by fixture 4 (guard body contains `throw`) and fixtures 1–2/12 (strict source-order and causal-dependency checks).
+- **Case 2 — outcome succeeds but evaluation fails**: the outcome write already completed and independently remains persisted (no cross-database transaction exists to roll it back, and the orchestrator contains no delete/rollback call — fixture 5). The error propagates out of the orchestrator's Promise to `paperTrader.ts`'s single `.catch()`, which logs `"[ElVoid AI] Decision learning lifecycle failed (non-fatal, trade close unaffected):"` — the same convention as the two other `console.error` calls already in that file. No retry is attempted (fixture 19 confirms no retry/queue/cron infrastructure exists anywhere in the new code); a future manual `evaluateAndPersistDecision()` call remains fully valid and safe if invoked later.
+- The orchestrator itself has no internal `try/catch` (fixture 6) — every thrown error is intentionally left to propagate to the caller's boundary, per the task's explicit "do not swallow the error inside the orchestrator" requirement.
+
+### Automatic `INSUFFICIENT_EVIDENCE` guard
+Implemented entirely at the composition boundary (inside `lifecycle.ts`), **not** inside `evaluate.ts` or `decisionEvaluation`'s persistence rules (both untouched, confirmed by `git status`). The orchestrator deliberately does **not** call the coarser `evaluateAndPersistDecision()` convenience wrapper — which always persists unconditionally — and instead composes `getDecisionExperienceForEvaluation()` + `evaluateDecision()` + `persistDecisionEvaluation()` directly, so it can intercept before the final write. When the automatic post-outcome-success evaluation resolves to `INSUFFICIENT_EVIDENCE`, the orchestrator logs a diagnostic (`console.log`, not `console.error` — this is an expected defensive skip, not a failure) and returns without calling `persistDecisionEvaluation()`, avoiding a permanently-locked incorrect record. **Manual/historical evaluation semantics are completely unaffected**: `evaluateAndPersistDecision()` itself was not modified and still persists unconditionally for its own callers (fixture 14b), where a genuine `INSUFFICIENT_EVIDENCE` (e.g. re-evaluating an old, still-open decision) remains valid, persistable data.
+
+### Idempotency
+Unchanged and fully inherited — the orchestrator introduces zero database writes of its own (fixture 9: no `.insert(`/`.update(`/`.upsert(` anywhere in `lifecycle.ts`); it exclusively delegates to the already-idempotent `captureAndPersistOutcome()` (conditional `UPDATE ... WHERE outcome_result IS NULL`) and `persistDecisionEvaluation()` (`UNIQUE(source_signal_id)` + `ignoreDuplicates` upsert). Repeated/duplicate `completeDecisionLearningLifecycle()` calls for the same signal are safe: a second call's outcome step is a no-op (`updated: false`, still `persisted: true`, still allows evaluation per the fix above), and a second evaluation attempt (if the class isn't `INSUFFICIENT_EVIDENCE`) is a safe no-op via the existing `ignoreDuplicates` guarantee.
+
+### Files changed
+- **NEW**: `lib/ai/decisionLearning/lifecycle.ts` (the orchestrator), `scripts/phase8/decision-learning-lifecycle-fixtures.ts` (21 cases).
+- **MODIFIED**: `lib/elvoid/paperTrader.ts` — the single existing `captureAndPersistOutcome(signal.id).catch(...)` call site inside `writeClose()` replaced with `completeDecisionLearningLifecycle(signal.id).catch(...)` (same fire-and-forget shape, same `.catch()`-based isolation, same position immediately after the `ai_journal` insert's error guard and before the `ai_signals` status/wallet updates — all 4 close paths covered automatically, unchanged). `scripts/phase8/decision-outcome-fixtures.ts` — cases 29/30/32/33 updated to check for the new `completeDecisionLearningLifecycle(...)` call site instead of the now-superseded direct `captureAndPersistOutcome(...)` call (the underlying architectural claims those cases verify — ordering, non-blocking, failure isolation, no duplicated evaluation logic — are unchanged; only the literal function name being checked for changed, since the call site itself moved). `CHANGES.md` — this entry.
+- **UNTOUCHED** (confirmed via `git status --porcelain`): `lib/ai/cognitive/*`, `lib/ai/oracle/*`, `lib/ai/decisionOutcome/{contracts,capture}.ts`, `lib/ai/decisionEvaluation/{contracts,evaluate,repository}.ts`, `supabase/learning/schema.sql`, Main DB schema, Binance/`bn_*`, auth, wallet logic, order execution, signal generation.
+
+### Fixture results (`scripts/phase8/decision-learning-lifecycle-fixtures.ts`) — 21/21 passed
+Static source-inspection verification (no live Supabase — `lifecycle.ts` transitively imports `@supabase/supabase-js` via both domains' repository files, unavailable in this offline sandbox, same reasoning as every other Supabase-dependent fixture in this repo). Covers: 1–3 ordering (outcome-before-evaluation in source position, strict await sequencing, no concurrent `Promise.all`/`race`). 4–8 failure isolation (guard contains `throw`, no rollback of the outcome write, no internal `try/catch` swallowing errors, `writeClose()` doesn't await the lifecycle, the `ai_signals` status update sits structurally after and outside the lifecycle call). 9–12 idempotency (zero direct DB writes in the orchestrator, `updated: false` still permits evaluation, evaluation persistence goes through the existing idempotent adapter, evaluation call is causally downstream of the outcome guard). 13–14b the automatic `INSUFFICIENT_EVIDENCE` guard skips persistence while the manual wrapper stays untouched. 15–18 scope/boundary guards (exactly one orchestrator call site in `paperTrader.ts`, no behavioral cross-imports between the two domains, the orchestrator is confirmed as the sole dual-importer). 19–20 no retry/queue/cron/auto-trading/LLM/Binance terms anywhere in the new code.
+
+Also re-ran `scripts/phase8/decision-outcome-fixtures.ts` after updating its 4 affected cases: **33/33 still passed**.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/decision-learning-lifecycle-fixtures.ts`
+
+### Regression — full Phase 8 suite, all re-run this pass
+`cognitive-observation-fixtures.ts` (8.0.1), `cognitive-memory-fixtures.ts` (8.0.2), `cognitive-hypothesis-fixtures.ts` (8.0.3), `cognitive-conflict-fixtures.ts` (8.0.4), `cognitive-context-fixtures.ts` (8.0.5), `decision-outcome-fixtures.ts` (33/33, 4 cases updated for the new call site), `learning-db-env-fixtures.ts` (12/12), `decision-evaluation-fixtures.ts` (36/36) — all passed.
+
+### Typecheck
+Zero errors in `lib/ai/decisionLearning/lifecycle.ts`. `lib/elvoid/paperTrader.ts` and the two touched fixture scripts show only the same pre-existing `@supabase/supabase-js`/`node:fs/promises`/`process`-missing pattern every other Supabase- or Node-API-importing file in this repo already exhibits.
+
+### Build
+Not attempted — same unavailable `node_modules`/blocked Google Fonts egress documented in every prior entry; no new build-time dependency introduced.
+
+### Explicit scope guard
+Repository-wide scan for `OpenAI`/`Claude`/`prompt`/auto-execute/auto-trade/order-placement/adaptive-execution/position-sizing/risk-mutation/retry-queue/cron/pattern-detection/decision-memory/schema-change terms across every file touched this pass: the only matches found were (a) inside the new fixture file's own *forbidden-term string literals* (the search terms themselves, used to verify their absence elsewhere) and (b) inside `lifecycle.ts`'s own doc comment explicitly *disclaiming* "no retry queue, no cron/polling" — both false positives from substring matching, not actual usage. No schema file was modified.
+
+### Remaining roadmap status
+- Phase 8.1.0: Decision Capture + Learning DB + Outcome Lifecycle — **COMPLETE**.
+- Phase 8.1.1: Decision Evaluation Engine — **COMPLETE**.
+- Phase 8.1.1.1: Decision Evaluation Lifecycle Wiring — **COMPLETE**. The full automatic pipeline (`writeClose() -> ai_journal -> outcome capture -> evaluation -> decision_evaluations`) is now correctly sequenced and safely wired for every trade that closes going forward.
+- Future only, not started: Phase 8.1.2 Failure Pattern Detection, Phase 8.1.3 Decision Memory, adaptive constraints.
