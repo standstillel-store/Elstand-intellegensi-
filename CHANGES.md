@@ -1623,3 +1623,88 @@ Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs
 - Phase 8.1.1.1: Decision Evaluation Lifecycle Wiring — **COMPLETE**.
 - Phase 8.1.2: Failure Pattern Detection — **COMPLETE** (detection + persistence pipeline only; `recomputeFailurePatterns()` is callable but not automatically triggered from anywhere).
 - Future only, not started: an automatic trigger/schedule for `recomputeFailurePatterns()` (deliberately deferred, same staging pattern as 8.1.0 -> 8.1.0's outcome trigger -> 8.1.1 -> 8.1.1.1), Phase 8.1.3 Decision Memory (reading `failure_pattern_candidates` into decision-time context), and any adaptive constraints derived from it — all explicitly out of scope until separately approved.
+
+---
+
+## Phase 8.1.3 — Decision Memory Architecture & Retrieval Layer
+
+### Purpose
+Adds a deterministic, read-only, query-time retrieval layer over the Learning DB's accumulated historical population — `decision_experiences` (8.1.0), `decision_evaluations` (8.1.1), and `failure_pattern_candidates` (8.1.2) — so a future, separately-approved Phase 8.1.4 Adaptive Constraint Engine has a bounded, structural way to retrieve relevant historical decisions/patterns. This phase builds retrieval ONLY: no new table, no write path, no automatic wiring, no constraint generation, no LLM/vector infrastructure.
+
+### Repository audit performed first (per this task's instruction)
+Verified directly against the actual repository, not assumed from the handover: `git log` confirms commits `5ad33a2` (8.1.0), `a3bc5ca` (8.1.1–8.1.1.1), `df60d67` (8.1.2) exist in that order; all expected files (`lib/ai/decisionOutcome/*`, `lib/ai/decisionEvaluation/*`, `lib/ai/decisionLearning/lifecycle.ts`, `lib/ai/failurePatterns/*`, `lib/ai/learning/db.ts`, `supabase/learning/schema.sql`) exist and match the handover's stated implementation characteristics (observational-only, 5-sample minimum, 0.7 confidence cap, sources never mixed, recompute-and-upsert, no automatic trigger anywhere in the repo). This audit's findings were delivered separately and approved before implementation began.
+
+### Architecture
+```
+lib/ai/decisionMemory/
+  contracts.ts   — types only: DecisionMemoryQuery, DecisionMemoryJoinedRow,
+                   DecisionMemoryResult (+ re-exports of DecisionSource/
+                   DecisionExperienceRecord/DecisionEvaluation/
+                   EvaluationEvidenceTag/FailurePatternCandidate)
+  retrieve.ts    — retrieveDecisionMemory(query, joinedRows, patterns): pure,
+                   deterministic, zero DB/LLM/fetch/Date.now/Math.random
+  repository.ts  — getDecisionMemoryJoinedExperiences() [read, joins
+                   decision_experiences + decision_evaluations in-memory
+                   by source_signal_id], getDecisionMemoryPatterns()
+                   [read, failure_pattern_candidates verbatim],
+                   queryDecisionMemory() [orchestrator, composes the two
+                   reads + the pure retriever] — zero write/upsert/
+                   insert/update/delete anywhere in this file
+
+scripts/phase8/decision-memory-fixtures.ts — 20 offline cases against retrieve.ts,
+  plus static source-scan checks over repository.ts/retrieve.ts/contracts.ts
+```
+Same layering convention as Phase 8.1.1/8.1.2 (`{contracts, <pure-engine>, repository}.ts`): the pure module (`retrieve.ts`) never imports Supabase/network/LLM; `repository.ts` holds 100% of the persistence-aware code and zero filtering/ranking logic. `getLearningSupabase()` (`lib/ai/learning/db.ts`, Phase 8.1.0) is reused unchanged — no second Learning DB client was created. No new table: retrieval is dynamic/query-time, re-reading the current Learning DB population on every call — never materialized, cached, or snapshotted.
+
+### Naming — collision with `lib/ai/cognitive/memory.ts` avoided
+`lib/ai/cognitive/memory.ts` owns `CognitiveWorkingMemory`/`CognitiveMemoryEntry`/`createWorkingMemory()`/`appendMemoryEntry()` for a fully unrelated concept: request-scoped, in-process, never-persisted working notes attached to a single live `CognitiveObservation`, discarded at the end of one Oracle assessment. Decision Memory is the structural opposite — a read-only query over the Learning DB's persisted historical population, called on demand, holding no state of its own between calls. Every exported type in `lib/ai/decisionMemory/*` is prefixed `DecisionMemory*` (`DecisionMemoryQuery`, `DecisionMemoryJoinedRow`, `DecisionMemoryResult`), no file in this module imports from `lib/ai/cognitive/memory.ts`, and no bare/`Cognitive`-prefixed `*Memory` identifier appears anywhere in this module's actual code (fixture 15, comment-stripped scan).
+
+### Retrieval rules (implemented exactly as specified)
+- **Source isolation**: `source` is a required `DecisionMemoryQuery` field; AI_SIGNAL and ELVOID_PRO_ORACLE rows/patterns are never mixed in one query's results (fixtures 2, 3).
+- **Join**: `decision_experiences` x `decision_evaluations`, joined in-memory by `source_signal_id` — same convention `failurePatterns/repository.ts` already established for the same two tables. An experience with no evaluation yet yields `evaluation: null` (valid, expected — outcome unresolved or an automatic `INSUFFICIENT_EVIDENCE` deliberately never persisted); it still appears in `matchedExperiences` but contributes nothing to `matchedEvaluations` (fixture 12). An orphaned `decision_evaluations` row (no matching experience) is structurally unreachable — the join iterates `decision_experiences`, never the reverse (fixture 14b-style static check, `repository.ts` doc comment).
+- **Evidence relevance**: plain closed-enum set-overlap between `query.evidenceTags` and a row's `decision_evaluations.evidence` — no similarity/embedding score anywhere. Omitted/empty `evidenceTags` is a no-op filter (fixture 4, 18).
+- **Optional specificity filters**: `symbol`/`side` narrow further; all filters (`source`, `symbol`, `side`, `since`, `evidenceTags`) AND together (fixtures 5, 6, 18).
+- **`since`**: bounds to `decisionTimestamp >= since`, inclusive at the exact boundary (fixture 7).
+- **Ranking**: experiences ranked primarily by evidence-overlap count (descending), then `decisionTimestamp` (descending), then `sourceSignalId` (ascending) as a final deterministic tie-break — proven order-independent regardless of input array order (fixture 9).
+- **`limit`**: caps `matchedExperiences`/`matchedEvaluations` only; `matchedPatterns` is never capped by it (fixtures 8, 19).
+- **Pattern qualification untouched**: `matchedPatterns` reuses `failure_pattern_candidates` rows exactly as Phase 8.1.2 persisted them — filtered only by `source` and, optionally, `evidenceTag` membership in the requested set. No `MIN_OCCURRENCE_COUNT`/`CONFIDENCE_SAMPLE_CAP`/`MAX_CONFIDENCE` (or any occurrence/confidence comparison) is referenced anywhere in `retrieve.ts` or `repository.ts` (fixture 14b, comment-stripped scan) — that qualification logic lives solely in `lib/ai/failurePatterns/detect.ts`, run once, before a row ever reaches the table.
+- **Structural separation preserved**: `DecisionMemoryResult` has exactly three closed keys — `matchedExperiences`, `matchedEvaluations`, `matchedPatterns` — never flattened into one list; a pattern row is never shaped like an experience record and vice versa (fixture 13).
+- **No causal language / no free text**: every field on every input/output type is a closed enum, count, ID, or timestamp already defined in an earlier phase — this module introduces no new field, string, or narrative anywhere.
+- **Purity / immutability**: `retrieveDecisionMemory()` never mutates its `joinedRows`/`patterns` inputs (fixture 10) and produces byte-identical output for the same population regardless of input array order (fixture 9); `retrieve.ts`'s actual code contains no `fetch`/`Date.now`/`Math.random`/Supabase/Learning-DB-or-Oracle-or-elvoid-or-cognitive imports/Binance (fixture 17).
+
+### Read-only — zero write path (verified, not assumed)
+`repository.ts`'s actual code (comments excluded) contains no `.insert(`/`.upsert(`/`.update(`/`.delete(`/`.rpc(` call anywhere (fixture 16). `queryDecisionMemory()` performs two parallel reads (`getDecisionMemoryJoinedExperiences()`, `getDecisionMemoryPatterns()`) and calls the pure retriever — nothing else.
+
+### Not wired anywhere — callable infrastructure only
+`queryDecisionMemory()` is exported and independently callable, exactly mirroring how `recomputeFailurePatterns()` (8.1.2) and `evaluateAndPersistDecision()` (8.1.1) were both left uncalled until a separately-approved wiring task. Nothing in `paperTrader.ts`, any API route, a cron, or a scanner/execution path calls it. No adaptive-constraint generation or application exists anywhere in this module — that remains exclusively Phase 8.1.4's scope, not started.
+
+### Files changed
+- **NEW**: `lib/ai/decisionMemory/contracts.ts`, `lib/ai/decisionMemory/retrieve.ts`, `lib/ai/decisionMemory/repository.ts`, `scripts/phase8/decision-memory-fixtures.ts` (20 cases). `CHANGES.md` — this entry.
+- **MODIFIED**: none. `supabase/learning/schema.sql` — **untouched**, confirmed via `git diff --stat` (no new table required for dynamic/query-time retrieval).
+- **UNTOUCHED** (confirmed via `git status --porcelain` and per-path `git diff --stat`, see Scope verification below): `lib/ai/decisionOutcome/*`, `lib/ai/decisionEvaluation/*`, `lib/ai/failurePatterns/*`, `lib/ai/decisionLearning/lifecycle.ts`, `lib/ai/cognitive/*`, `lib/ai/oracle/*`, `lib/ai/insights/*`, `lib/elvoid/paperTrader.ts`, `lib/supabase.ts`, Main DB schema, `supabase/learning/schema.sql`, `app/api/*`, auth, Binance/`bn_*`, execution/order-placement logic.
+
+### Fixture results (`scripts/phase8/decision-memory-fixtures.ts`) — 20/20 passed
+Offline, pure-layer only (same convention as `decision-evaluation-fixtures.ts`/`failure-pattern-fixtures.ts` — `repository.ts` requires a live Learning DB, unavailable in this sandbox, and is not exercised by fixtures beyond static source-text scans). Covers: 1 empty population. 2 mandatory source isolation. 3 patterns never mixed across sources. 4 exact evidence-overlap ranking (2-tag query, overlap 2/1/0). 5 symbol filter. 6 side filter. 7 `since` boundary (inclusive-at-exact, exclusive-before). 8 `limit` caps experiences/evaluations, never patterns. 9 deterministic output under reversed input order, including a same-timestamp tie-break. 10 input immutability. 11 experience/evaluation join correctness. 12 unresolved experience (no evaluation) handled without fabrication. 13 three-way structural separation of the result shape. 14a/14b pattern qualification never re-implemented or weakened (behavioral + static-scan proof). 15 no `CognitiveWorkingMemory`/`cognitive/memory.ts` naming or import collision. 16 zero write operations in `repository.ts` (static scan). 17 `retrieve.ts` purity/source-boundary (static scan). 18 all five filters composing with AND semantics. 19 `limit=0` edge case.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/decision-memory-fixtures.ts`
+
+### Regression — full Phase 8 suite, all re-run this pass
+`cognitive-observation-fixtures.ts` (8.0.1), `cognitive-memory-fixtures.ts` (8.0.2), `cognitive-hypothesis-fixtures.ts` (8.0.3), `cognitive-conflict-fixtures.ts` (8.0.4), `cognitive-context-fixtures.ts` (8.0.5), `decision-outcome-fixtures.ts` (8.1.0, 33/33), `learning-db-env-fixtures.ts` (8.1.0, 12/12), `decision-evaluation-fixtures.ts` (8.1.1, 36/36), `decision-learning-lifecycle-fixtures.ts` (8.1.1.1, 21/21), `failure-pattern-fixtures.ts` (8.1.2, 16/16) — **all still pass, zero regressions.** None of these suites' source files were modified this pass.
+
+### Typecheck
+`npx tsc --noEmit` — **not run**: `node_modules` is not installed in this sandbox and there is no network access to install it — same pre-existing environment limitation documented in every prior 8.x entry. In its place: (1) `node --experimental-strip-types --check` run individually against all four new files — clean, no syntax/parse errors; (2) the fixture script itself exercises `retrieve.ts` through Node's TS-stripping runtime end-to-end (20/20 passing is only possible if the module's types/imports/exports resolve and its logic executes without a runtime `TypeError`); (3) manual cross-check of every import in the four new files against the actual exported names in `lib/ai/decisionOutcome/contracts.ts`, `lib/ai/decisionEvaluation/contracts.ts`, `lib/ai/failurePatterns/contracts.ts`, `lib/ai/learning/db.ts`, and `lib/elvoid/types.ts` (`DecisionSource`, `DecisionExperienceRecord`, `DecisionEvaluation`, `EvaluationEvidenceTag`, `FailurePatternCandidate`, `getLearningSupabase`, `SignalSide` — all confirmed present). Recommend running `npx tsc --noEmit` in an environment with network access before considering this phase fully verified, same recommendation as every prior sandbox-limited entry.
+
+### Scope verification
+`git status --porcelain`: only the three new `lib/ai/decisionMemory/*.ts` files and the one new fixture script (untracked) — `supabase/learning/schema.sql` shows **zero diff**. Explicit per-path `git diff --stat` check against every protected path (`lib/ai/decisionOutcome`, `lib/ai/decisionEvaluation`, `lib/ai/failurePatterns`, `lib/ai/decisionLearning`, `lib/ai/cognitive`, `lib/ai/oracle`, `lib/ai/insights`, `lib/elvoid/paperTrader.ts`, `lib/supabase.ts`, `supabase/learning/schema.sql`, `supabase/schema.sql`, `app/api`) returned empty for all of them — zero incidental edits.
+
+### Limitations discovered
+- No live Learning DB is reachable in this sandbox, so `repository.ts`'s three functions (`getDecisionMemoryJoinedExperiences`, `getDecisionMemoryPatterns`, `queryDecisionMemory`) are verified by static-scan/structural checks and manual import cross-referencing only, not by an end-to-end database round-trip — same limitation every prior 8.1.x `repository.ts` has carried, each still awaiting live-DB verification before or during Phase 8.1.4.
+- `since` comparison uses `Date.parse()` on caller-supplied ISO strings (never `Date.now()`) — deterministic given fixed inputs, but callers of `queryDecisionMemory()` should be aware `since` performs no timezone normalization beyond what `Date.parse` itself does for a well-formed ISO 8601 string with an explicit offset/`Z`.
+
+### Remaining roadmap status
+- Phase 8.1.0: Decision Capture + Learning DB + Outcome Lifecycle — **COMPLETE**.
+- Phase 8.1.1: Decision Evaluation Engine — **COMPLETE**.
+- Phase 8.1.1.1: Decision Evaluation Lifecycle Wiring — **COMPLETE**.
+- Phase 8.1.2: Failure Pattern Detection — **COMPLETE**.
+- Phase 8.1.3: Decision Memory — **COMPLETE** (query-time retrieval layer only; `queryDecisionMemory()` is callable but not automatically triggered/wired from anywhere).
+- Future only, not started: Phase 8.1.4 Adaptive Constraint Engine (consuming `DecisionMemoryResult` to propose constraints — read-only relative to Oracle/canonical trading intelligence, no signal generation, no execution, no position sizing), and Phase "Learning Validation" beyond it — both explicitly out of scope until separately approved.
