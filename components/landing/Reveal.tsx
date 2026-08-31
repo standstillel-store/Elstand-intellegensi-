@@ -3,11 +3,8 @@
 import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 
-// Small client-only wrapper so section files (Features, Roadmap, Security,
-// TokenSection) can add scroll-triggered animation without becoming client
-// components themselves — a Server Component can render a Client Component
-// and pass it server-rendered JSX as children, so this is the only file in
-// this batch that needs "use client".
+// Unchanged from the previous landing design — still the right tool for
+// scroll-triggered reveal in the new template-matched sections below.
 export function Reveal({
   children,
   delay = 0,

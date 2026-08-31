@@ -1,84 +1,58 @@
 import Link from "next/link";
-import { Twitter, Send, MessageCircle, Mail } from "lucide-react";
-import { Container } from "./shared";
 
-const SOCIALS = [
-  { icon: Twitter, label: "X / Twitter", href: "https://x.com/elstandai" },
-  { icon: Send, label: "Telegram", href: "https://t.me/elstandai" },
-  { icon: MessageCircle, label: "WhatsApp Community", href: "https://chat.whatsapp.com/elstandai" },
-  { icon: Mail, label: "Email", href: "mailto:support@elstand.ai" },
-];
-
+// Legal links point to existing public pages (app/terms, app/privacy-policy,
+// app/contact) — none of those routes are in middleware.ts's protected-path
+// list, so linking to them is presentation-layer only, no backend touched.
 export function LandingFooter() {
   return (
-    <footer className="border-t border-line/70 py-14">
-      <Container>
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="lg:col-span-2">
-            <div className="flex items-center gap-2.5">
-              <span className="h-2 w-2 rounded-full bg-signal animate-pulseGlow" />
-              <span className="text-sm font-bold tracking-tight text-ink">ElStand AI</span>
-            </div>
-            <p className="mt-3 max-w-xs text-sm leading-relaxed text-ink-muted">
-              AI-powered crypto market intelligence for traders and investors — analysis and tools, not advice.
-            </p>
-            <div className="mt-5 flex gap-3">
-              {SOCIALS.map((s) => (
-                <a
-                  key={s.label}
-                  href={s.href}
-                  aria-label={s.label}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex h-8 w-8 items-center justify-center rounded-md border border-line text-ink-faint transition-colors hover:border-signal/40 hover:text-ink"
-                >
-                  <s.icon size={15} />
-                </a>
-              ))}
-            </div>
+    <footer className="elv-footer">
+      <div className="elv-footer-grid">
+        <div>
+          <div className="elv-footer-brand mono">
+            <span className="elv-footer-brand-mark" />
+            ELSTAND INTELLIGENCE
           </div>
-
-          <div>
-            <p className="eyebrow text-[11px] text-ink-faint">Company</p>
-            <ul className="mt-3 space-y-2.5 text-sm">
-              <li>
-                <a href="#about" className="text-ink-muted hover:text-ink">
-                  About
-                </a>
-              </li>
-              <li>
-                <Link href="/contact" className="text-ink-muted hover:text-ink">
-                  Contact
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="eyebrow text-[11px] text-ink-faint">Legal</p>
-            <ul className="mt-3 space-y-2.5 text-sm">
-              <li>
-                <Link href="/privacy-policy" className="text-ink-muted hover:text-ink">
-                  Privacy Policy
-                </Link>
-              </li>
-              <li>
-                <Link href="/terms" className="text-ink-muted hover:text-ink">
-                  Terms of Service
-                </Link>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="mt-10 border-t border-line/70 pt-6">
-          <p className="text-xs leading-relaxed text-ink-faint">
-            ElStand AI provides analytical tools and educational insights only — not financial advice, and not a
-            guarantee of profit. Cryptocurrency markets are volatile; always do your own research.
+          <p className="elv-footer-desc">
+            A market-intelligence layer built from macro context, structure, order flow and an evidence-based AI
+            reasoning core — with a Web3 access layer on top.
           </p>
-          <p className="mt-3 text-xs text-ink-faint">© {new Date().getFullYear()} ElStand AI. All rights reserved.</p>
+          <div className="elv-footer-status mono">
+            <span className="elv-footer-status-dot" />
+            ELVOID CORE — OPERATIONAL
+          </div>
         </div>
-      </Container>
+
+        <div className="elv-footer-col">
+          <h4>Intelligence</h4>
+          <a href="#macro">Macro Context</a>
+          <a href="#map">Intelligence Map</a>
+          <a href="#quant">ELVOID Quant</a>
+          <a href="#orderflow">Order Flow</a>
+        </div>
+
+        <div className="elv-footer-col">
+          <h4>Decision Layer</h4>
+          <a href="#oracle">ELVOID PRO Oracle</a>
+          <a href="#performance">Evidence Ledger</a>
+          <Link href="/methodology">Methodology</Link>
+        </div>
+
+        <div className="elv-footer-col">
+          <h4>Ecosystem</h4>
+          <a href="#web3">Web3 Utility</a>
+          <a href="#membership">ELVOID Pro</a>
+          <Link href="/contact">Contact</Link>
+        </div>
+      </div>
+
+      <div className="elv-footer-bottom mono">
+        <span>© ELSTAND INTELLIGENCE</span>
+        <span className="elv-footer-legal">
+          <Link href="/terms">Terms</Link>
+          <Link href="/privacy-policy">Privacy</Link>
+        </span>
+        <span>ELVOID PROVIDES DECISION SUPPORT, NOT GUARANTEED OUTCOMES. NOT FINANCIAL ADVICE.</span>
+      </div>
     </footer>
   );
 }

@@ -1,6 +1,11 @@
-import { FAQS } from "./faqData";
-
-// Update SITE_URL once the real domain is live — placeholder for now.
+// Phase B — Landing Redesign. Simplified from the previous version:
+// - FAQPage schema removed along with the FAQ section itself (not part of
+//   the new template's structure).
+// - The previous "Pro $29" Offer entry is removed — that price was not
+//   something the Phase A/B audits verified against the repository (the
+//   membership pricing lives in lib/payments/config.ts, a protected file
+//   this phase doesn't read into marketing copy), so it's dropped rather
+//   than repeated unverified.
 const SITE_URL = "https://elstand.ai";
 
 export function JsonLd() {
@@ -11,12 +16,8 @@ export function JsonLd() {
     applicationCategory: "FinanceApplication",
     operatingSystem: "Web",
     description:
-      "AI-powered crypto market intelligence platform: AI market analysis, technical indicators, a crypto scanner, news sentiment, risk management tools, and paper trading.",
+      "ElStand AI is a crypto market intelligence platform: macro and micro context, order flow, a deterministic AI Oracle decision-support pipeline, paper trading, and an on-chain (BSC Testnet) membership and rewards layer.",
     url: SITE_URL,
-    offers: [
-      { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD" },
-      { "@type": "Offer", name: "Pro", price: "29", priceCurrency: "USD" },
-    ],
   };
 
   const organization = {
@@ -27,21 +28,10 @@ export function JsonLd() {
     sameAs: ["https://x.com/elstandai", "https://t.me/elstandai"],
   };
 
-  const faqPage = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: FAQS.map((f) => ({
-      "@type": "Question",
-      name: f.question,
-      acceptedAnswer: { "@type": "Answer", text: f.answer },
-    })),
-  };
-
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareApplication) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organization) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqPage) }} />
     </>
   );
 }

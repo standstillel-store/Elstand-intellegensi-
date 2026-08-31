@@ -1,76 +1,88 @@
-import Link from "next/link";
-import { Suspense } from "react";
-import { ArrowRight } from "lucide-react";
-import { Container, LandingEyebrow } from "./shared";
-import { OrbIntelligence } from "./OrbIntelligence";
-import { TickerStrip, TickerStripFallback } from "./TickerStrip";
+"use client";
 
-// Phase 5 REBOOT — full rewrite, not a reskin. Previous version (center-
-// stack: eyebrow, h1, subhead, CTAs, then the signature element in its own
-// row below) is gone — see VoidCore.tsx for why the signature element
-// itself changed. Layout change here: the void now sits large and
-// overlaps the bottom of the text block instead of politely stacking
-// below it in its own clean row — more depth, less "generic SaaS hero."
-//
-// Copy leads with the one true mechanic (many signals in, one verdict
-// out) instead of a generic "AI-powered" opener. "The Bloomberg Terminal
-// for crypto intelligence" — the positioning line from the original
-// brief — still appears, just demoted from H1 to subhead so the H1 can be
-// shorter and bigger.
+import { motion, useReducedMotion } from "framer-motion";
+import { AuthAwareCta } from "./AuthAwareCta";
+
+// ---------------------------------------------------------------------------
+// Phase B — Landing Redesign. Reproduces the template's per-letter canvas
+// "ParticleText" headline as a Framer Motion staggered-line reveal instead —
+// same visual beat (headline assembles itself on load), no canvas, no new
+// dependency, and it degrades cleanly to a static heading under
+// prefers-reduced-motion via Framer's own useReducedMotion() (same pattern
+// Reveal.tsx already uses elsewhere in this folder).
+// ---------------------------------------------------------------------------
+
+const HEADLINE_LINES = ["MARKET", "INTELLIGENCE,", "REENGINEERED."];
+
+const HERO_TAGS = [
+  { label: "MACRO", style: { top: "16%", right: "6%" } },
+  { label: "MICRO", style: { top: "30%", right: "22%" } },
+  { label: "LIQUIDITY", style: { top: "46%", right: "4%" } },
+  { label: "ORDER FLOW", style: { top: "60%", right: "18%" } },
+  { label: "AI", style: { top: "74%", right: "6%" } },
+  { label: "WEB3", style: { top: "88%", right: "24%" } },
+];
 
 export function Hero() {
+  const reducedMotion = useReducedMotion();
+
   return (
-    <section className="landing-aurora theme-invariant relative overflow-hidden bg-landing-bg pt-16 sm:pt-24">
-      {/* Corner registration marks — small, quiet, "instrument panel" detail. */}
-      <div className="pointer-events-none absolute inset-6 hidden sm:block" aria-hidden="true">
-        <span className="absolute left-0 top-0 h-3 w-3 border-l border-t border-landing-line" />
-        <span className="absolute right-0 top-0 h-3 w-3 border-r border-t border-landing-line" />
-        <span className="absolute bottom-0 left-0 h-3 w-3 border-b border-l border-landing-line" />
-        <span className="absolute bottom-0 right-0 h-3 w-3 border-b border-r border-landing-line" />
+    <section id="hero" data-elv-layer="00" className="elv-section elv-env-dark elv-hero">
+      <div className="elv-hero-tags" aria-hidden="true">
+        {HERO_TAGS.map((tag, i) => (
+          <motion.span
+            key={tag.label}
+            className="elv-hero-tag mono"
+            style={tag.style}
+            initial={reducedMotion ? { opacity: 1 } : { opacity: 0 }}
+            animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: [0, -14, 0] }}
+            transition={
+              reducedMotion
+                ? undefined
+                : {
+                    opacity: { duration: 1, delay: 0.4 + i * 0.12 },
+                    y: { duration: 3 + i * 0.3, repeat: Infinity, ease: "easeInOut", delay: 1 },
+                  }
+            }
+          >
+            {tag.label}
+          </motion.span>
+        ))}
       </div>
 
-      <Container className="relative flex flex-col items-center pb-10 text-center">
-        <LandingEyebrow>ElVoid Core — Online</LandingEyebrow>
+      <div className="elv-section-inner elv-hero-content">
+        <div className="elv-eyebrow">ELSTAND // ELVOID CORE ONLINE</div>
 
-        <h1 className="mt-6 max-w-3xl font-display text-5xl font-light leading-[1.05] tracking-tight text-ink sm:text-7xl">
-          Every signal.
-          <br />
-          <span className="font-medium bg-gradient-to-r from-landing-gold via-landing-gold-glow to-landing-gold bg-clip-text text-transparent">
-            One verdict.
-          </span>
+        <h1 className="elv-h1" aria-label="Market Intelligence, Reengineered.">
+          {HEADLINE_LINES.map((line, i) => (
+            <motion.span
+              key={line}
+              className="elv-h1-line"
+              initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={reducedMotion ? undefined : { duration: 0.6, delay: 0.15 + i * 0.14, ease: "easeOut" }}
+            >
+              {line}
+            </motion.span>
+          ))}
         </h1>
 
-        <p className="mt-6 max-w-xl text-[15px] leading-relaxed text-ink-muted sm:text-base">
-          ElVoid reads price, whales, funding, news, and macro together — then shows you exactly why.
-          This is the Bloomberg Terminal for crypto intelligence.
+        <p className="elv-lede">
+          Most tools give you a signal and walk away. ELVOID shows the case file: the macro context, the structure
+          underneath, the order flow inside the candle — and the reasoning that connects them before it says a
+          direction out loud.
         </p>
 
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <Link
-            href="/login"
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-landing-gold px-6 py-3 text-sm font-semibold text-landing-bg shadow-glow-landing-gold transition-colors hover:bg-landing-gold-glow"
-          >
-            Launch Terminal <ArrowRight size={16} />
-          </Link>
-          {/* Live Market Preview (Section 2) lives at #intelligence. */}
-          <a
-            href="#intelligence"
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-landing-line px-6 py-3 text-sm font-semibold text-ink transition-colors hover:border-landing-gold/40"
-          >
-            See It Think
-          </a>
+        <div className="elv-cta-row">
+          <AuthAwareCta guestLabel="Get Started" authLabel="Enter Dashboard" />
+          <AuthAwareCta guestLabel="Enter ELVOID" authLabel="Open Terminal" variant="secondary" icon={false} />
         </div>
+      </div>
 
-        <p className="mt-4 text-xs text-ink-faint">Free to start · No credit card required</p>
-
-        <div className="relative mt-8 w-full sm:mt-4 sm:-mb-8 lg:-mb-16">
-          <OrbIntelligence />
-        </div>
-      </Container>
-
-      <Suspense fallback={<TickerStripFallback />}>
-        <TickerStrip />
-      </Suspense>
+      <div className="elv-scroll-hint mono" aria-hidden="true">
+        <span className="elv-scroll-hint-line" />
+        SCROLL TO DESCEND
+      </div>
     </section>
   );
 }

@@ -180,6 +180,21 @@ body {
   letter-spacing: 0.08em;
 }
 
+/* Phase C fix: small, generic, non-`elv-*` dot marker used by the shared
+   Eyebrow component (components/landing/shared.tsx). Deliberately placed
+   here, unscoped, next to the existing bare `.eyebrow` rule above — it's a
+   single-purpose 5-line utility using `currentColor`, not part of the
+   landing redesign's `.elv-*` design system, so nothing from that system
+   leaks outside `.landing-root`. */
+.eyebrow-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
 /* ---- Terminal-grade motion & surface primitives -------------------- */
 
 .glow-card {
@@ -540,3 +555,816 @@ body {
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
+
+/* =====================================================================
+   Phase B — LANDING REDESIGN (template-matched)
+   Everything below is scoped under `.landing-root` (set on the <main> in
+   app/page.tsx) and prefixed `elv-` ("ElVoid") to stay fully isolated
+   from both the dashboard's tokens and the previous landing design's
+   `--landing-*` tokens above (left untouched, just unused by the new
+   design). Fonts reuse the already-loaded --font-sans / --font-mono
+   variables from app/layout.tsx — no new font or library was added.
+   ===================================================================== */
+
+.landing-root.elv-page {
+  --elv-ink-rgb: 8 9 12;
+  --elv-panel-rgb: 16 20 28;
+  --elv-panel2-rgb: 22 27 37;
+  --elv-paper-rgb: 236 238 242;
+  --elv-paper-panel-rgb: 222 226 232;
+  --elv-paper-panel2-rgb: 210 215 224;
+  --elv-fg-dark-rgb: 233 230 220;
+  --elv-fg-dark-dim-rgb: 139 143 152;
+  --elv-fg-light-rgb: 18 21 27;
+  --elv-fg-light-dim-rgb: 90 96 104;
+  --elv-amber-rgb: 201 154 82;
+  --elv-amber-bright-rgb: 224 180 108;
+  --elv-teal-rgb: 60 125 118;
+  --elv-teal-bright-rgb: 87 168 158;
+  --elv-rule-dark-rgb: 233 230 220;
+  --elv-rule-light-rgb: 18 21 27;
+
+  position: relative;
+  background: rgb(var(--elv-ink-rgb));
+  color: rgb(var(--elv-fg-dark-rgb));
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+.landing-root.elv-page .mono {
+  font-family: var(--font-mono);
+}
+
+.landing-root.elv-page ::selection {
+  background: rgb(var(--elv-amber-rgb));
+  color: rgb(var(--elv-ink-rgb));
+}
+
+/* ---------- section shell ---------- */
+.landing-root .elv-section {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: clamp(24px, 6vw, 96px) clamp(20px, 8vw, 120px);
+  z-index: 2;
+  transition: background 0.4s ease, color 0.4s ease;
+}
+@media (min-width: 901px) {
+  .landing-root .elv-section {
+    padding-left: calc(clamp(20px, 8vw, 120px) + 44px);
+  }
+}
+.landing-root .elv-section-inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.landing-root .elv-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(var(--elv-rule-dark-rgb) / 0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+.landing-root .elv-env-dark {
+  background: rgb(var(--elv-ink-rgb) / 0.94);
+  color: rgb(var(--elv-fg-dark-rgb));
+}
+.landing-root .elv-env-dark .elv-tile,
+.landing-root .elv-env-dark .elv-flow-node,
+.landing-root .elv-env-dark .elv-mock-panel {
+  background: rgb(var(--elv-panel-rgb));
+  border-color: rgb(var(--elv-rule-dark-rgb) / 0.12);
+}
+.landing-root .elv-env-light {
+  background: rgb(var(--elv-paper-rgb) / 0.96);
+  color: rgb(var(--elv-fg-light-rgb));
+}
+.landing-root .elv-env-light::before {
+  background-image: radial-gradient(rgb(var(--elv-rule-light-rgb) / 0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.landing-root .elv-env-light .elv-tile,
+.landing-root .elv-env-light .elv-flow-node,
+.landing-root .elv-env-light .elv-mock-panel {
+  background: rgb(var(--elv-paper-panel-rgb));
+  border-color: rgb(var(--elv-rule-light-rgb) / 0.12);
+}
+.landing-root .elv-env-light .elv-lede,
+.landing-root .elv-env-light .elv-note,
+.landing-root .elv-env-light .elv-tile-label {
+  color: rgb(var(--elv-fg-light-dim-rgb));
+}
+
+/* ---------- typography ---------- */
+.landing-root .elv-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgb(var(--elv-amber-rgb));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+/* Phase C fix: the dot marker is now rendered by the Eyebrow component
+   itself (`.eyebrow-dot`, defined near the pre-existing bare `.eyebrow`
+   rule above) instead of CSS-generated content here, so `Eyebrow` renders
+   correctly both inside `.landing-root` and on the three pre-existing
+   public pages that use it outside that scope. Restored to the exact
+   original 7px/sharp-corner size here so every existing landing section's
+   eyebrow dot is pixel-identical to before this fix — only its markup
+   origin changed (component-rendered span vs. CSS ::before), not its
+   appearance. The generic 4px circular `.eyebrow-dot` fallback (defined
+   near the bare `.eyebrow` rule) still applies outside `.landing-root`. */
+.landing-root .eyebrow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+}
+/* Phase C fix: two eyebrow strings ("LAYER 04 — ON-CHAIN UTILITY (BSC
+   TESTNET)" in Web3Section, "ELSTAND INTELLIGENCE // ALL LAYERS CONVERGED"
+   in FinalCta) are long enough to wrap at narrow mobile widths. Desktop is
+   untouched (this only applies <=480px). Wrapping itself is still allowed
+   here (not suppressed with white-space: nowrap, which would risk
+   horizontal overflow instead) — this just makes it look intentional: a
+   slightly smaller, tighter tracking reduces how badly the longest strings
+   wrap, and `align-items: flex-start` (instead of `center`) keeps the dot
+   marker aligned to the first line instead of floating in the vertical
+   middle of a two-line block. */
+@media (max-width: 480px) {
+  .landing-root .elv-eyebrow {
+    align-items: flex-start;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    gap: 8px;
+  }
+  .landing-root .elv-eyebrow .eyebrow-dot {
+    margin-top: 3px;
+  }
+}
+.landing-root .elv-h1,
+.landing-root .elv-h2 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+.landing-root .elv-h1 {
+  font-size: clamp(34px, 7vw, 84px);
+  display: flex;
+  flex-direction: column;
+}
+.landing-root .elv-h1-line {
+  display: block;
+}
+.landing-root .elv-h1-final {
+  max-width: 14ch;
+}
+.landing-root .elv-h2 {
+  font-size: clamp(26px, 4.2vw, 50px);
+  max-width: 16ch;
+}
+.landing-root .elv-lede {
+  font-size: clamp(15px, 1.6vw, 18px);
+  line-height: 1.6;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  max-width: 52ch;
+  font-weight: 300;
+  margin-top: 18px;
+}
+.landing-root .elv-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  letter-spacing: 0.04em;
+  margin-top: 14px;
+}
+
+/* ---------- CTA buttons ---------- */
+.landing-root .elv-cta-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 36px;
+  flex-wrap: wrap;
+}
+.landing-root .elv-btn {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 15px 26px;
+  border: 1px solid rgb(var(--elv-amber-rgb));
+  color: rgb(var(--elv-amber-rgb));
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.25s ease, color 0.25s ease, transform 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+.landing-root .elv-btn:hover {
+  background: rgb(var(--elv-amber-rgb));
+  color: rgb(var(--elv-ink-rgb));
+  transform: translateY(-1px);
+}
+.landing-root .elv-btn-secondary {
+  border-color: rgb(var(--elv-fg-dark-dim-rgb) / 0.4);
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+}
+.landing-root .elv-env-light .elv-btn-secondary {
+  border-color: rgb(var(--elv-fg-light-dim-rgb) / 0.4);
+  color: rgb(var(--elv-fg-light-dim-rgb));
+}
+.landing-root .elv-btn-secondary:hover {
+  border-color: rgb(var(--elv-fg-dark-dim-rgb));
+  color: rgb(var(--elv-fg-dark-rgb));
+  background: transparent;
+}
+
+/* ---------- two-column split ---------- */
+.landing-root .elv-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .landing-root .elv-split {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+}
+
+/* ---------- tile grid ---------- */
+.landing-root .elv-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: rgb(var(--elv-rule-dark-rgb) / 0.12);
+  border: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  margin-top: 26px;
+}
+.landing-root .elv-env-light .elv-tile-grid {
+  background: rgb(var(--elv-rule-light-rgb) / 0.12);
+  border-color: rgb(var(--elv-rule-light-rgb) / 0.12);
+}
+.landing-root .elv-tile {
+  padding: 18px 16px;
+}
+.landing-root .elv-tile-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+}
+.landing-root .elv-tile-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  margin-top: 8px;
+}
+@media (max-width: 640px) {
+  .landing-root .elv-tile-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---------- flow diagram ---------- */
+.landing-root .elv-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 8px;
+}
+.landing-root .elv-flow-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.landing-root .elv-flow-reveal-row {
+  margin-top: 30px;
+}
+.landing-root .elv-flow-node {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  padding: 14px 18px;
+  border: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+.landing-root .elv-flow-row .elv-flow-node {
+  margin-top: 0;
+}
+.landing-root .elv-flow:not(.elv-flow-row) .elv-flow-node + .elv-flow-node {
+  margin-top: 0;
+}
+.landing-root .elv-flow-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--elv-amber-rgb));
+  box-shadow: 0 0 0 rgb(var(--elv-amber-rgb) / 0.5);
+  animation: elv-flowpulse 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.landing-root .elv-flow-node:nth-child(even) .elv-flow-pulse {
+  background: rgb(var(--elv-teal-bright-rgb));
+}
+@keyframes elv-flowpulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(var(--elv-amber-rgb) / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgb(var(--elv-amber-rgb) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--elv-amber-rgb) / 0);
+  }
+}
+.landing-root .elv-flow-arrow-inline {
+  font-family: var(--font-mono);
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  padding-left: 26px;
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+/* ---------- illustrative mock panel (replaces canvas mocks) ---------- */
+.landing-root .elv-mock-panel {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  border: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: 14px;
+}
+.landing-root .elv-mock-panel-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgb(var(--elv-amber-rgb) / 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--elv-amber-rgb) / 0.14) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at 30% 30%, black, transparent 75%);
+}
+.landing-root .elv-mock-panel-label {
+  position: relative;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  text-transform: uppercase;
+}
+.landing-root .elv-env-light .elv-mock-panel-label {
+  color: rgb(var(--elv-fg-light-dim-rgb));
+}
+
+/* ---------- footprint grid (order flow) ---------- */
+.landing-root .elv-fp-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  margin-top: 26px;
+}
+.landing-root .elv-fp-cell {
+  aspect-ratio: 1;
+  background: rgb(var(--elv-teal-bright-rgb));
+}
+
+/* ---------- hero ---------- */
+.landing-root .elv-hero {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 140px;
+}
+.landing-root .elv-hero-content {
+  position: relative;
+  z-index: 3;
+  max-width: 680px;
+}
+.landing-root .elv-hero-tags {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: block;
+}
+@media (max-width: 1100px) {
+  .landing-root .elv-hero-tags {
+    display: none;
+  }
+}
+.landing-root .elv-hero-tag {
+  position: absolute;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgb(var(--elv-amber-rgb));
+  border: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  padding: 5px 10px;
+  background: rgb(var(--elv-ink-rgb) / 0.55);
+  backdrop-filter: blur(2px);
+}
+.landing-root .elv-scroll-hint {
+  position: absolute;
+  bottom: 40px;
+  left: clamp(20px, 8vw, 120px);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.landing-root .elv-scroll-hint-line {
+  width: 24px;
+  height: 1px;
+  background: rgb(var(--elv-fg-dark-dim-rgb));
+  animation: elv-pulseline 2s ease-in-out infinite;
+}
+@keyframes elv-pulseline {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- system rail (desktop-only fixed nav) ---------- */
+.landing-root .elv-rail-brand {
+  position: fixed;
+  left: 22px;
+  top: 26px;
+  z-index: 61;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgb(var(--elv-fg-dark-rgb));
+}
+.landing-root .elv-rail-brand-mark {
+  width: 10px;
+  height: 10px;
+  background: rgb(var(--elv-amber-rgb));
+  flex-shrink: 0;
+}
+.landing-root .elv-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.landing-root .elv-rail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  padding: 20px 0;
+  border-right: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  height: 60vh;
+  justify-content: center;
+}
+.landing-root .elv-rail-node {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.45;
+  transition: opacity 0.4s ease, color 0.4s ease;
+  text-decoration: none;
+}
+.landing-root .elv-rail-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(var(--elv-fg-dark-dim-rgb));
+  transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.4s ease;
+}
+.landing-root .elv-rail-node-active {
+  opacity: 1;
+  color: rgb(var(--elv-amber-rgb));
+}
+.landing-root .elv-rail-node-active .elv-rail-dot {
+  background: rgb(var(--elv-amber-rgb));
+  box-shadow: 0 0 8px rgb(var(--elv-amber-rgb) / 0.7);
+  transform: scale(1.4);
+}
+@media (max-width: 900px) {
+  .landing-root .elv-rail,
+  .landing-root .elv-rail-brand {
+    display: none;
+  }
+}
+
+/* ---------- header (mobile brand + persistent CTA) ---------- */
+.landing-root .elv-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 62;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px clamp(20px, 6vw, 40px);
+  background: transparent;
+  border-bottom: 1px solid transparent;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+.landing-root .elv-header-scrolled {
+  background: rgb(var(--elv-ink-rgb) / 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom-color: rgb(var(--elv-rule-dark-rgb) / 0.12);
+}
+.landing-root .elv-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: rgb(var(--elv-fg-dark-rgb));
+  text-decoration: none;
+}
+.landing-root .elv-header-brand-mark {
+  width: 9px;
+  height: 9px;
+  background: rgb(var(--elv-amber-rgb));
+  flex-shrink: 0;
+}
+@media (min-width: 901px) {
+  /* SystemRail already renders the fixed brand mark on desktop — avoid
+     showing it twice. */
+  .landing-root .elv-header-brand {
+    display: none;
+  }
+}
+.landing-root .elv-header-cta {
+  padding: 9px 16px;
+  font-size: 11px;
+  /* Phase C fix: at >=901px .elv-header-brand is display:none (see the
+     media query above), leaving this CTA as the header's only visible
+     flex child — with `justify-content: space-between` that placed a
+     lone child at flex-start (left) instead of the right. `margin-left:
+     auto` forces it to the right edge regardless of how many siblings are
+     in flow, so it's correct both when the brand is hidden (desktop) and
+     when it's visible (mobile, where it already sat correctly). */
+  margin-left: auto;
+}
+
+/* ---------- boot intro ---------- */
+.landing-root .elv-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgb(var(--elv-ink-rgb));
+  color: rgb(var(--elv-amber-rgb));
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0 clamp(20px, 8vw, 120px);
+  pointer-events: none;
+}
+.landing-root .elv-boot-line {
+  margin-bottom: 6px;
+}
+.landing-root .elv-boot-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: rgb(var(--elv-amber-rgb));
+  margin-left: 4px;
+  animation: elv-blink 0.9s step-end infinite;
+  vertical-align: middle;
+}
+@keyframes elv-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- ticker ---------- */
+.landing-root .elv-ticker {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 55;
+  height: 30px;
+  overflow: hidden;
+  background: rgb(var(--elv-ink-rgb) / 0.75);
+  backdrop-filter: blur(4px);
+  border-top: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+.landing-root .elv-ticker-track {
+  display: flex;
+  white-space: nowrap;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  animation: elv-ticker-scroll 34s linear infinite;
+}
+.landing-root .elv-ticker-track span {
+  padding-right: 48px;
+}
+.landing-root .elv-ticker-hl {
+  color: rgb(var(--elv-amber-rgb));
+}
+@keyframes elv-ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (max-width: 900px) {
+  .landing-root .elv-ticker {
+    display: none;
+  }
+}
+
+/* ---------- ambient background (CSS replacement for the template's
+   WebGL ferrofluid shader — see AmbientField.tsx for why) ---------- */
+.landing-root .elv-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.landing-root .elv-ambient-blob {
+  position: absolute;
+  width: 60vmax;
+  height: 60vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.16;
+  animation: elv-ambient-drift 28s ease-in-out infinite;
+}
+.landing-root .elv-ambient-blob-amber {
+  background: rgb(var(--elv-amber-rgb));
+  top: -10%;
+  left: -10%;
+}
+.landing-root .elv-ambient-blob-teal {
+  background: rgb(var(--elv-teal-bright-rgb));
+  bottom: -15%;
+  right: -10%;
+  animation-delay: -14s;
+}
+@keyframes elv-ambient-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(6%, 8%) scale(1.12);
+  }
+}
+.landing-root .elv-ambient-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.4;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+/* ---------- footer ---------- */
+.landing-root .elv-footer {
+  position: relative;
+  z-index: 2;
+  padding: 70px clamp(20px, 8vw, 120px) 96px;
+  border-top: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  background: rgb(var(--elv-ink-rgb));
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+}
+.landing-root .elv-footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  gap: 40px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+@media (max-width: 900px) {
+  .landing-root .elv-footer-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .landing-root .elv-footer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.landing-root .elv-footer-brand {
+  font-size: 15px;
+  color: rgb(var(--elv-fg-dark-rgb));
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.landing-root .elv-footer-brand-mark {
+  width: 9px;
+  height: 9px;
+  background: rgb(var(--elv-amber-rgb));
+  flex-shrink: 0;
+}
+.landing-root .elv-footer-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 14px;
+  max-width: 34ch;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  font-weight: 300;
+}
+.landing-root .elv-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgb(var(--elv-teal-bright-rgb));
+  margin-top: 20px;
+}
+.landing-root .elv-footer-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(var(--elv-teal-bright-rgb));
+  box-shadow: 0 0 6px rgb(var(--elv-teal-bright-rgb) / 0.7);
+}
+.landing-root .elv-footer-col h4 {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--elv-amber-rgb));
+  margin-bottom: 16px;
+}
+.landing-root .elv-footer-col a {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+  padding: 6px 0;
+  transition: color 0.2s ease;
+  text-decoration: none;
+}
+.landing-root .elv-footer-col a:hover {
+  color: rgb(var(--elv-fg-dark-rgb));
+}
+.landing-root .elv-footer-bottom {
+  max-width: 1180px;
+  margin: 50px auto 0;
+  padding-top: 24px;
+  border-top: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: rgb(var(--elv-fg-dark-dim-rgb) / 0.75);
+}
+.landing-root .elv-footer-legal {
+  display: flex;
+  gap: 16px;
+}
+.landing-root .elv-footer-legal a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* prefers-reduced-motion is already handled globally (see the blanket
+   `*` rule earlier in this file) — every @keyframes animation added above
+   is automatically covered, no extra rule needed here. */
