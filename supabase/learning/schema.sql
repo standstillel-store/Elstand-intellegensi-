@@ -132,3 +132,64 @@ create index if not exists decision_evaluations_evaluation_class_idx on decision
 alter table decision_evaluations enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.1.2 — Failure Pattern Detection
+--
+-- failure_pattern_candidates is a DERIVED, AGGREGATE STATISTIC computed
+-- over many already-frozen decision_evaluations rows (joined against
+-- decision_experiences for source/decision_timestamp) — never a third
+-- source of decision/outcome/evaluation truth, and never a causal claim.
+-- Purely observational: "this evidence tag recurred alongside a negative
+-- outcome N times, across multiple calendar days, for this source."
+--
+-- Unlike decision_evaluations (append-only, one row per experience,
+-- forever), this table is AGGREGATE STATE for its (source, evidence_tag)
+-- group. A recompute (lib/ai/failurePatterns/repository.ts::
+-- recomputeFailurePatterns()) safely OVERWRITES the existing row for a
+-- group via UPSERT ... ON CONFLICT (source, evidence_tag) DO UPDATE —
+-- never accumulates/duplicates, never merges partial state, since the
+-- pure detector (lib/ai/failurePatterns/detect.ts) always recomputes each
+-- group's aggregate from scratch, from the full current population.
+-- ---------------------------------------------------------------------------
+
+create table if not exists failure_pattern_candidates (
+  id uuid primary key default gen_random_uuid(),
+
+  -- Group identity — AI_SIGNAL and ELVOID_PRO_ORACLE are NEVER merged
+  -- into the same group; single evidence tag only, never a combination.
+  source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  evidence_tag text not null,          -- one EvaluationEvidenceTag member — see lib/ai/decisionEvaluation/contracts.ts.
+
+  version integer not null,
+
+  -- Most frequent evaluation class among this group's qualifying
+  -- negative-outcome rows. Only these two EvaluationClass members are
+  -- ever possible here (see NEGATIVE_EVALUATION_CLASSES in detect.ts) —
+  -- a group only exists in this table because it has >= 5 rows in one
+  -- of these two classes.
+  dominant_evaluation_class text not null check (dominant_evaluation_class in ('GOOD_DECISION_BAD_OUTCOME', 'BAD_DECISION_BAD_OUTCOME')),
+
+  -- occurrence_count >= 5 always (MIN_OCCURRENCE_COUNT in detect.ts) —
+  -- groups below that threshold are never persisted as a row here.
+  occurrence_count integer not null check (occurrence_count >= 5),
+  dominant_class_share numeric not null,   -- dominant_evaluation_class's own count / occurrence_count — a frequency share (0..1), never a probability/causal-strength score.
+  confidence numeric not null,             -- scales with occurrence_count up to 30 samples, capped at 0.7 — see MAX_CONFIDENCE in detect.ts. Never 1.0.
+
+  first_observed_at timestamptz not null,  -- earliest decision_timestamp among this group's qualifying rows.
+  last_observed_at timestamptz not null,   -- latest decision_timestamp among this group's qualifying rows. Must differ in calendar date from first_observed_at (temporal-recurrence rule enforced in detect.ts, not re-enforced in SQL to avoid a timezone-dependent CHECK).
+
+  computed_at timestamptz not null,        -- stamped once per recompute batch by repository.ts, shared across every candidate produced by that same recompute run. This IS the "last updated" marker for a row — no separate updated_at column, to avoid a second timestamp that a naive upsert could silently leave stale.
+  created_at timestamptz not null default now(),
+
+  -- One row per (source, evidence_tag) group. A recompute UPSERTs this
+  -- key, safely replacing the previous aggregate for the same group.
+  unique (source, evidence_tag)
+);
+
+create index if not exists failure_pattern_candidates_source_idx on failure_pattern_candidates (source);
+create index if not exists failure_pattern_candidates_computed_at_idx on failure_pattern_candidates (computed_at);
+
+alter table failure_pattern_candidates enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.

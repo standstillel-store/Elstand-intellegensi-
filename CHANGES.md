@@ -1553,3 +1553,73 @@ Repository-wide scan for `OpenAI`/`Claude`/`prompt`/auto-execute/auto-trade/orde
 - Phase 8.1.1: Decision Evaluation Engine — **COMPLETE**.
 - Phase 8.1.1.1: Decision Evaluation Lifecycle Wiring — **COMPLETE**. The full automatic pipeline (`writeClose() -> ai_journal -> outcome capture -> evaluation -> decision_evaluations`) is now correctly sequenced and safely wired for every trade that closes going forward.
 - Future only, not started: Phase 8.1.2 Failure Pattern Detection, Phase 8.1.3 Decision Memory, adaptive constraints.
+
+---
+
+## Phase 8.1.2 — Failure Pattern Detection
+
+### Purpose
+Adds the next stage in the Phase 8.1 pipeline: a deterministic, offline, historical-learning layer that surfaces recurring negative decision patterns from the accumulated `decision_experiences` x `decision_evaluations` population. Strictly **observational/statistical**, never causal, and never wired into trading behavior — this phase computes and persists aggregate candidates only; nothing reads them yet and nothing acts on them.
+
+### Architecture
+```
+lib/ai/failurePatterns/
+  contracts.ts   — types only: FailurePatternObservationInput (join row),
+                   FailurePatternCandidateWithoutTimestamp (pure output),
+                   FailurePatternCandidate (+ computedAt, persisted shape)
+  detect.ts      — detectFailurePatternCandidates(observations): pure,
+                   deterministic, zero DB/LLM/fetch/Date.now/randomness
+  repository.ts  — getFailurePatternObservations() [read, joins
+                   decision_experiences + decision_evaluations in-memory
+                   by source_signal_id], persistFailurePatternCandidates()
+                   [recompute-and-upsert write], recomputeFailurePatterns()
+                   [orchestrator, composes the two + the pure detector]
+
+scripts/phase8/failure-pattern-fixtures.ts — 16 offline cases against detect.ts
+```
+Same layering convention as Phase 8.1.1 (`decisionEvaluation/{contracts,evaluate,repository}.ts`): pure domain logic (`detect.ts`) never imports Supabase/network/LLM; `repository.ts` holds 100% of the persistence-aware code and zero aggregation logic. `getLearningSupabase()` (`lib/ai/learning/db.ts`, Phase 8.1.0) is reused unchanged — no second Learning DB client was created.
+
+### Naming — collision with `lib/ai/insights` avoided
+`lib/ai/insights/types.ts` already owns `InsightPattern`/`PatternKind` for a fully unrelated concept (live market-structure pattern detection over `OracleContext`/`ConfluenceResult` — liquidity sweeps, order-block reactions, etc., via `detectAllPatterns()`). Every exported type in `lib/ai/failurePatterns/*` is prefixed `FailurePattern*` (`FailurePatternSource`, `FailurePatternEvidenceTag`, `FailurePatternEvaluationClass`, `FailurePatternObservationInput`, `FailurePatternCandidateWithoutTimestamp`, `FailurePatternCandidate`) and neither `Pattern` bare, `PatternKind`, nor `InsightPattern` appears anywhere in this module's actual code (verified by fixture 10, comment-stripped scan).
+
+### Grouping / detection rules (implemented exactly as specified)
+- **Grouping key**: `(source, evidenceTag)` — single evidence tag only, never a multi-tag combination. A decision carrying multiple evidence tags fans out into one independent contribution per tag (fixture 14).
+- **AI_SIGNAL and ELVOID_PRO_ORACLE are never merged** into the same group, even for the identical evidence tag (fixture 4).
+- **Negative-outcome filter**: only rows whose `decision_evaluations.evaluation_class` is `GOOD_DECISION_BAD_OUTCOME` or `BAD_DECISION_BAD_OUTCOME` (i.e. `marketOutcome === "NEGATIVE"` per Phase 8.1.1's own `evaluateMarketOutcome`) contribute to a group's `occurrenceCount` — every other evaluation class (including `BAD_DECISION_GOOD_OUTCOME`, `NEUTRAL_OUTCOME`, `INSUFFICIENT_EVIDENCE`) is excluded (fixture 11).
+- **Minimum occurrence**: `occurrenceCount >= 5` (`MIN_OCCURRENCE_COUNT`); groups below that are dropped entirely, never persisted as a low-confidence row (fixtures 1–2).
+- **Temporal recurrence**: the group's rows must span **more than one distinct UTC calendar date** (derived from `decisionTimestamp`, never `outcome_closed_at`/`evaluated_at`); a same-day-only cluster is excluded regardless of count (fixtures 5–6).
+- **Confidence**: `min(occurrenceCount, 30) / 30 * 0.7`, rounded to 4 decimals — scales linearly with sample size up to 30 occurrences and never exceeds `MAX_CONFIDENCE` (0.7) (fixtures 3, 3b).
+- **`dominantEvaluationClass`/`dominantClassShare`**: the more frequent of the two negative classes within the group, and its share of `occurrenceCount`; ties broken deterministically by `NEGATIVE_EVALUATION_CLASSES`' declared order, never by input/Map iteration order (fixture 13).
+- **Output**: frequency observations only — `FailurePatternCandidateWithoutTimestamp` has exactly 9 closed fields (`version`, `source`, `evidenceTag`, `dominantEvaluationClass`, `occurrenceCount`, `dominantClassShare`, `confidence`, `firstObservedAt`, `lastObservedAt`); there is no free-text/narrative/explanation field anywhere, so a causal claim has no field to be attached to even by accident (fixture 9a). `detect.ts`'s own code (comments excluded) contains no `fetch`/`Date.now`/`Math.random`/Supabase/LLM/oracle/cognitive/elvoid/Binance references (fixture 9b).
+
+### Persistence — recompute-and-upsert (deliberately NOT append-only)
+New table `failure_pattern_candidates` (appended to `supabase/learning/schema.sql`, ELVOID Learning DB only — same isolated project as `decision_experiences`/`decision_evaluations`), `UNIQUE(source, evidence_tag)`. Unlike `decision_evaluations`' one-row-forever-per-experience model, a failure-pattern candidate is **aggregate state** over the whole current population for its group, so `persistFailurePatternCandidates()` does a real `upsert(rows, {onConflict: "source,evidence_tag"})` — a later recompute safely **overwrites** the prior aggregate for a group (never accumulates/duplicates it). This is safe specifically because `detectFailurePatternCandidates()` is pure and stateless — every call recomputes each group's aggregate from scratch from the full input it's given (proven directly by fixture 12: two independent calls for the same group with 5 vs. 20 rows each produce their own correct, non-leaking `occurrenceCount`).
+
+### Exposed pipeline — NOT wired to automatic execution
+`recomputeFailurePatterns()` is exported and independently callable, exactly like `evaluateAndPersistDecision()` was left uncalled at the end of Phase 8.1.1. Nothing in `paperTrader.ts`, any API route, a cron, or a retry queue calls it — this task deliberately stops at "callable pipeline," per the handover's explicit instruction. No LLM calls, no causal inference, no auto-trading/strategy-mutation/confidence-or-risk-mutation/position-sizing hooks exist anywhere in the new code.
+
+### Files changed
+- **NEW**: `lib/ai/failurePatterns/contracts.ts`, `lib/ai/failurePatterns/detect.ts`, `lib/ai/failurePatterns/repository.ts`, `scripts/phase8/failure-pattern-fixtures.ts` (16 cases).
+- **MODIFIED**: `supabase/learning/schema.sql` — appended-only (`failure_pattern_candidates` table + 2 indexes + RLS-enabled/no-policies, same convention as every other table in this file); zero lines of the existing `decision_experiences`/`decision_evaluations` sections touched. `CHANGES.md` — this entry.
+- **UNTOUCHED** (confirmed via `git status --porcelain`, see Scope verification below): `lib/ai/decisionOutcome/*`, `lib/ai/decisionEvaluation/*`, `lib/ai/decisionLearning/lifecycle.ts`, `lib/ai/cognitive/*`, `lib/ai/oracle/*`, `lib/ai/insights/*`, `lib/elvoid/paperTrader.ts`, Main DB schema, auth, Binance/`bn_*`, execution/order-placement logic.
+
+### Fixture results (`scripts/phase8/failure-pattern-fixtures.ts`) — 16/16 passed
+Offline, pure-layer only (same convention as `decision-evaluation-fixtures.ts` — `repository.ts` requires a live Learning DB, unavailable in this sandbox, and is not exercised by fixtures). Covers: 1–2 minimum-occurrence threshold (4 excluded, 5 accepted). 3/3b confidence scaling and cap. 4 sources never merged. 5–6 temporal recurrence (same-day excluded, multi-day accepted, including a non-uniform 3-then-2 day split). 7 deterministic output regardless of input order. 8 input immutability. 9a/9b closed output shape + no forbidden imports in the pure module. 10 naming-collision scan (comment-stripped) against `InsightPattern`/`PatternKind`/bare `Pattern`. 11 only qualifying negative classes contribute (5 negative + 5 non-negative rows -> occurrenceCount 5, not 10). 12 stateless-recompute safety proof. 13 dominant-class/share arithmetic on a mixed 6/2 population. 14 multi-tag fan-out (never combinatorial grouping).
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/failure-pattern-fixtures.ts`
+
+### Regression — full Phase 8 suite, all re-run this pass
+`cognitive-observation-fixtures.ts` (8.0.1), `cognitive-memory-fixtures.ts` (8.0.2), `cognitive-hypothesis-fixtures.ts` (8.0.3), `cognitive-conflict-fixtures.ts` (8.0.4), `cognitive-context-fixtures.ts` (8.0.5), `decision-outcome-fixtures.ts` (8.1.0, 33/33), `learning-db-env-fixtures.ts` (8.1.0, 12/12), `decision-evaluation-fixtures.ts` (8.1.1, 36/36), `decision-learning-lifecycle-fixtures.ts` (8.1.1.1, 21/21) — **all still pass, zero regressions.** None of these suites' source files were modified this pass.
+
+### Typecheck
+`npx tsc --noEmit` — **not run**: `node_modules` is not installed in this sandbox and `npm install` (attempted) could not reach the network — same pre-existing environment limitation documented in every 7.x/8.0.x/8.1.x entry that lacked network access. In its place: (1) `node --experimental-strip-types --check` run individually against all three new `lib/ai/failurePatterns/*.ts` files — clean, no syntax/parse errors; (2) the fixture script itself exercises `detect.ts` through Node's TS-stripping runtime end-to-end (16/16 passing is only possible if the module's types/imports/exports resolve and its logic executes without a runtime `TypeError`); (3) manual cross-check of every import in the three new files against the actual exported names in `lib/ai/decisionOutcome/contracts.ts`, `lib/ai/decisionEvaluation/contracts.ts`, and `lib/ai/learning/db.ts` (`DecisionSource`, `EvaluationEvidenceTag`, `EvaluationClass`, `getLearningSupabase` — all confirmed present). Recommend running `npx tsc --noEmit` in an environment with network access before considering this phase fully verified, same recommendation as every prior sandbox-limited entry.
+
+### Scope verification
+`git status --porcelain`: only `supabase/learning/schema.sql` (modified, append-only diff, +61/-0 lines confirmed via `git diff --stat`), plus the three new `lib/ai/failurePatterns/*.ts` files and the one new fixture script (untracked). Explicit per-path `git diff --stat` check against every protected path (`lib/ai/decisionOutcome`, `lib/ai/decisionEvaluation`, `lib/ai/decisionLearning`, `lib/ai/cognitive`, `lib/ai/oracle`, `lib/ai/insights`, `lib/elvoid/paperTrader.ts`, `lib/supabase.ts`, `app/api`) returned empty for all of them — zero incidental edits.
+
+### Remaining roadmap status
+- Phase 8.1.0: Decision Capture + Learning DB + Outcome Lifecycle — **COMPLETE**.
+- Phase 8.1.1: Decision Evaluation Engine — **COMPLETE**.
+- Phase 8.1.1.1: Decision Evaluation Lifecycle Wiring — **COMPLETE**.
+- Phase 8.1.2: Failure Pattern Detection — **COMPLETE** (detection + persistence pipeline only; `recomputeFailurePatterns()` is callable but not automatically triggered from anywhere).
+- Future only, not started: an automatic trigger/schedule for `recomputeFailurePatterns()` (deliberately deferred, same staging pattern as 8.1.0 -> 8.1.0's outcome trigger -> 8.1.1 -> 8.1.1.1), Phase 8.1.3 Decision Memory (reading `failure_pattern_candidates` into decision-time context), and any adaptive constraints derived from it — all explicitly out of scope until separately approved.
