@@ -388,7 +388,11 @@ export const DERIVATIVES_WATCHLIST = WATCHLIST;
  * This is genuine exchange data, not a simulation — the standard way CVD
  * is computed without a raw trade-tick feed.
  */
-export async function getCvdSeries(symbol: string, interval: string, limit = 100): Promise<{ time: number; delta: number; cvd: number }[]> {
+export async function getCvdSeries(
+  symbol: string,
+  interval: string,
+  limit = 100
+): Promise<{ time: number; delta: number; cvd: number; buyVolumeUsd: number; sellVolumeUsd: number }[]> {
   const pair = `${symbol.toUpperCase()}USDT`;
   return cached(`bn:cvd:${pair}:${interval}:${limit}`, 60_000, async () => {
     const res = await fetch(`${BASE}/fapi/v1/klines?symbol=${pair}&interval=${interval}&limit=${limit}`, {
@@ -400,12 +404,15 @@ export async function getCvdSeries(symbol: string, interval: string, limit = 100
     >;
     let running = 0;
     return raw.map((k) => {
+      const close = parseFloat(k[4]);
       const volume = parseFloat(k[5]);
       const takerBuy = parseFloat(k[9]);
       const takerSell = volume - takerBuy;
       const delta = takerBuy - takerSell;
       running += delta;
-      return { time: k[0], delta, cvd: running };
+      // Dollar notional, derived from this candle's own real close price —
+      // not a separate/simulated price feed.
+      return { time: k[0], delta, cvd: running, buyVolumeUsd: takerBuy * close, sellVolumeUsd: takerSell * close };
     });
   });
 }

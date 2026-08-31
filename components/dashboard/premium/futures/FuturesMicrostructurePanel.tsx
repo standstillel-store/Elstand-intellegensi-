@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Activity } from "lucide-react";
 import { FundingRateCard } from "./FundingRateCard";
 import { MarketOrderFlowCard } from "./MarketOrderFlowCard";
 import { OrderBookImbalanceCard } from "./OrderBookImbalanceCard";
+import { LiveDot } from "@/components/ui/LiveDot";
 import {
   SUPPORTED_PAIRS,
   type SupportedPair,
@@ -42,11 +43,16 @@ export function FuturesMicrostructurePanel() {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="eyebrow text-[11px] text-ink-muted">Futures Microstructure Intelligence</h2>
-          <p className="text-[11px] text-ink-faint">Real-time derivatives &amp; order flow analysis — Binance Futures</p>
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-bg-raised text-signal">
+            <Activity size={16} />
+          </span>
+          <div>
+            <h2 className="eyebrow text-[11px] text-ink-muted">Futures Microstructure Intelligence</h2>
+            <p className="text-[11px] text-ink-faint">Real-time derivatives &amp; order flow analysis — Binance Futures</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <select
               value={pair}
@@ -74,6 +80,10 @@ export function FuturesMicrostructurePanel() {
               </button>
             ))}
           </div>
+          <span className="hidden items-center gap-1.5 rounded-lg border border-line bg-bg-raised px-2.5 py-1.5 text-[10px] text-ink-faint sm:flex">
+            <LiveDot tone="up" />
+            Live Data
+          </span>
         </div>
       </div>
 
@@ -85,7 +95,12 @@ export function FuturesMicrostructurePanel() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <FundingRateCard pair={snapshot.pair} history={snapshot.fundingHistory} currentFundingRate={snapshot.currentFundingRate} />
+          <FundingRateCard
+            pair={snapshot.pair}
+            multiAssetFunding={snapshot.multiAssetFunding}
+            crossExchangeFunding={snapshot.crossExchangeFunding}
+            currentFundingRate={snapshot.currentFundingRate}
+          />
           <MarketOrderFlowCard pair={snapshot.pair} series={snapshot.orderFlow} />
           <div className="lg:col-span-2">
             <OrderBookImbalanceCard pair={snapshot.pair} book={snapshot.orderBook} />
