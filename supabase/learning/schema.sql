@@ -354,3 +354,81 @@ create index if not exists constraint_validations_validated_at_idx on constraint
 alter table constraint_validations enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.2.1 — Autonomous Decision Traceability
+--
+-- decision_traces is infrastructure-only traceability for FUTURE ELVOID Pro
+-- autonomous decisions, including decisions that never execute. It is a
+-- NEW, INDEPENDENT identity space: `id` here is a stable trace identifier
+-- that exists whether or not an `ai_signals` row was ever created — never
+-- derived from or equal to `ai_signals.id`. `source_signal_id` is an
+-- OPTIONAL logical reference to the Main DB's `ai_signals.id` (same
+-- no-cross-project-FK reasoning as decision_experiences.source_signal_id
+-- above), populated only for `outcome = 'EXECUTE'` rows; every
+-- `WAIT`/`REJECT`/`EXPIRE` row has `source_signal_id IS NULL` by design AND
+-- by the CHECK constraint below (belt-and-suspenders alongside
+-- lib/ai/decisionTrace/contracts.ts's validateDecisionTraceInput) — these
+-- outcomes must be fully self-contained without any Main DB dependency.
+--
+-- ELVOID Pro only for this phase (hard boundary): `source` is a
+-- single-value CHECK, not the two-value union `decision_experiences.source`
+-- uses — this table structurally cannot accept an `AI_SIGNAL` row yet, by
+-- design, preserving source isolation. Widening to AI_SIGNAL is a future,
+-- separately-approved phase, not this one.
+--
+-- Immutable: rows are INSERT-only. No UPDATE path exists in
+-- lib/ai/decisionTrace/repository.ts — a decision-time snapshot, once
+-- written, is never revised (matches decision_experiences' own frozen-
+-- snapshot fields, applied here to the ENTIRE row, not just a subset of
+-- columns).
+--
+-- `snapshot` reuses `LearningContextSnapshot` (Phase 8.1.0,
+-- lib/ai/decisionOutcome/contracts.ts) verbatim — no new/competing
+-- snapshot shape is introduced. Nullable for the same reason it already is
+-- nullable in decision_experiences (no Cognitive Layer context yet for the
+-- originating decision).
+--
+-- No grade/confidence/entry/stopLoss/takeProfit/riskStatus column exists
+-- here at all, by design — this table records THAT a decision resolved and
+-- HOW (outcome + frozen snapshot), never recomputes or stores a second
+-- copy of any canonical Oracle/grading value outside the opaque `snapshot`
+-- jsonb blob, which is itself only ever a verbatim copy.
+-- ---------------------------------------------------------------------------
+
+create table if not exists decision_traces (
+  id uuid primary key default gen_random_uuid(),
+
+  source text not null check (source in ('ELVOID_PRO_ORACLE')),
+  outcome text not null check (outcome in ('EXECUTE', 'WAIT', 'REJECT', 'EXPIRE')),
+
+  -- Optional logical reference to the Main DB's ai_signals.id. Only ever
+  -- populated for outcome = 'EXECUTE'; enforced structurally (not just in
+  -- application code) so WAIT/REJECT/EXPIRE can never smuggle in a Main DB
+  -- dependency.
+  source_signal_id text,
+  constraint decision_traces_signal_ref_only_on_execute check (
+    (outcome = 'EXECUTE') or (source_signal_id is null)
+  ),
+
+  symbol text not null,
+  side text check (side in ('LONG', 'SHORT')),
+  decision_timestamp timestamptz not null,
+
+  -- Frozen decision-time snapshot — LearningContextSnapshot shape, see
+  -- lib/ai/decisionOutcome/contracts.ts. Null when no Cognitive Layer
+  -- context exists for the originating decision (valid, not an error).
+  snapshot jsonb,
+
+  created_at timestamptz not null default now()
+);
+
+create index if not exists decision_traces_source_idx on decision_traces (source);
+create index if not exists decision_traces_outcome_idx on decision_traces (outcome);
+create index if not exists decision_traces_symbol_idx on decision_traces (symbol);
+create index if not exists decision_traces_decision_timestamp_idx on decision_traces (decision_timestamp);
+create index if not exists decision_traces_source_signal_id_idx on decision_traces (source_signal_id);
+
+alter table decision_traces enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
