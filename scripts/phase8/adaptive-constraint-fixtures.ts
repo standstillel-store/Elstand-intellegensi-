@@ -69,9 +69,9 @@ function candidate(overrides: Partial<FailurePatternCandidate> = {}): FailurePat
 //    mapping 1:1 per input row)
 // ===========================================================================
 {
-  const result = generateAdaptiveConstraints([candidate({ evidenceTag: "HIGH_RISK_PRESENT" }), candidate({ evidenceTag: "LOW_LIQUIDITY" })]);
+  const result = generateAdaptiveConstraints([candidate({ evidenceTag: "HIGH_RISK_PRESENT" }), candidate({ evidenceTag: "MODERATE_RISK_PRESENT" })]);
   const tags = result.map((r) => r.evidenceTag).sort();
-  check("3. distinct evidenceTags -> one constraint each, both present", result.length === 2 && tags[0] === "HIGH_RISK_PRESENT" && tags[1] === "LOW_LIQUIDITY", JSON.stringify(result));
+  check("3. distinct evidenceTags -> one constraint each, both present", result.length === 2 && tags[0] === "HIGH_RISK_PRESENT" && tags[1] === "MODERATE_RISK_PRESENT", JSON.stringify(result));
 }
 
 // ===========================================================================
@@ -117,8 +117,8 @@ function candidate(overrides: Partial<FailurePatternCandidate> = {}): FailurePat
   const allowed = new Set(["FLAG_HISTORICAL_UNRELIABILITY", "INCREASE_CAUTION", "REQUIRE_STRONGER_CONFIRMATION"]);
   const result = generateAdaptiveConstraints([
     candidate({ dominantClassShare: 0.95, confidence: 0.6 }),
-    candidate({ evidenceTag: "LOW_LIQUIDITY", occurrenceCount: 20, dominantClassShare: 0.5, confidence: 0.3 }),
-    candidate({ evidenceTag: "STALE_DATA", occurrenceCount: 6, dominantClassShare: 0.5, confidence: 0.1 }),
+    candidate({ evidenceTag: "MODERATE_RISK_PRESENT", occurrenceCount: 20, dominantClassShare: 0.5, confidence: 0.3 }),
+    candidate({ evidenceTag: "LOW_RISK_PRESENT", occurrenceCount: 6, dominantClassShare: 0.5, confidence: 0.1 }),
   ]);
   check("8. every generated constraintType is a member of the closed v1 enum", result.every((r) => allowed.has(r.constraintType)), JSON.stringify(result));
 }
@@ -151,7 +151,7 @@ function candidate(overrides: Partial<FailurePatternCandidate> = {}): FailurePat
 // 9. Deterministic output — reversed input order yields identical result
 // ===========================================================================
 {
-  const inputs = [candidate({ evidenceTag: "HIGH_RISK_PRESENT" }), candidate({ evidenceTag: "LOW_LIQUIDITY" }), candidate({ evidenceTag: "STALE_DATA" })];
+  const inputs = [candidate({ evidenceTag: "HIGH_RISK_PRESENT" }), candidate({ evidenceTag: "MODERATE_RISK_PRESENT" }), candidate({ evidenceTag: "LOW_RISK_PRESENT" })];
   const forward = generateAdaptiveConstraints(inputs);
   const reversed = generateAdaptiveConstraints([...inputs].reverse());
   check("9. output order is deterministic regardless of input array order", JSON.stringify(forward) === JSON.stringify(reversed), `${JSON.stringify(forward)} vs ${JSON.stringify(reversed)}`);

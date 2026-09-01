@@ -206,11 +206,11 @@ function constraint(overrides: Partial<AdaptiveConstraint> = {}): AdaptiveConstr
 // 12. Verbatim field carry-through — source/evidenceTag/constraintType/basis
 // ===========================================================================
 {
-  const input = constraint({ source: "ELVOID_PRO_ORACLE", evidenceTag: "LOW_LIQUIDITY", constraintType: "FLAG_HISTORICAL_UNRELIABILITY" });
+  const input = constraint({ source: "ELVOID_PRO_ORACLE", evidenceTag: "MODERATE_RISK_PRESENT", constraintType: "FLAG_HISTORICAL_UNRELIABILITY" });
   const result = validateConstraint(input, ASOF);
   check(
     "12. source/evidenceTag/constraintType/basis carried forward verbatim",
-    result.source === "ELVOID_PRO_ORACLE" && result.evidenceTag === "LOW_LIQUIDITY" && result.constraintType === "FLAG_HISTORICAL_UNRELIABILITY" && JSON.stringify(result.basis) === JSON.stringify(input.basis),
+    result.source === "ELVOID_PRO_ORACLE" && result.evidenceTag === "MODERATE_RISK_PRESENT" && result.constraintType === "FLAG_HISTORICAL_UNRELIABILITY" && JSON.stringify(result.basis) === JSON.stringify(input.basis),
     JSON.stringify(result)
   );
 }
