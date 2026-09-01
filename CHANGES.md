@@ -1770,3 +1770,70 @@ Explicit per-path check against every protected path (`lib/ai/decisionOutcome`, 
 - Phase 8.1.3: Decision Memory — **COMPLETE**.
 - Phase 8.1.4: Adaptive Constraint Engine — **COMPLETE** (generation + storage only; `recomputeAdaptiveConstraints()` is callable but not automatically triggered/wired from anywhere; nothing consumes `adaptive_constraints` yet).
 - Future only, not started: Phase 8.1.5 — constraint application/consumption, expiry, retirement, efficacy, and recency enforcement, all read-only relative to Oracle/canonical trading intelligence — explicitly out of scope until separately approved.
+
+---
+
+## Phase 8.1.5 — Learning Validation
+
+Adds a bounded, infrastructure-only validation layer that VALIDATES already-generated `AdaptiveConstraint` rows (Phase 8.1.4) and produces timestamped `ConstraintValidation` snapshots. This phase does not apply, gate, or otherwise consume validated output anywhere — that (a future Phase 8.2 or later consumer) remains explicitly out of scope, not started.
+
+### Authority boundary (enforced structurally, not just documented)
+No file in `lib/ai/learningValidation/*` reads, imports, or writes `OracleAssessment`, `grading.ts`, any canonical `grade`/`confidence`/`score`/`riskStatus`/`entry`/`stopLoss`/`takeProfit` field, `execute.ts`, `paperTrader.ts`, `ai_signals`, or any decision-lifecycle/autonomous-execution path (fixture 18, static scan). No import from `lib/ai/oracle/*`, `lib/ai/cognitive/*`, or `lib/elvoid/*` anywhere in the three new files (fixture 15). This phase is not wired into Oracle, grading, execute, paperTrader, API routes, lifecycle, cron, or autonomous execution — `recomputeConstraintValidations()` exists and is independently callable but has zero call sites outside its own declaration (fixture 20).
+
+### Architecture (`{contracts, validate, repository}.ts` — same layering as 8.1.4)
+- `contracts.ts` — types/contracts only. `ConstraintValidationSignals` is a closed, boolean-only record (`sampleSizeAdequate`, `withinFreshnessWindow`, `structurallyConsistent`, `overfitRiskFlag`) — no free-text/reason/explanation/narrative/causal-claim field anywhere (fixture 17). `basis` is carried forward verbatim from the source `AdaptiveConstraint`, never recomputed (fixture 12).
+- `validate.ts` — pure, deterministic validation only. Zero DB/network/LLM/randomness/`Date.now()` (fixtures 13–14); the "as of" instant is always the caller-supplied `asOf` parameter. Never reimplements or imports upstream thresholds (`MIN_OCCURRENCE_COUNT`, `HIGH_DOMINANCE_SHARE`, `HIGH_OCCURRENCE_COUNT`) — every threshold here (`MIN_VALIDATION_SAMPLE_SIZE`, `FRESHNESS_WINDOW_DAYS`, `OVERFIT_SAMPLE_SIZE_CEILING`, `OVERFIT_DOMINANCE_SHARE_THRESHOLD`, `OVERFIT_MAX_SPAN_DAYS`) is a new, locally-scoped v1 tier (fixture 16). Basis stats are read straight off the given `AdaptiveConstraint`, never recomputed from `decision_experiences`/`decision_evaluations` (fixture 21).
+- `repository.ts` — Learning DB read (`adaptive_constraints`) / upsert (`constraint_validations`) / orchestrator (`recomputeConstraintValidations()`) only, mirroring `lib/ai/adaptiveConstraint/repository.ts`'s exact recompute-and-upsert model on `UNIQUE(source, evidence_tag)`. Reads only `adaptive_constraints`, writes only `constraint_validations` (fixture 19, static scan). Source isolation preserved end-to-end — AI_SIGNAL and ELVOID_PRO_ORACLE rows are read, validated, and upserted independently, never merged (fixture 11).
+
+### Status selection — closed, fail-closed, priority-ordered (implemented exactly as specified)
+Exactly one status per validation. First-match-wins order (most fundamental concern first):
+1. `!structurallyConsistent` -> `INCONSISTENT` (fixtures 5a–5c, 6a).
+2. `!withinFreshnessWindow` -> `STALE` (fixture 4; boundary exactness at fixture 7a/7b; priority over `OVERFIT_RISK` at fixture 6b).
+3. `overfitRiskFlag` -> `OVERFIT_RISK` (fixture 3; span-boundary exactness at fixture 8a/8b; priority over `PROVISIONAL` at fixture 6c).
+4. `!sampleSizeAdequate` -> `PROVISIONAL` (fixture 2).
+5. Otherwise -> `VALID` — only ever reached when every concern has cleared (fixture 1).
+There is no fallthrough case that silently defaults to `VALID`.
+
+### Signal definitions
+- `structurallyConsistent` — internal structural sanity of the constraint's own fields (`version === 1`, non-empty closed-enum fields, `basis` numeric ranges finite/in-range, `firstObservedAt <= lastObservedAt`). Not a re-check of upstream qualification logic (that already ran once in `lib/ai/failurePatterns/detect.ts`) — a narrower, purely-structural check.
+- `withinFreshnessWindow` — `basis.lastObservedAt` within `FRESHNESS_WINDOW_DAYS` (30) of the caller-supplied `asOf`.
+- `overfitRiskFlag` — a closed three-part signature: small sample (`occurrenceCount <= OVERFIT_SAMPLE_SIZE_CEILING` = 7) AND near-total dominance (`dominantClassShare >= OVERFIT_DOMINANCE_SHARE_THRESHOLD` = 0.95) AND narrow observation span (`lastObservedAt - firstObservedAt <= OVERFIT_MAX_SPAN_DAYS` = 3 days). All three must hold.
+- `sampleSizeAdequate` — `basis.occurrenceCount >= MIN_VALIDATION_SAMPLE_SIZE` (10), a stricter, distinct, later-stage threshold from `detect.ts`'s own `MIN_OCCURRENCE_COUNT` (5).
+
+### Persistence
+- New `constraint_validations` table, Learning DB only, `UNIQUE(source, evidence_tag)`, RLS enabled with no policies — same convention as every other Learning DB table. Recompute-and-upsert, no append-only event semantics. `validated_at` is the snapshot's "as of" marker — kept distinct from `created_at` because freshness/overfit signals can decay between recomputes even without a re-upsert.
+- `recomputeConstraintValidations()` exists and is independently callable but is called from nowhere else in the codebase — no cron, no per-trade trigger, no lifecycle hook, no Oracle/grading/execute/paperTrader/API-route wiring (fixture 20, static scan for zero external call sites).
+
+### Files changed
+- **NEW**: `lib/ai/learningValidation/contracts.ts`, `lib/ai/learningValidation/validate.ts`, `lib/ai/learningValidation/repository.ts`, `scripts/phase8/learning-validation-fixtures.ts` (27 cases). `CHANGES.md` — this entry.
+- **MODIFIED**: `supabase/learning/schema.sql` — append-only addition of the new `constraint_validations` table (0 deletions, 89 insertions; `git diff --stat` confirms no existing table/column touched).
+- **UNTOUCHED**: `lib/ai/decisionOutcome/*`, `lib/ai/decisionEvaluation/*`, `lib/ai/failurePatterns/*`, `lib/ai/decisionMemory/*`, `lib/ai/adaptiveConstraint/*`, `lib/ai/decisionLearning/*`, `lib/ai/cognitive/*`, `lib/ai/oracle/*`, `lib/ai/insights/*`, `lib/elvoid/paperTrader.ts`, `lib/elvoid/execute.ts`, `lib/supabase.ts`, `supabase/schema.sql` (Main DB schema), `app/api/*` — confirmed by explicit `git diff --stat` per path, every one empty.
+
+### Fixture results (`scripts/phase8/learning-validation-fixtures.ts`) — 27/27 passed
+Offline, pure-layer only (same convention as `adaptive-constraint-fixtures.ts`/`failure-pattern-fixtures.ts` — `repository.ts` requires a live Learning DB, unavailable in this sandbox, and is verified only by static-scan checks). Covers: 1 VALID (every concern clears). 2 PROVISIONAL (sample-size-only concern). 3 OVERFIT_RISK (three-part signature). 4 STALE. 5a–5c INCONSISTENT (out-of-range share, inverted timestamps, non-positive occurrence count). 6a–6c priority ordering across all four concern pairs (INCONSISTENT > STALE > OVERFIT_RISK > PROVISIONAL). 7a/7b staleness boundary exactness (at-window vs one-millisecond-over). 8a/8b overfit-span boundary exactness (at-span vs one-day-over). 9 determinism (identical input -> byte-identical repeated output). 10 input immutability. 11 source isolation (identical basis, different source, independent results). 12 verbatim field carry-through (source/evidenceTag/constraintType/basis). 13 no `Date.now()`. 14 no DB/network/LLM/randomness dependency. 15 no oracle/cognitive/elvoid import. 16 no upstream-threshold reimplementation/reimport. 17 no causal-language field in `ConstraintValidationSignals`. 18 no protected canonical identifier referenced anywhere in the module. 19 repository.ts reads only `adaptive_constraints` and writes only `constraint_validations` (static scan). 20 `recomputeConstraintValidations()` has zero external call sites (static scan). 21 no reference to `decision_experiences`/`decision_evaluations` anywhere in this phase.
+
+Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/learning-validation-fixtures.ts`
+
+### Regression — full Phase 8 suite, all re-run this pass
+`cognitive-observation-fixtures.ts` (8.0.1), `cognitive-memory-fixtures.ts` (8.0.2), `cognitive-hypothesis-fixtures.ts` (8.0.3), `cognitive-conflict-fixtures.ts` (8.0.4), `cognitive-context-fixtures.ts` (8.0.5), `decision-outcome-fixtures.ts` (8.1.0, 33/33), `learning-db-env-fixtures.ts` (8.1.0, 12/12), `decision-evaluation-fixtures.ts` (8.1.1, 36/36), `decision-learning-lifecycle-fixtures.ts` (8.1.1.1, 21/21), `failure-pattern-fixtures.ts` (8.1.2, 16/16), `decision-memory-fixtures.ts` (8.1.3, 20/20), `adaptive-constraint-fixtures.ts` (8.1.4, 21/21) — **all still pass, zero regressions** (verified by exit code and a zero-`FAIL`-line grep across every fixture file's output, this pass). None of these suites' source files were modified this pass.
+
+### Typecheck
+`npx tsc --noEmit` — **not run**: `node_modules` is not installed in this sandbox and there is no network access to install it — same pre-existing environment limitation documented in every prior 8.x entry. In its place: (1) the fixture script itself exercises `contracts.ts`/`validate.ts` through Node's TS-stripping runtime end-to-end (27/27 passing is only possible if the module's types/imports/exports resolve and its logic executes without a runtime `TypeError`); (2) manual cross-check of every import in the three new files against the actual exported names in `lib/ai/adaptiveConstraint/contracts.ts` (`AdaptiveConstraint`, `AdaptiveConstraintSource`, `AdaptiveConstraintEvidenceTag`, `AdaptiveConstraintType`, `AdaptiveConstraintBasis` — all confirmed present) and `lib/ai/learning/db.ts` (`getLearningSupabase`). `repository.ts` itself is not exercised by the fixture runtime (no live Learning DB in this sandbox) and is verified by static-scan/structural checks and manual import cross-referencing only. Recommend running `npx tsc --noEmit` in an environment with network access before considering this phase fully verified, same recommendation as every prior sandbox-limited entry.
+
+### Scope verification
+`git status --porcelain`: only the three new `lib/ai/learningValidation/*.ts` files and the one new fixture script (untracked), plus `supabase/learning/schema.sql` (modified). Explicit per-path `git diff --stat` check against every protected path (`lib/ai/decisionOutcome`, `lib/ai/decisionEvaluation`, `lib/ai/failurePatterns`, `lib/ai/decisionMemory`, `lib/ai/adaptiveConstraint`, `lib/ai/decisionLearning`, `lib/ai/cognitive`, `lib/ai/oracle`, `lib/ai/insights`, `lib/elvoid/paperTrader.ts`, `lib/elvoid/execute.ts`, `lib/supabase.ts`, `supabase/schema.sql`, `app/api`) returned empty for every one of them. `git diff --stat supabase/learning/schema.sql` shows `89 insertions(+)`, `0 deletions(-)` — pure append, byte-for-byte identical up to line 267.
+
+### Limitations discovered
+- No live Learning DB is reachable in this sandbox, so `repository.ts`'s three functions (`getValidationBasisConstraints`, `persistConstraintValidations`, `recomputeConstraintValidations`) are verified by static-scan/structural checks and manual import cross-referencing only, not by an end-to-end database round-trip — same limitation every prior 8.1.x `repository.ts` has carried.
+- The v1 validation thresholds (`MIN_VALIDATION_SAMPLE_SIZE = 10`, `FRESHNESS_WINDOW_DAYS = 30`, `OVERFIT_SAMPLE_SIZE_CEILING = 7`, `OVERFIT_DOMINANCE_SHARE_THRESHOLD = 0.95`, `OVERFIT_MAX_SPAN_DAYS = 3`) are a first deterministic cut, not specified anywhere upstream, and should be revisited once real Learning DB population statistics exist — ideally as part of whatever phase eventually builds the validated-output consumer.
+- `constraint_validations` currently has no consumer anywhere in the codebase, by design — this phase is intentionally infrastructure-only, matching the task's explicit boundary.
+
+### Remaining roadmap status
+- Phase 8.1.0: Decision Capture + Learning DB + Outcome Lifecycle — **COMPLETE**.
+- Phase 8.1.1: Decision Evaluation Engine — **COMPLETE**.
+- Phase 8.1.1.1: Decision Evaluation Lifecycle Wiring — **COMPLETE**.
+- Phase 8.1.2: Failure Pattern Detection — **COMPLETE**.
+- Phase 8.1.3: Decision Memory — **COMPLETE**.
+- Phase 8.1.4: Adaptive Constraint Engine — **COMPLETE**.
+- Phase 8.1.5: Learning Validation — **COMPLETE** (validation + storage only; `recomputeConstraintValidations()` is callable but not automatically triggered/wired from anywhere; nothing consumes `constraint_validations` yet).
+- Future only, not started: a Phase 8.2 (or later) consumer that reads validated constraints to influence a canonical decision — read-only relative to Oracle/canonical trading intelligence, no signal generation, no execution, no position sizing — explicitly out of scope until separately approved.

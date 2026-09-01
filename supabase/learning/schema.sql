@@ -265,3 +265,92 @@ create index if not exists adaptive_constraints_generated_at_idx on adaptive_con
 alter table adaptive_constraints enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.1.5 — Learning Validation
+--
+-- constraint_validations is a TIMESTAMPED SNAPSHOT of an already-generated
+-- adaptive_constraints row (Phase 8.1.4) — never a new source of
+-- decision/outcome/pattern/constraint truth, and never a causal claim.
+-- This phase VALIDATES constraints only; nothing reads this table to
+-- influence a canonical decision yet (that remains a future,
+-- separately-approved consumer phase).
+--
+-- AUTHORITY BOUNDARY: no column here ever adjusts a canonical
+-- grade/confidence/score/riskStatus/entry/stopLoss/takeProfit value, and
+-- no column here is an execution-blocking flag. status is a closed,
+-- fail-closed, priority-ordered v1 enum — see
+-- lib/ai/learningValidation/validate.ts's selectStatus() doc.
+--
+-- Same recompute-and-upsert model as adaptive_constraints (Phase 8.1.4): a
+-- recompute (lib/ai/learningValidation/repository.ts::
+-- recomputeConstraintValidations()) safely OVERWRITES the existing row for
+-- a (source, evidence_tag) group via UPSERT ... ON CONFLICT (source,
+-- evidence_tag) DO UPDATE — never accumulates/duplicates, never merges
+-- partial state, since the pure validator
+-- (lib/ai/learningValidation/validate.ts) always recomputes each
+-- validation from scratch, from the current adaptive_constraints
+-- population plus a single shared asOf. No append-only event semantics.
+-- validated_at is the "as of" marker for the snapshot: because
+-- freshness/overfit signals can shift as new evaluations accumulate
+-- upstream, a validation is only ever trustworthy as of this timestamp —
+-- it is intentionally NOT dropped or replaced by created_at, since
+-- freshness can decay between recomputes even if the row itself is not
+-- re-upserted.
+-- ---------------------------------------------------------------------------
+
+create table if not exists constraint_validations (
+  id uuid primary key default gen_random_uuid(),
+
+  -- Group identity — inherited verbatim from the originating
+  -- adaptive_constraints row. AI_SIGNAL and ELVOID_PRO_ORACLE are never
+  -- merged into the same row; single evidence tag only.
+  source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  evidence_tag text not null,          -- one EvaluationEvidenceTag member, copied verbatim — see lib/ai/decisionEvaluation/contracts.ts.
+
+  version integer not null,
+
+  -- Copied verbatim from the originating adaptive_constraints row — never
+  -- re-derived here. See lib/ai/adaptiveConstraint/contracts.ts's
+  -- AdaptiveConstraintType doc for the closed v1 enum this belongs to.
+  constraint_type text not null check (constraint_type in ('FLAG_HISTORICAL_UNRELIABILITY', 'INCREASE_CAUTION', 'REQUIRE_STRONGER_CONFIRMATION')),
+
+  -- Closed, fail-closed, priority-ordered v1 status. Exactly one value per
+  -- row — see lib/ai/learningValidation/validate.ts::selectStatus().
+  status text not null check (status in ('INCONSISTENT', 'STALE', 'OVERFIT_RISK', 'PROVISIONAL', 'VALID')),
+
+  -- signals.* — the four independently computed booleans status is a
+  -- deterministic function of. No free-text/reason/explanation field
+  -- anywhere in this table, by design.
+  sample_size_adequate boolean not null,
+  within_freshness_window boolean not null,
+  structurally_consistent boolean not null,
+  overfit_risk_flag boolean not null,
+
+  -- basis.* — verbatim copies of the originating adaptive_constraints
+  -- row's own already-validated statistics. Never recomputed here; see
+  -- lib/ai/failurePatterns/detect.ts for where these values were
+  -- originally derived and qualified.
+  occurrence_count integer not null check (occurrence_count > 0),
+  dominant_class_share numeric not null,
+  statistical_confidence numeric not null,
+
+  first_observed_at timestamptz not null,  -- copied verbatim from the originating adaptive_constraints row.
+  last_observed_at timestamptz not null,   -- copied verbatim from the originating adaptive_constraints row.
+
+  validated_at timestamptz not null,       -- the "as of" instant this snapshot was computed against, stamped once per recompute batch by repository.ts, shared across every validation produced by that same recompute run. Freshness/overfit signals can decay after this instant — this column is what makes the row a snapshot rather than a permanently-current judgment.
+  created_at timestamptz not null default now(),
+
+  -- One row per (source, evidence_tag) group. A recompute UPSERTs this
+  -- key, safely replacing the previous validation snapshot for the same
+  -- group.
+  unique (source, evidence_tag)
+);
+
+create index if not exists constraint_validations_source_idx on constraint_validations (source);
+create index if not exists constraint_validations_status_idx on constraint_validations (status);
+create index if not exists constraint_validations_validated_at_idx on constraint_validations (validated_at);
+
+alter table constraint_validations enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
