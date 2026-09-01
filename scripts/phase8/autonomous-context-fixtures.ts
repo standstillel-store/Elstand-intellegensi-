@@ -41,7 +41,7 @@ function assessment(overrides: Partial<OracleAssessment> = {}): OracleAssessment
     independentConfirmationClusters: 2,
     supportingEvidence: ["fixture supporting evidence"],
     contradictingEvidence: [],
-    dataQuality: [{ source: "structure", quality: "real" }],
+    dataQuality: [{ source: "market_structure", quality: "real" }],
     riskStatus: "valid",
     risk: { entry: 60000, stopLoss: 59000, takeProfit: 63000, riskReward: 3 },
     gradeReason: "fixture grade reason",
