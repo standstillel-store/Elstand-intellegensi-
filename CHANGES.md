@@ -1990,6 +1990,9 @@ Run: `node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs
 - `MacroUpcomingHighImpactEvent` deliberately carries no `category` (FOMC/CPI/PPI/etc.) field, since `macroEvents.ts`'s `categorize()` is private/unexported and this phase's own rules forbid reimplementing a second, drifting copy of validated classification logic. A future phase could either export `categorize()` from `macroEvents.ts` for reuse, or accept the duplication if a category field becomes genuinely needed downstream.
 - `analyzeMacroIntelligence()` currently has no consumer anywhere in the codebase, by design — this phase is intentionally infrastructure-only, matching the task's explicit boundary and every other 8.2.x phase's "unwired" convention.
 
+### Post-entry fix — duplicate object-literal key in fixture script (build-blocking)
+`npm run build`'s typecheck caught `event({ title: "Blank Title", date: isoAtHoursAway(5), impact: "high", title: "" })` in fixture 5 (`scripts/phase8/macro-intelligence-fixtures.ts`) — `title` was supplied twice in the same object literal (a leftover label from copy-pasting the builder pattern, missed by this sandbox's `node --experimental-strip-types` runs, which parse but do not typecheck duplicate keys the way `tsc` does). Fixed by removing the redundant leading `title: "Blank Title"`, leaving the intended `title: ""` — a literal-value fix only, no test intent, assertion, or logic changed; fixture count is unchanged (still 43/43), and a re-run confirms the suite still passes end-to-end.
+
 ### Remaining roadmap status
 - Phase 8.1.0 – 8.1.5: **COMPLETE** (unchanged this pass).
 - Phase 8.2.0: Autonomous Intelligence Integration Foundation — **COMPLETE** (unchanged this pass).

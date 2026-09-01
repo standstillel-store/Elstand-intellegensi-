@@ -116,7 +116,7 @@ function input(calendar: EconomicEvent[], asOf: string = ASOF): MacroIntelligenc
 {
   const calendar = [
     event({ title: "Bad Date Event", date: "not-a-real-date", impact: "high" }),
-    event({ title: "Blank Title", date: isoAtHoursAway(5), impact: "high", title: "" }),
+    event({ title: "", date: isoAtHoursAway(5), impact: "high" }),
     event({ title: "Good Event", date: isoAtHoursAway(4), impact: "high" }),
   ];
   const ctx = analyzeMacroIntelligence(input(calendar));
