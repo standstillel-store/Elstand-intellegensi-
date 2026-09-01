@@ -4,6 +4,7 @@ import type { AiJournalEntry, AiSignal, AiStatistics, PaperWallet, OrderType } f
 import { GRADE_ORDER } from "./types";
 import { computeCloseResult, computeUnrealized } from "./math";
 import { completeDecisionLearningLifecycle } from "../ai/decisionLearning/lifecycle";
+import { triggerLearningRefreshBestEffort } from "../ai/autonomousRuntime/learningRefresh";
 
 export { computeUnrealized };
 
@@ -215,13 +216,24 @@ async function writeClose(
   // can never later overwrite a wrong early insert). No outcome/evaluation
   // normalization logic is duplicated here — this file delegates entirely
   // to the existing Phase 8.1.0/8.1.1 pipelines via that orchestrator.
-  completeDecisionLearningLifecycle(signal.id).catch((err) => {
-    // Intentionally isolated from the trading lifecycle — but NOT
-    // silently swallowed: logged via the same console.error convention
-    // this file already uses two lines above, so an unexpected failure in
-    // either the outcome or evaluation step remains observable.
-    console.error("[ElVoid AI] Decision learning lifecycle failed (non-fatal, trade close unaffected):", err instanceof Error ? err.message : String(err));
-  });
+  completeDecisionLearningLifecycle(signal.id)
+    .then(() => {
+      // Phase 8.2.9 §7-8 — the ONE new line this phase adds here. Only
+      // reached once outcome-capture-then-evaluation above has actually
+      // succeeded (never on the .catch() path below). Fire-and-forget,
+      // locked, and fully isolated from this trade close — see
+      // lib/ai/autonomousRuntime/learningRefresh.ts's own header for why
+      // a per-trade-close trigger is safe here (guarded by a shared lock,
+      // never a synchronous full-table recompute on this request).
+      triggerLearningRefreshBestEffort();
+    })
+    .catch((err) => {
+      // Intentionally isolated from the trading lifecycle — but NOT
+      // silently swallowed: logged via the same console.error convention
+      // this file already uses two lines above, so an unexpected failure in
+      // either the outcome or evaluation step remains observable.
+      console.error("[ElVoid AI] Decision learning lifecycle failed (non-fatal, trade close unaffected):", err instanceof Error ? err.message : String(err));
+    });
 
   await sb.from("ai_signals").update({ status: "closed" }).eq("id", signal.id);
 

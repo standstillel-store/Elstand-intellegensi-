@@ -91,6 +91,62 @@ export async function getValidationBasisConstraints(): Promise<readonly Adaptive
 }
 
 // ---------------------------------------------------------------------------
+// Read: constraint_validations (Learning DB only) — Phase 8.2.9 addition
+//
+// The consumer boundary Phase 8.2.9 §8 requires: a future
+// `AutonomousDecisionContext` must only ever see already-validated
+// `constraint_validations` rows, filtered to `status === "VALID"` by
+// `lib/ai/autonomous/context.ts::filterValidConstraints()` (unchanged,
+// Phase 8.2.0) — never a direct read of `adaptive_constraints`. This
+// function is the read half of that boundary: it returns the full,
+// already-computed `ConstraintValidation` population for one source,
+// straight off `constraint_validations`, never re-validating or
+// re-deriving `status` a second time. Filtering to VALID-only remains
+// `filterValidConstraints()`'s job, not this function's — this returns
+// every status so a caller/dashboard can still see CAUTION/STALE/etc rows
+// if it ever needs to (only the autonomous-context consumer boundary
+// itself is required to narrow to VALID).
+// ---------------------------------------------------------------------------
+
+export async function getConstraintValidations(source: ConstraintValidation["source"]): Promise<readonly ConstraintValidation[] | null> {
+  const learningDb = getLearningSupabase();
+  if (!learningDb) return null;
+
+  const { data, error } = await learningDb
+    .from("constraint_validations")
+    .select(
+      "source, evidence_tag, version, constraint_type, status, sample_size_adequate, within_freshness_window, structurally_consistent, overfit_risk_flag, occurrence_count, dominant_class_share, statistical_confidence, first_observed_at, last_observed_at, validated_at"
+    )
+    .eq("source", source);
+
+  if (error || !data) return [];
+
+  return data.map(
+    (row): ConstraintValidation => ({
+      version: row.version,
+      source: row.source,
+      evidenceTag: row.evidence_tag,
+      constraintType: row.constraint_type,
+      status: row.status,
+      signals: {
+        sampleSizeAdequate: row.sample_size_adequate,
+        withinFreshnessWindow: row.within_freshness_window,
+        structurallyConsistent: row.structurally_consistent,
+        overfitRiskFlag: row.overfit_risk_flag,
+      },
+      basis: {
+        occurrenceCount: row.occurrence_count,
+        dominantClassShare: row.dominant_class_share,
+        statisticalConfidence: row.statistical_confidence,
+        firstObservedAt: row.first_observed_at,
+        lastObservedAt: row.last_observed_at,
+      },
+      validatedAt: row.validated_at,
+    })
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Write: constraint_validations (Learning DB only, recompute-and-upsert)
 // ---------------------------------------------------------------------------
 

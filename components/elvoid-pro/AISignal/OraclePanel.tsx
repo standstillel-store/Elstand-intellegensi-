@@ -1,11 +1,86 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { Crown, ArrowUpRight, ArrowDownRight, ShieldOff, Loader2, CheckCircle2 } from "lucide-react";
+import { Crown, ArrowUpRight, ArrowDownRight, ShieldOff, Radar, CheckCircle2, CircleDashed, XCircle } from "lucide-react";
 import clsx from "clsx";
 import type { ConfluenceResult } from "@/lib/ai/oracle/confluenceTypes";
 import type { OracleAssessment, OracleRiskPlan } from "@/lib/ai/oracle/gradingTypes";
 import type { OracleInsight } from "@/lib/ai/oracle/insight";
 import type { MtfContext } from "@/lib/ai/oracle/mtf";
+import { useAutonomousRuntimeTick } from "@/lib/hooks/useAutonomousRuntimeTick";
+
+interface AutonomousStatusResponse {
+  symbol: string;
+  latestDecision: { outcome: "EXECUTE" | "WAIT" | "REJECT" | "EXPIRE"; side: "LONG" | "SHORT" | null; decisionTimestamp: string; sourceSignalId: string | null } | null;
+  validatedLearningActive: boolean;
+}
+
+const AUTONOMOUS_STATUS_POLL_MS = 20_000;
+
+/**
+ * Phase 8.2.9 — replaces the old manual "Execute Signal" button. The
+ * ELVOID Pro autonomous runtime (app/api/elvoid-pro/autonomous/tick,
+ * ticked in the background by useAutonomousRuntimeTick below) is the sole
+ * authority over whether a Paper Trade gets created; this component only
+ * OBSERVES the most recent decision it already produced for this symbol
+ * — it never triggers execution itself.
+ */
+function AutonomousStatusCard({ symbol }: { symbol: string }) {
+  const [status, setStatus] = useState<AutonomousStatusResponse | null>(null);
+
+  useAutonomousRuntimeTick(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      fetch(`/api/elvoid-pro/autonomous/status?symbol=${encodeURIComponent(symbol)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((json) => {
+          if (!cancelled && json) setStatus(json as AutonomousStatusResponse);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const interval = setInterval(poll, AUTONOMOUS_STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [symbol]);
+
+  const decision = status?.latestDecision ?? null;
+
+  const outcomeLabel: Record<string, string> = { EXECUTE: "PAPER TRADE CREATED", WAIT: "WAIT — belum ada trade", REJECT: "REJECT — tidak ada trade", EXPIRE: "EXPIRED" };
+  const outcomeIcon = decision?.outcome === "EXECUTE" ? <CheckCircle2 size={13} className="text-up" /> : decision?.outcome === "REJECT" ? <XCircle size={13} className="text-down" /> : <CircleDashed size={13} className="text-ink-faint" />;
+
+  return (
+    <div className="mt-3 space-y-2 rounded-md border border-gold/20 bg-bg-raised/40 p-2.5">
+      <div className="flex items-center justify-between">
+        <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gold">
+          <Radar size={12} className="animate-pulse" /> Autonomous Mode — Monitoring
+        </p>
+      </div>
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-ink-faint">Latest Decision</span>
+        <span className="flex items-center gap-1 font-semibold text-ink">
+          {decision ? decision.outcome : "—"}
+          {decision && (decision.outcome === "EXECUTE" ? <ArrowUpRight size={12} className="text-up" /> : null)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-ink-faint">Execution</span>
+        <span className="flex items-center gap-1 text-ink-muted">
+          {outcomeIcon}
+          {decision ? outcomeLabel[decision.outcome] : "Belum ada siklus autonomous"}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-ink-faint">Learning</span>
+        <span className={clsx("font-medium", status?.validatedLearningActive ? "text-up" : "text-ink-faint")}>{status?.validatedLearningActive ? "VALIDATED LEARNING ACTIVE" : "Belum ada validated learning"}</span>
+      </div>
+      <p className="text-[9px] leading-relaxed text-ink-faint">AI menganalisis, memvalidasi, dan mengeksekusi Paper Trade secara otomatis di background — tidak perlu klik apa pun.</p>
+    </div>
+  );
+}
 
 interface OracleResponse {
   assessment: OracleAssessment;
@@ -53,13 +128,10 @@ export function OraclePanel({ symbol }: { symbol: string }) {
   const [data, setData] = useState<OracleResponse | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string>("");
-  const [executeState, setExecuteState] = useState<"idle" | "executing" | "done" | "error">("idle");
-  const [executeMsg, setExecuteMsg] = useState<string>("");
 
   const load = useCallback(() => {
     let cancelled = false;
     setStatus("loading");
-    setExecuteState("idle");
     fetch(`/api/elvoid-pro/oracle?symbol=${encodeURIComponent(symbol)}&interval=15m`)
       .then(async (res) => {
         const json = await res.json();
@@ -84,30 +156,6 @@ export function OraclePanel({ symbol }: { symbol: string }) {
   }, [symbol]);
 
   useEffect(() => load(), [load]);
-
-  async function handleExecute() {
-    if (!data || data.assessment.grade === "NO_TRADE" || !data.risk) return;
-    setExecuteState("executing");
-    setExecuteMsg("");
-    try {
-      const res = await fetch("/api/elvoid-pro/execute-signal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assessment: data.assessment, risk: data.risk, confluence: data.confluence }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        setExecuteState("error");
-        setExecuteMsg(json.error ?? "Gagal mengeksekusi sinyal.");
-        return;
-      }
-      setExecuteState("done");
-      setExecuteMsg(json.alreadyExecuted ? "Sinyal ini sudah pernah dieksekusi sebelumnya." : "Berhasil dibuat sebagai PaperTrade — cek AI Performance.");
-    } catch {
-      setExecuteState("error");
-      setExecuteMsg("Gagal mengeksekusi sinyal.");
-    }
-  }
 
   const assessment = data?.assessment;
   const grade = assessment?.grade;
@@ -162,6 +210,7 @@ export function OraclePanel({ symbol }: { symbol: string }) {
         <div className="mt-3 space-y-2 border-t border-line pt-3">
           <p className="text-base font-bold text-ink-muted">NO_TRADE</p>
           <p className="text-[10px] leading-relaxed text-ink-faint">{assessment.gradeReason}</p>
+          <AutonomousStatusCard symbol={symbol} />
         </div>
       )}
 
@@ -251,21 +300,7 @@ export function OraclePanel({ symbol }: { symbol: string }) {
             {mainRiskNote && <p className="mt-1 text-[10px] leading-relaxed text-amber-400/80">{mainRiskNote}</p>}
           </div>
 
-          <button
-            onClick={handleExecute}
-            disabled={executeState === "executing" || executeState === "done" || !data?.risk}
-            className={clsx(
-              "flex w-full items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-[11px] font-semibold transition-colors",
-              executeState === "done" ? "border-up/30 bg-up/10 text-up" : "border-gold/40 bg-gold/10 text-gold hover:bg-gold/20 disabled:opacity-50"
-            )}
-          >
-            {executeState === "executing" && <Loader2 size={13} className="animate-spin" />}
-            {executeState === "done" && <CheckCircle2 size={13} />}
-            {executeState === "executing" ? "Mengeksekusi…" : executeState === "done" ? "Tereksekusi" : !data?.risk ? "Risk plan tidak tersedia" : "Execute Signal"}
-          </button>
-          {executeMsg && (
-            <p className={clsx("text-[10px]", executeState === "error" ? "text-down" : "text-ink-faint")}>{executeMsg}</p>
-          )}
+          <AutonomousStatusCard symbol={symbol} />
         </div>
       )}
 

@@ -432,3 +432,77 @@ create index if not exists decision_traces_source_signal_id_idx on decision_trac
 alter table decision_traces enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- ELVOID Learning Database — Phase 8.2.9 additions
+--
+-- Two small, narrowly-scoped tables that exist ONLY to make the Phase
+-- 8.2.0-8.2.8 pipeline (already fully built) runnable unattended, without
+-- re-implementing or widening any canonical authority from an earlier
+-- phase:
+--
+--   autonomous_execution_dedup — one row per (source, symbol). Records the
+--   "setup identity" (see lib/ai/autonomousRuntime/dedup.ts) of the most
+--   recent EXECUTE this runtime actually produced for that symbol, so a
+--   later cycle over an unchanged setup safely WAITs instead of creating a
+--   second Paper Trade. This is NOT a second copy of
+--   `buildOracleSignalId()`'s own per-assessment idempotency
+--   (lib/ai/oracle/execute.ts, unchanged) — that key changes every cycle
+--   because `assessment.timestamp` always advances; this key is
+--   deliberately coarser (symbol + side + grade + invalidation text) so it
+--   stays stable across repeated cycles over the same underlying market
+--   read.
+--
+--   autonomous_runtime_lock — a single-row mutex the runtime tick route
+--   claims before running a batch of cycles, so two overlapping
+--   invocations (a Vercel Cron tick landing mid-way through a client-side
+--   tick, for example) can never run concurrently. A stale lock (crashed
+--   invocation) is safely reclaimed after LOCK_STALE_MS
+--   (lib/ai/autonomousRuntime/lock.ts) — this is a plain advisory
+--   application-level lock, not a Postgres advisory lock/transaction, kept
+--   deliberately simple per the phase's own "proportional, not distributed
+--   infrastructure" requirement.
+-- ---------------------------------------------------------------------------
+
+create table if not exists autonomous_execution_dedup (
+  source text not null check (source in ('ELVOID_PRO_ORACLE')),
+  symbol text not null,
+
+  -- Deterministic identity of the setup this runtime last EXECUTEd for this
+  -- symbol — see buildAutonomousSetupIdentity() in
+  -- lib/ai/autonomousRuntime/dedup.ts. Never the same value as
+  -- ai_signals.oracle_signal_id / buildOracleSignalId()'s hash — a
+  -- deliberately different, coarser key (see file header above).
+  setup_identity text not null,
+
+  -- The resulting Main DB ai_signals.id (buildOracleSignalId() output) for
+  -- traceability only — never read back into decision logic anywhere.
+  paper_trade_id text,
+
+  executed_at timestamptz not null default now(),
+
+  primary key (source, symbol)
+);
+
+alter table autonomous_execution_dedup enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
+
+create table if not exists autonomous_runtime_lock (
+  id text primary key,
+  running boolean not null default false,
+  started_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+-- Single fixed row this runtime always claims/releases — see
+-- lib/ai/autonomousRuntime/lock.ts. Seeded here so the first claim attempt
+-- is always an UPDATE (safe, atomic `WHERE running = false`), never an
+-- INSERT race.
+insert into autonomous_runtime_lock (id, running)
+values ('elvoid_pro_oracle_autonomous_cycle', false), ('elvoid_pro_oracle_learning_refresh', false)
+on conflict (id) do nothing;
+
+alter table autonomous_runtime_lock enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.

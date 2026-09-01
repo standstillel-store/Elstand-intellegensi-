@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/market-history/cleanup", "schedule": "0 19 * * *" },
     { "path": "/api/whale/cleanup", "schedule": "30 19 * * *" },
-    { "path": "/api/tick-storage-cleanup", "schedule": "0 20 * * *" }
+    { "path": "/api/tick-storage-cleanup", "schedule": "0 20 * * *" },
+    { "path": "/api/elvoid-pro/autonomous/tick", "schedule": "0 21 * * *" }
   ]
 }
