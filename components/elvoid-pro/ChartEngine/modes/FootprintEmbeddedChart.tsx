@@ -153,7 +153,15 @@ export function FootprintEmbeddedChart({
       chartRef.current = null;
       seriesRef.current = null;
     };
+    // Deliberately NOT depending on `height` — see TradingChart.tsx's own
+    // identical comment. Height changes are applied to the existing chart
+    // instance in the separate effect right below instead of tearing down
+    // and recreating the chart (which would wipe seriesRef/candle data).
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({ height });
   }, [height]);
 
   // Spec section C, FOOTPRINT MODE: candle body/wick becomes transparent so

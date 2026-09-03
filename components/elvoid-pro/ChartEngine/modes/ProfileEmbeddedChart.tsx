@@ -96,7 +96,18 @@ export function ProfileEmbeddedChart({
       chartRef.current = null;
       seriesRef.current = null;
     };
+    // Deliberately NOT depending on `height` — see TradingChart.tsx's own
+    // identical comment. `height` can change after mount (responsive
+    // container measurement); re-running this effect would destroy and
+    // recreate the chart, wiping `seriesRef` and any data already seeded
+    // into it by the OTHER effects in this file, none of which depend on
+    // `height` and so would never re-seed it. Height changes are applied
+    // to the existing chart instance in the separate effect right below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({ height });
   }, [height]);
 
   useEffect(() => {

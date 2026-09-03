@@ -182,6 +182,24 @@ export function TradingChart({
       ichimokuBRef.current = null;
       supertrendRef.current = null;
     };
+    // Deliberately NOT depending on `height` here — `height` can now change
+    // after mount (the caller may measure its container responsively; see
+    // AdvancedChart.tsx), and re-running this whole effect on every height
+    // change would destroy + recreate the chart, wiping candleSeriesRef and
+    // leaving the new chart empty until the separate candle-seeding effect
+    // below happens to re-run (it depends on `candles`, not `height`, so it
+    // wouldn't). Height changes are instead applied to the EXISTING chart
+    // instance below, exactly like width already is via `onResize`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Resize the existing chart instance in place whenever `height` changes —
+  // mirrors the width `onResize` handler above, but keyed off the `height`
+  // prop instead of a DOM resize event, since the caller may recompute
+  // `height` from its own container measurement (see AdvancedChart.tsx)
+  // rather than from a window-level resize.
+  useEffect(() => {
+    chartRef.current?.applyOptions({ height });
   }, [height]);
 
   // Seed historical data + all overlay series whenever candles change (symbol/interval/timeframe switch).

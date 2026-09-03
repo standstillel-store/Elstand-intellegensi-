@@ -78,9 +78,14 @@ export function TerminalShell() {
         </div>
       ) : (
         <>
-          {/* Chart + right rail — chart dominates, right rail is the secondary column. */}
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="rounded-lg border border-line bg-bg-surface/40">
+          {/* Chart + right rail — chart dominates, right rail is the secondary column.
+              `items-stretch` (grid's own default, made explicit here) means both
+              columns always match the taller one's height; the chart column below
+              is `flex flex-col` so its own content (toolbar + chart) can actually
+              fill that stretched height, instead of just shrink-wrapping to the
+              chart's own natural size and leaving dead space in a taller box. */}
+          <div className="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="flex flex-col rounded-lg border border-line bg-bg-surface/40">
               <ChartToolbar
                 symbol={symbol}
                 onSymbolChange={setSymbol}
@@ -89,7 +94,10 @@ export function TerminalShell() {
                 chartMode={chartMode}
                 onChartModeChange={setChartMode}
               />
-              <div className="p-2">
+              {/* min-h-0 is required here: a flex child otherwise refuses to
+                  shrink below its content's natural size, which would silently
+                  defeat flex-1 and reintroduce the same dead-space bug. */}
+              <div className="min-h-0 flex-1 p-2">
                 <AdvancedChart symbol={symbol} timeframe={timeframe} chartMode={chartMode} />
               </div>
             </div>
