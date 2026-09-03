@@ -197,28 +197,24 @@ create table if not exists failure_pattern_candidates (
   unique (source, symbol, evidence_tag)
 );
 
-create index if not exists failure_pattern_candidates_source_idx on failure_pattern_candidates (source);
-create index if not exists failure_pattern_candidates_symbol_idx on failure_pattern_candidates (symbol);
-create index if not exists failure_pattern_candidates_computed_at_idx on failure_pattern_candidates (computed_at);
-
-alter table failure_pattern_candidates enable row level security;
--- No policies defined — same service-role-only convention as every other
--- table in this schema. Zero public/anon access.
-
 -- ---------------------------------------------------------------------------
 -- Phase 8.3.0.1 §7 — additive migration for a deployment that already ran
 -- the Phase 8.1.2 `create table if not exists failure_pattern_candidates`
 -- above BEFORE the `symbol` column/constraint existed. `create table if
 -- not exists` is a no-op on such a deployment, so this block explicitly
--- upgrades it in place. NEVER deletes historical rows — a backfill value
--- is required (existing rows predate symbol-aware aggregation and cannot
--- be retroactively attributed to a real symbol), so this migration marks
--- them `'UNKNOWN'` rather than guessing, and the next
--- `recomputeFailurePatterns()` run naturally replaces every `'UNKNOWN'`
--- row with correctly symbol-scoped groups (old rows simply stop being
--- upserted into, since no future observation ever has `symbol =
--- 'UNKNOWN'`); a manual cleanup of leftover `'UNKNOWN'` rows once that
--- has happened is optional, not required for correctness.
+-- upgrades it in place — and MUST run before the `create index ...
+-- (symbol)` statement below, since that statement would otherwise fail
+-- with "column symbol does not exist" on a pre-existing table (exactly
+-- the ordering bug an earlier version of this migration had). NEVER
+-- deletes historical rows — a backfill value is required (existing rows
+-- predate symbol-aware aggregation and cannot be retroactively
+-- attributed to a real symbol), so this migration marks them `'UNKNOWN'`
+-- rather than guessing, and the next `recomputeFailurePatterns()` run
+-- naturally replaces every `'UNKNOWN'` row with correctly symbol-scoped
+-- groups (old rows simply stop being upserted into, since no future
+-- observation ever has `symbol = 'UNKNOWN'`); a manual cleanup of
+-- leftover `'UNKNOWN'` rows once that has happened is optional, not
+-- required for correctness.
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -231,9 +227,16 @@ begin
     alter table failure_pattern_candidates alter column symbol set not null;
     alter table failure_pattern_candidates drop constraint if exists failure_pattern_candidates_source_evidence_tag_key;
     alter table failure_pattern_candidates add constraint failure_pattern_candidates_source_symbol_evidence_tag_key unique (source, symbol, evidence_tag);
-    create index if not exists failure_pattern_candidates_symbol_idx on failure_pattern_candidates (symbol);
   end if;
 end $$;
+
+create index if not exists failure_pattern_candidates_source_idx on failure_pattern_candidates (source);
+create index if not exists failure_pattern_candidates_symbol_idx on failure_pattern_candidates (symbol);
+create index if not exists failure_pattern_candidates_computed_at_idx on failure_pattern_candidates (computed_at);
+
+alter table failure_pattern_candidates enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
 
 -- ---------------------------------------------------------------------------
 -- Phase 8.1.4 — Adaptive Constraint Engine
@@ -304,17 +307,12 @@ create table if not exists adaptive_constraints (
   unique (source, symbol, evidence_tag)
 );
 
-create index if not exists adaptive_constraints_source_idx on adaptive_constraints (source);
-create index if not exists adaptive_constraints_symbol_idx on adaptive_constraints (symbol);
-create index if not exists adaptive_constraints_generated_at_idx on adaptive_constraints (generated_at);
-
-alter table adaptive_constraints enable row level security;
--- No policies defined — same service-role-only convention as every other
--- table in this schema. Zero public/anon access.
-
 -- ---------------------------------------------------------------------------
 -- Phase 8.3.0.1 §7 — additive migration, same reasoning/UNKNOWN-backfill
 -- convention as failure_pattern_candidates' own migration block above.
+-- Runs BEFORE the `create index ... (symbol)` statement below — same
+-- ordering fix as that table (a pre-existing deployment would otherwise
+-- hit "column symbol does not exist" on the index statement).
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -327,9 +325,16 @@ begin
     alter table adaptive_constraints alter column symbol set not null;
     alter table adaptive_constraints drop constraint if exists adaptive_constraints_source_evidence_tag_key;
     alter table adaptive_constraints add constraint adaptive_constraints_source_symbol_evidence_tag_key unique (source, symbol, evidence_tag);
-    create index if not exists adaptive_constraints_symbol_idx on adaptive_constraints (symbol);
   end if;
 end $$;
+
+create index if not exists adaptive_constraints_source_idx on adaptive_constraints (source);
+create index if not exists adaptive_constraints_symbol_idx on adaptive_constraints (symbol);
+create index if not exists adaptive_constraints_generated_at_idx on adaptive_constraints (generated_at);
+
+alter table adaptive_constraints enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
 
 -- ---------------------------------------------------------------------------
 -- Phase 8.1.5 — Learning Validation
@@ -415,19 +420,11 @@ create table if not exists constraint_validations (
   unique (source, symbol, evidence_tag)
 );
 
-create index if not exists constraint_validations_source_idx on constraint_validations (source);
-create index if not exists constraint_validations_symbol_idx on constraint_validations (symbol);
-create index if not exists constraint_validations_status_idx on constraint_validations (status);
-create index if not exists constraint_validations_validated_at_idx on constraint_validations (validated_at);
-
-alter table constraint_validations enable row level security;
--- No policies defined — same service-role-only convention as every other
--- table in this schema. Zero public/anon access.
-
 -- ---------------------------------------------------------------------------
 -- Phase 8.3.0.1 §7 — additive migration, same reasoning/UNKNOWN-backfill
 -- convention as failure_pattern_candidates'/adaptive_constraints' own
--- migration blocks above.
+-- migration blocks above. Runs BEFORE the `create index ... (symbol)`
+-- statement below — same ordering fix as those two tables.
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -440,9 +437,16 @@ begin
     alter table constraint_validations alter column symbol set not null;
     alter table constraint_validations drop constraint if exists constraint_validations_source_evidence_tag_key;
     alter table constraint_validations add constraint constraint_validations_source_symbol_evidence_tag_key unique (source, symbol, evidence_tag);
-    create index if not exists constraint_validations_symbol_idx on constraint_validations (symbol);
   end if;
 end $$;
+
+create index if not exists constraint_validations_source_idx on constraint_validations (source);
+create index if not exists constraint_validations_symbol_idx on constraint_validations (symbol);
+create index if not exists constraint_validations_status_idx on constraint_validations (status);
+create index if not exists constraint_validations_validated_at_idx on constraint_validations (validated_at);
+
+alter table constraint_validations enable row level security;
+-- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
 
 -- ---------------------------------------------------------------------------
