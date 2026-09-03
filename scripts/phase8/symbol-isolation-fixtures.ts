@@ -88,7 +88,14 @@ function spanningDays(count: number, base: Partial<FailurePatternObservationInpu
 {
   const btcRows = spanningDays(MIN_OCCURRENCE_COUNT, { symbol: "BTCUSDT", evidenceTags: ["HIGH_RISK_PRESENT"] }, 1);
   const dogeRows = spanningDays(MIN_OCCURRENCE_COUNT, { symbol: "DOGEUSDT", evidenceTags: ["HIGH_RISK_PRESENT"] }, 1);
-  const candidates = detectFailurePatternCandidates([...btcRows, ...dogeRows]);
+  // Stamp `computedAt` the same way lib/ai/failurePatterns/repository.ts::
+  // recomputeFailurePatterns() does — detectFailurePatternCandidates()
+  // itself is pure and returns FailurePatternCandidateWithoutTimestamp
+  // (no computedAt yet); the repository adds one shared timestamp per
+  // recompute batch, which is what generateAdaptiveConstraints() (typed
+  // against the full FailurePatternCandidate) actually requires.
+  const computedAt = "2026-01-06T00:00:00.000Z";
+  const candidates = detectFailurePatternCandidates([...btcRows, ...dogeRows]).map((c) => ({ ...c, computedAt }));
 
   const constraints = generateAdaptiveConstraints(candidates);
   const btcConstraint = constraints.find((c) => c.symbol === "BTCUSDT");
@@ -139,9 +146,9 @@ function spanningDays(count: number, base: Partial<FailurePatternObservationInpu
   // filters with the identical mechanism this fixture demonstrates for
   // failurePatterns' own grouping.
   check(
-    "D2. A BTCUSDT query's exact-match symbol filter (mirrored by getConstraintValidations/matchedPatterns downstream) structurally excludes 'UNKNOWN' — string equality, never a fallback/wildcard match",
-    "UNKNOWN" !== "BTCUSDT",
-    "sanity check of the exact-match premise itself"
+    "D2. The legacy UNKNOWN candidate's symbol never equals BTCUSDT's — proven on the actual runtime values from D1's result array (typed as `string`, not a literal), the same shape getConstraintValidations'/matchedPatterns' own exact-match symbol filters compare against",
+    unknown !== undefined && btc !== undefined && unknown.symbol !== btc.symbol,
+    `unknown symbol=${unknown?.symbol} btc symbol=${btc?.symbol}`
   );
 }
 
