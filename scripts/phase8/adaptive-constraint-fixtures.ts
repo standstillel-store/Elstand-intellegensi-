@@ -30,6 +30,7 @@ function candidate(overrides: Partial<FailurePatternCandidate> = {}): FailurePat
   return {
     version: 1,
     source: "AI_SIGNAL",
+    symbol: "BTC",
     evidenceTag: "HIGH_RISK_PRESENT",
     dominantEvaluationClass: "BAD_DECISION_BAD_OUTCOME",
     occurrenceCount: 5,

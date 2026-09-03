@@ -151,7 +151,7 @@ function selectStatus(signals: ConstraintValidationSignals): ConstraintValidatio
  * always produces byte-identical output. Never mutates `constraint` or
  * anything nested inside it. Holds no state across calls.
  *
- * `source`/`evidenceTag`/`constraintType`/`basis` are carried forward
+ * `source`/`symbol`/`evidenceTag`/`constraintType`/`basis` are carried forward
  * verbatim from `constraint` — never re-derived. `signals` are four
  * independently computed booleans; `status` is a deterministic function
  * of `signals` alone (see `selectStatus()`), fail-closed and
@@ -180,6 +180,7 @@ export function validateConstraint(constraint: AdaptiveConstraint, asOf: string)
   return {
     version: 1,
     source: constraint.source,
+    symbol: constraint.symbol,
     evidenceTag: constraint.evidenceTag,
     constraintType: constraint.constraintType,
     status: selectStatus(signals),

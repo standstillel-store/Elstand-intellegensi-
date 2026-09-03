@@ -19,8 +19,10 @@
 //   - `source` (AI_SIGNAL vs ELVOID_PRO_ORACLE) is part of every
 //     candidate's identity. The two sources are NEVER merged into the
 //     same candidate/sample group — see detect.ts's grouping key.
-//   - Grouping is single-tag only: `(source, evidenceTag)`. No
-//     multi-tag/combinatorial grouping exists anywhere in this phase.
+//   - Grouping is single-tag only: `(source, symbol, evidenceTag)` (Phase
+//     8.3.0.1 §7 widened this from `(source, evidenceTag)` for symbol
+//     isolation). No multi-tag/combinatorial grouping exists anywhere in
+//     this phase.
 //   - NAMING: deliberately does NOT reuse `Pattern` / `PatternKind` /
 //     `InsightPattern` — those names are already owned by
 //     lib/ai/insights/types.ts for a fully unrelated concept (live
@@ -50,6 +52,14 @@ export type FailurePatternEvaluationClass = EvaluationClass;
  */
 export interface FailurePatternObservationInput {
   readonly source: FailurePatternSource;
+  /**
+   * Phase 8.3.0.1 §7 — SYMBOL ISOLATION. Copied verbatim from the
+   * originating `decision_experiences.symbol` row. `detect.ts` groups on
+   * `(source, symbol, evidenceTag)` — widened from `(source,
+   * evidenceTag)` — so one symbol's occurrences can never be pooled into,
+   * or influence, another symbol's aggregate.
+   */
+  readonly symbol: string;
   readonly sourceSignalId: string;
   readonly evaluationClass: FailurePatternEvaluationClass;
   readonly evidenceTags: readonly FailurePatternEvidenceTag[];
@@ -74,6 +84,8 @@ export interface FailurePatternObservationInput {
 export interface FailurePatternCandidateWithoutTimestamp {
   readonly version: 1;
   readonly source: FailurePatternSource;
+  /** Phase 8.3.0.1 §7 — copied verbatim from the group's observations, all of which share the same symbol by construction (see detect.ts's grouping key). */
+  readonly symbol: string;
   readonly evidenceTag: FailurePatternEvidenceTag;
   /**
    * The most frequent evaluation class among this group's qualifying

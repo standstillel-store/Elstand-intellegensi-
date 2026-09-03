@@ -461,6 +461,88 @@ itself, and its failure never breaks the Oracle route.
   downstream consumer (evaluation/learning/agent layers, not yet built)
   from having to re-thread four separate parameters itself.
 
+## AI Signal Intelligence & Background Autonomous Runtime (Phase 8.3.0.1)
+
+ELVOID Pro's autonomous runtime (`runAutonomousBatch()`, Phase 8.2.9)
+analyzes every symbol in the existing watchlist through one shared
+intelligence pipeline, decides EXECUTE/WAIT/REJECT per symbol
+independently, and persists the outcome — this phase adds a bounded
+**latest-state snapshot** for the new **AI Signal Intelligence** tab to
+read, and a genuinely browser-independent trigger for the batch itself.
+
+- **Snapshot storage** (`autonomous_intelligence_snapshot` table, Learning
+  DB — see `supabase/learning/schema.sql`). One row per symbol, upserted
+  every autonomous cycle by `lib/ai/autonomousSnapshot/repository.ts`.
+  Every field is a verbatim copy of an already-computed Oracle/confluence/
+  macro/event/memory value — this table computes nothing and is never a
+  second decision authority. EXECUTE, WAIT, and REJECT are all persisted.
+- **Read API**: `GET /api/elvoid-pro/autonomous/snapshots` returns every
+  symbol's latest snapshot. Read-only — it calls
+  `listAutonomousIntelligenceSnapshots()` and nothing else; loading the AI
+  Signal Intelligence page never triggers a fresh Oracle analysis.
+- **Background trigger, independent of the browser tab.** `vercel.json`'s
+  own cron for `/api/elvoid-pro/autonomous/tick` only runs once a day —
+  same Hobby-plan cron-frequency limit documented on
+  `app/api/binance/auto-trade/tick` and `app/api/whale/indexer/run`
+  above. That cadence does not satisfy "keeps running with the browser
+  closed", so `.github/workflows/elvoid-autonomous-tick.yml` calls the
+  same existing tick route on a schedule (every 15 minutes) from GitHub's
+  own runners — genuinely server-side, and it works the same regardless
+  of which Vercel plan is deployed underneath, so it doesn't need to wait
+  on that answer. It contains no analysis/decision/execution logic of its
+  own; `runAutonomousBatch()`'s existing runtime lock
+  (`lib/ai/autonomousRuntime/lock.ts`) already makes an overlapping
+  client-tick/GitHub-Actions/Vercel-Cron call a safe no-op. Requires two
+  repo secrets — see that workflow file's header comment for setup
+  (`ELVOID_PRO_BASE_URL`, `CRON_SECRET`). The client-side
+  `useAutonomousRuntimeTick.ts` hook remains as an additional, optional
+  foreground trigger/freshness mechanism — it is no longer the only way
+  the runtime advances.
+- **Known limitation, stated honestly**: GitHub Actions' free-tier
+  scheduler is best-effort and can delay a queued run by several minutes
+  under load — this is a GitHub platform characteristic, not a gap in
+  this repo's own lock/dedup logic. If the deployment is confirmed to be
+  on Vercel Pro, a tighter `vercel.json` cron entry (e.g. `*/10 * * * *`)
+  can be added as a second, redundant trigger — the runtime lock makes
+  that safe.
+- **Mini chart** (Phase 8.3.0.1 §6, Option A): each snapshot also carries
+  a small, bounded `sparkline` array — real closing prices lifted
+  verbatim from that cycle's `OracleContext.candles` (the same Binance
+  candles the Oracle pipeline already fetched to grade the symbol, capped
+  to the most recent 24 points by `orchestrator.ts::buildSparkline()`).
+  No second per-card market request, no decorative/fake line — null when
+  too little real data existed that cycle.
+- **Failure-mode behavior, stated explicitly** (every answer below is
+  read directly off `app/api/elvoid-pro/autonomous/tick/route.ts` and
+  `lib/ai/autonomousRuntime/lock.ts`, not assumed):
+  - *A GitHub Actions run fires late*: harmless — the tick just runs
+    whenever the request lands; no correctness impact, only cadence.
+  - *Two invocations overlap* (client tick + GitHub Actions + Vercel
+    Cron landing close together): the runtime lock makes the second (and
+    third) call a safe no-op — `{ ran: false, reason: "already_running" }`,
+    HTTP 200, no duplicate batch.
+  - *The tick endpoint itself throws*: caught, returns
+    `{ ok: false, ... }` at HTTP 500 — visible as a failed step in the
+    GitHub Actions run log. No partial/half-written decision, since each
+    symbol's cycle inside the batch is independently isolated. The next
+    scheduled tick (15 minutes later) simply tries again.
+  - *`CRON_SECRET` is not set on the Vercel deployment*: the route's own
+    `isAuthorizedCron()` intentionally stays open in that case (documented
+    in the route's own header comment, unchanged this phase) — anyone who
+    knows the deployment URL could trigger a tick. Not a live-trading risk
+    (paper-trade only), but worth setting `CRON_SECRET` in production.
+  - *The GitHub repo secrets are not configured*: the workflow's own
+    `ELVOID_PRO_BASE_URL` check fails fast with a clear log line rather
+    than silently doing nothing — see the workflow file.
+  - *Hobby plan's 10-second function cap*: `maxDuration = 60` on the tick
+    route only takes effect on Pro+ — Hobby still hard-caps each
+    invocation at 10s, so a single tick may not finish analyzing every
+    watchlist symbol before being killed. This is not a correctness bug —
+    each symbol's cycle is isolated, so a truncated run just leaves the
+    remaining symbols for the next tick 15 minutes later — but it does mean
+    "every symbol refreshed every 15 minutes" is only guaranteed on a plan
+    where one invocation can complete the full batch.
+
 ## Decision Outcome Capture & ELVOID Learning Database (Phase 8.1.0)
 
 Phase 8.1 ("Self-Evaluation & Adaptive Learning") begins here, with the

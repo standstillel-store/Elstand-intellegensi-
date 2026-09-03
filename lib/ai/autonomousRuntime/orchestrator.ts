@@ -68,10 +68,37 @@ import { decideAutonomous } from "@/lib/ai/autonomousDecision/decide";
 import { executeAutonomousPaperTrade } from "@/lib/ai/autonomousExecution/execute";
 import { classifyAutonomousLearningLifecycle } from "@/lib/ai/autonomousLearning/lifecycle";
 import { buildAutonomousSetupIdentity, getLastExecutedSetup, isDuplicateSetup, recordExecutedSetup } from "./dedup";
+import { upsertAutonomousIntelligenceSnapshot } from "@/lib/ai/autonomousSnapshot/repository";
 import type { EconomicEvent } from "@/lib/ai/macroIntelligence/contracts";
 import type { NewsItem } from "@/lib/ai/eventImpact/contracts";
 import type { AutonomousDecisionEngineResult } from "@/lib/ai/autonomousDecision/contracts";
+import type { ConfluenceSource } from "@/lib/ai/oracle/confluenceTypes";
 import type { AutonomousCycleResult } from "./contracts";
+
+/** Joins every ConfluenceFactor.evidence string for one source, "; "-separated. Null when no factor of that source fired — never a fabricated placeholder. */
+function evidenceForSource(factors: { source: ConfluenceSource; evidence: string }[], source: ConfluenceSource): string | null {
+  const matches = factors.filter((f) => f.source === source).map((f) => f.evidence);
+  return matches.length > 0 ? matches.join("; ") : null;
+}
+
+/** Deterministic, count-based description of Decision Memory for this cycle — never a fabricated narrative. Null when no memory context exists. */
+function describeLearningInfluence(memory: { matchedExperiences: readonly unknown[]; matchedPatterns: readonly unknown[] } | null): string | null {
+  if (!memory) return null;
+  const experienceCount = memory.matchedExperiences.length;
+  const patternCount = memory.matchedPatterns.length;
+  if (experienceCount === 0 && patternCount === 0) return null;
+  const parts: string[] = [];
+  if (experienceCount > 0) parts.push(`${experienceCount} pengalaman serupa`);
+  if (patternCount > 0) parts.push(`${patternCount} pola kegagalan`);
+  return parts.join(", ");
+}
+
+/** Phase 8.3.0.1 §6 (Mini Chart, Option A) — SPARKLINE_POINTS most recent real closing prices, verbatim from this cycle's OracleContext.candles (the same Binance real candles the Oracle pipeline already fetched — never a second market request). Null (never an empty/padded array) when fewer than 2 real candles were available. */
+const SPARKLINE_POINTS = 24;
+function buildSparkline(candles: { close: number }[]): readonly number[] | null {
+  if (candles.length < 2) return null;
+  return candles.slice(-SPARKLINE_POINTS).map((c) => c.close);
+}
 
 const AUTONOMOUS_SOURCE = "ELVOID_PRO_ORACLE" as const;
 
@@ -203,7 +230,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
 
   // --- Step 3: Decision Memory (Phase 8.1.3) + Learning Validation read (Phase 8.1.5). ---
   const memory = await queryDecisionMemory({ source: AUTONOMOUS_SOURCE, symbol, side: assessment.side ?? undefined }).catch(() => null);
-  const rawConstraints = await getConstraintValidations(AUTONOMOUS_SOURCE).catch(() => null);
+  const rawConstraints = await getConstraintValidations(AUTONOMOUS_SOURCE, symbol).catch(() => null);
 
   // --- Step 4: Autonomous Decision Context assembly (Phase 8.2.0). ---
   const autonomousContext = buildAutonomousDecisionContext(AUTONOMOUS_SOURCE, symbol, asOf, assessment, decisionContext, memory, rawConstraints);
@@ -249,6 +276,39 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
 
   // --- Step 8 (Phase 8.2.8): classify whether this result will enter the existing learning lifecycle on close. ---
   const learningLifecycle = classifyAutonomousLearningLifecycle(execution);
+
+  // --- Step 9 (Phase 8.3.0.1 §10): persist the latest observation-only
+  // intelligence snapshot for this symbol. Best-effort — a Learning DB
+  // outage here can never fail this cycle (mirrors how recordExecutedSetup
+  // above is already awaited-with-catch, never left unhandled). Every
+  // field is a verbatim copy of an already-computed value from steps 1-7;
+  // nothing is recomputed or re-graded here. ---
+  await upsertAutonomousIntelligenceSnapshot({
+    source: AUTONOMOUS_SOURCE,
+    symbol,
+    generatedAt: asOf,
+    decision: effectiveDecision.decision,
+    side: assessment.side,
+    grade: assessment.grade,
+    confidence: assessment.confidence,
+    riskStatus: assessment.riskStatus,
+    entry: assessment.risk?.entry ?? null,
+    takeProfit: assessment.risk?.takeProfit ?? null,
+    stopLoss: assessment.risk?.stopLoss ?? null,
+    riskReward: assessment.risk?.riskReward ?? null,
+    sparkline: buildSparkline(context.candles),
+    liquidityEvidence: evidenceForSource(confluence.factors, "liquidity"),
+    structureEvidence: evidenceForSource(confluence.factors, "market_structure"),
+    volumeEvidence: evidenceForSource(confluence.factors, "footprint"),
+    macroState: `${macro.macroRegime} / ${macro.eventRisk}`,
+    eventState: `${eventImpact.eventState} / ${eventImpact.impactRisk}`,
+    reasoningSummary: assessment.gradeReason,
+    invalidation: assessment.invalidation,
+    learningInfluence: describeLearningInfluence(memory),
+    dedupApplied,
+    executionOutcome: execution.outcome,
+    paperTradeId: execution.paperTradeId,
+  }).catch(() => {});
 
   return {
     version: 1,

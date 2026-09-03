@@ -69,6 +69,7 @@ function pattern(overrides: Partial<FailurePatternCandidate> = {}): FailurePatte
   return {
     version: 1,
     source: "ELVOID_PRO_ORACLE",
+    symbol: "BTCUSDT",
     evidenceTag: "HIGH_RISK_PRESENT",
     dominantEvaluationClass: "BAD_DECISION_BAD_OUTCOME",
     occurrenceCount: 8,
@@ -94,6 +95,7 @@ function validConstraint(overrides: Partial<ConstraintValidation> = {}): Constra
   return {
     version: 1,
     source: "ELVOID_PRO_ORACLE",
+    symbol: "BTCUSDT",
     evidenceTag: "MODERATE_RISK_PRESENT",
     constraintType: "INCREASE_CAUTION",
     status: "VALID",

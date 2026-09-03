@@ -117,8 +117,10 @@ export interface DecisionMemoryJoinedRow {
  *     recency (see retrieve.ts); capped by `query.limit`.
  *
  *   - `matchedPatterns`: aggregate, many-sample statistics from Phase
- *     8.1.2, filtered only by `source` (mandatory) and, if provided,
- *     `evidenceTags` — never re-thresholded, never capped by `limit`.
+ *     8.1.2, filtered by `source` (mandatory), `symbol` (Phase 8.3.0.1
+ *     §7 — applied whenever the query provides one; every real caller
+ *     today always does) and, if provided, `evidenceTags` — never
+ *     re-thresholded, never capped by `limit`.
  *
  * A `FailurePatternCandidate` is never merged into `matchedExperiences`
  * and a `DecisionExperienceRecord` is never merged into `matchedPatterns`

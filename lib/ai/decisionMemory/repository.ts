@@ -154,6 +154,7 @@ export async function getDecisionMemoryPatterns(): Promise<readonly FailurePatte
     (row): FailurePatternCandidate => ({
       version: row.version,
       source: row.source,
+      symbol: row.symbol,
       evidenceTag: row.evidence_tag,
       dominantEvaluationClass: row.dominant_evaluation_class,
       occurrenceCount: row.occurrence_count,

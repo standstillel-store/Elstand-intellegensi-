@@ -47,11 +47,12 @@ function isNegativeEvaluationClass(evaluationClass: FailurePatternEvaluationClas
 
 interface GroupKey {
   readonly source: FailurePatternSource;
+  readonly symbol: string;
   readonly evidenceTag: FailurePatternEvidenceTag;
 }
 
 function groupKeyString(key: GroupKey): string {
-  return `${key.source}::${key.evidenceTag}`;
+  return `${key.source}::${key.symbol}::${key.evidenceTag}`;
 }
 
 /**
@@ -82,10 +83,12 @@ export function detectFailurePatternCandidates(observations: readonly FailurePat
 
     // Single-tag grouping only — never combinatorial. Each qualifying tag
     // on this observation independently contributes to its own (source,
-    // tag) group; a decision carrying multiple tags is legitimately
+    // symbol, tag) group — Phase 8.3.0.1 §7 widened this from (source,
+    // tag) specifically so one symbol's occurrences can never pool into
+    // another's; a decision carrying multiple tags is legitimately
     // counted once per tag, never once per tag-combination.
     for (const evidenceTag of observation.evidenceTags) {
-      const key: GroupKey = { source: observation.source, evidenceTag };
+      const key: GroupKey = { source: observation.source, symbol: observation.symbol, evidenceTag };
       const mapKey = groupKeyString(key);
       const existing = groups.get(mapKey);
       if (existing) existing.rows.push(observation);
@@ -133,6 +136,7 @@ export function detectFailurePatternCandidates(observations: readonly FailurePat
     candidates.push({
       version: 1,
       source: key.source,
+      symbol: key.symbol,
       evidenceTag: key.evidenceTag,
       dominantEvaluationClass,
       occurrenceCount,
@@ -146,7 +150,11 @@ export function detectFailurePatternCandidates(observations: readonly FailurePat
   // Fixed, deterministic output order — never dependent on Map iteration
   // order (which follows insertion order of the input, not a guaranteed
   // stable contract from a caller's perspective).
-  candidates.sort((a, b) => (a.source === b.source ? a.evidenceTag.localeCompare(b.evidenceTag) : a.source.localeCompare(b.source)));
+  candidates.sort((a, b) => {
+    if (a.source !== b.source) return a.source.localeCompare(b.source);
+    if (a.symbol !== b.symbol) return a.symbol.localeCompare(b.symbol);
+    return a.evidenceTag.localeCompare(b.evidenceTag);
+  });
 
   return candidates;
 }

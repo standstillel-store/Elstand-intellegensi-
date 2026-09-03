@@ -96,6 +96,8 @@ export interface AdaptiveConstraintBasis {
 export interface AdaptiveConstraintWithoutTimestamp {
   readonly version: 1;
   readonly source: AdaptiveConstraintSource;
+  /** Phase 8.3.0.1 §7 — inherited verbatim from the originating FailurePatternCandidate.symbol. */
+  readonly symbol: string;
   readonly evidenceTag: AdaptiveConstraintEvidenceTag;
   readonly constraintType: AdaptiveConstraintType;
   readonly basis: AdaptiveConstraintBasis;
@@ -109,7 +111,7 @@ export interface AdaptiveConstraintWithoutTimestamp {
  *
  * Like `failure_pattern_candidates` (and unlike append-only
  * `decision_evaluations`), this is AGGREGATE STATE for its
- * `(source, evidenceTag)` group — recompute-and-upsert is the correct and
+ * `(source, symbol, evidenceTag)` group — recompute-and-upsert is the correct and
  * only persistence model; see repository.ts.
  */
 export interface AdaptiveConstraint extends AdaptiveConstraintWithoutTimestamp {

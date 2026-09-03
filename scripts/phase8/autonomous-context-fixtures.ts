@@ -85,6 +85,7 @@ function constraintValidation(overrides: Partial<ConstraintValidation> = {}): Co
   return {
     version: 1,
     source: "AI_SIGNAL",
+    symbol: "BTCUSDT",
     evidenceTag: "HIGH_RISK_PRESENT",
     constraintType: "INCREASE_CAUTION",
     status: "VALID",
@@ -192,7 +193,7 @@ async function walk(dir: string, out: string[] = []): Promise<string[]> {
     constraintValidation({ evidenceTag: "HIGH_GRADE", status: "INCONSISTENT", signals: { sampleSizeAdequate: true, withinFreshnessWindow: true, structurallyConsistent: false, overfitRiskFlag: false } }),
     constraintValidation({ evidenceTag: "MODERATE_RISK_PRESENT", status: "OVERFIT_RISK", signals: { sampleSizeAdequate: true, withinFreshnessWindow: true, structurallyConsistent: true, overfitRiskFlag: true } }),
   ];
-  const result = filterValidConstraints(constraints, "AI_SIGNAL");
+  const result = filterValidConstraints(constraints, "AI_SIGNAL", "BTCUSDT");
   check("7. filterValidConstraints excludes PROVISIONAL/STALE/INCONSISTENT/OVERFIT_RISK, keeps only VALID", result.length === 1 && result[0].evidenceTag === "HIGH_RISK_PRESENT" && result[0].status === "VALID", JSON.stringify(result));
 }
 
@@ -201,8 +202,8 @@ async function walk(dir: string, out: string[] = []): Promise<string[]> {
 // ===========================================================================
 {
   const constraints: ConstraintValidation[] = [constraintValidation({ source: "AI_SIGNAL", evidenceTag: "HIGH_RISK_PRESENT", status: "VALID" }), constraintValidation({ source: "ELVOID_PRO_ORACLE", evidenceTag: "HIGH_RISK_PRESENT", status: "VALID" })];
-  const aiResult = filterValidConstraints(constraints, "AI_SIGNAL");
-  const oracleResult = filterValidConstraints(constraints, "ELVOID_PRO_ORACLE");
+  const aiResult = filterValidConstraints(constraints, "AI_SIGNAL", "BTCUSDT");
+  const oracleResult = filterValidConstraints(constraints, "ELVOID_PRO_ORACLE", "BTCUSDT");
   check(
     "8. Two VALID rows, same evidenceTag, different source -> each query returns only its own source's row, never both",
     aiResult.length === 1 && aiResult[0].source === "AI_SIGNAL" && oracleResult.length === 1 && oracleResult[0].source === "ELVOID_PRO_ORACLE",
@@ -347,6 +348,29 @@ async function walk(dir: string, out: string[] = []): Promise<string[]> {
     }
   }
   check("20. No file under lib/, app/, or components/ (outside lib/ai/autonomous itself) imports from lib/ai/autonomous/* — zero external call sites, fully unwired", offenders.length === 0, `found references in: ${offenders.join(", ")}`);
+}
+
+// ===========================================================================
+// 21 (Phase 8.3.0.1 §7, Scenario C). Symbol isolation — filterValidConstraints
+// never lets a VALID constraint for one symbol reach another symbol's
+// context, even when both share source AND evidenceTag.
+// ===========================================================================
+{
+  const constraints: ConstraintValidation[] = [constraintValidation({ symbol: "BTCUSDT", evidenceTag: "HIGH_RISK_PRESENT", status: "VALID" })];
+  const btcResult = filterValidConstraints(constraints, "AI_SIGNAL", "BTCUSDT");
+  const dogeResult = filterValidConstraints(constraints, "AI_SIGNAL", "DOGEUSDT");
+  check(
+    "21a. filterValidConstraints: a VALID BTCUSDT constraint is returned for a BTCUSDT query but NEVER for a DOGEUSDT query, same source/evidenceTag",
+    btcResult.length === 1 && btcResult[0].symbol === "BTCUSDT" && dogeResult.length === 0,
+    `btc=${JSON.stringify(btcResult)} doge=${JSON.stringify(dogeResult)}`
+  );
+
+  const dogeCtx = buildAutonomousDecisionContext("AI_SIGNAL", "DOGEUSDT", "2026-03-01T00:00:00.000Z", null, null, null, constraints);
+  check(
+    "21b. buildAutonomousDecisionContext for DOGEUSDT never surfaces a BTCUSDT-scoped VALID constraint in validConstraints, even though repository-level filtering is meant to have already excluded it — this is the defense-in-depth layer proving isolation even if mixed data hypothetically reached this function",
+    dogeCtx.validConstraints.length === 0,
+    JSON.stringify(dogeCtx.validConstraints)
+  );
 }
 
 console.log(failures === 0 ? `\n✓ ${passed}/${passed} Autonomous Decision Context fixtures passed.` : `\n${failures} Autonomous Decision Context fixture(s) FAILED (${passed} passed).`);

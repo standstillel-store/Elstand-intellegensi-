@@ -73,6 +73,7 @@ function pattern(overrides: Partial<FailurePatternCandidate> = {}): FailurePatte
   return {
     version: 1,
     source: "AI_SIGNAL",
+    symbol: "BTCUSDT",
     evidenceTag: "HIGH_RISK_PRESENT",
     dominantEvaluationClass: "BAD_DECISION_BAD_OUTCOME",
     occurrenceCount: 8,
@@ -369,6 +370,45 @@ function query(overrides: Partial<DecisionMemoryQuery> & { source: DecisionSourc
   const patterns = [pattern()];
   const result = retrieveDecisionMemory(query({ source: "AI_SIGNAL", limit: 0 }), rows, patterns);
   check("19. limit=0 -> matchedExperiences/matchedEvaluations both empty, matchedPatterns still returned (limit never applies to patterns)", result.matchedExperiences.length === 0 && result.matchedEvaluations.length === 0 && result.matchedPatterns.length === 1, JSON.stringify(result));
+}
+
+// ===========================================================================
+// 20 (Phase 8.3.0.1 §7, Scenario F). Symbol isolation of matchedPatterns —
+// a BTC query receives only BTC's pattern, a DOGE query receives only
+// DOGE's pattern, never the other's, even though both share source and
+// evidenceTag. Also re-confirms matchedExperiences' own (pre-existing,
+// unmodified) symbol filter still works side-by-side with the new
+// pattern filter in the same call.
+// ===========================================================================
+{
+  const patterns = [pattern({ symbol: "BTCUSDT", evidenceTag: "HIGH_RISK_PRESENT" }), pattern({ symbol: "DOGEUSDT", evidenceTag: "HIGH_RISK_PRESENT" })];
+  const rows = [row({ sourceSignalId: "sig-btc-mem", symbol: "BTCUSDT" }, { sourceSignalId: "sig-btc-mem" }), row({ sourceSignalId: "sig-doge-mem", symbol: "DOGEUSDT" }, { sourceSignalId: "sig-doge-mem" })];
+
+  const btcResult = retrieveDecisionMemory(query({ source: "AI_SIGNAL", symbol: "BTCUSDT" }), rows, patterns);
+  const dogeResult = retrieveDecisionMemory(query({ source: "AI_SIGNAL", symbol: "DOGEUSDT" }), rows, patterns);
+
+  check(
+    "20a. matchedPatterns: a BTCUSDT-scoped query returns ONLY the BTCUSDT pattern, never the DOGEUSDT one, though both share source+evidenceTag",
+    btcResult.matchedPatterns.length === 1 && btcResult.matchedPatterns[0].symbol === "BTCUSDT",
+    JSON.stringify(btcResult.matchedPatterns)
+  );
+  check(
+    "20b. matchedPatterns: a DOGEUSDT-scoped query returns ONLY the DOGEUSDT pattern, never the BTCUSDT one",
+    dogeResult.matchedPatterns.length === 1 && dogeResult.matchedPatterns[0].symbol === "DOGEUSDT",
+    JSON.stringify(dogeResult.matchedPatterns)
+  );
+  check(
+    "20c. matchedExperiences' own pre-existing symbol filter is unaffected by the new pattern filter — BTCUSDT query still returns only sig-btc-mem, DOGEUSDT query still returns only sig-doge-mem",
+    btcResult.matchedExperiences.length === 1 && btcResult.matchedExperiences[0].sourceSignalId === "sig-btc-mem" && dogeResult.matchedExperiences.length === 1 && dogeResult.matchedExperiences[0].sourceSignalId === "sig-doge-mem",
+    `btc=${JSON.stringify(btcResult.matchedExperiences)} doge=${JSON.stringify(dogeResult.matchedExperiences)}`
+  );
+
+  // Unscoped query (no query.symbol) — still a legitimate, explicit
+  // "everything for this source" read (e.g. a future dashboard), not a
+  // silent contamination path: it must be requested by omission, never
+  // reachable by accident from a real per-symbol autonomous cycle.
+  const unscopedResult = retrieveDecisionMemory(query({ source: "AI_SIGNAL" }), rows, patterns);
+  check("20d. Omitting query.symbol entirely is still a valid explicit unscoped read — both patterns returned, matching the experience filter's own long-standing optional-symbol convention", unscopedResult.matchedPatterns.length === 2, JSON.stringify(unscopedResult.matchedPatterns));
 }
 
 console.log(failures === 0 ? `\n✓ ${passed}/${passed} Decision Memory fixtures passed.` : `\n${failures} Decision Memory fixture(s) FAILED (${passed} passed).`);

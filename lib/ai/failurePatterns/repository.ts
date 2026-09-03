@@ -12,7 +12,7 @@
 //     why), matching the read-only, non-authoritative nature of this
 //     phase.
 //   - writes `failure_pattern_candidates` to that SAME Learning Database
-//     project — a full recompute-and-upsert on `UNIQUE(source,
+//     project — a full recompute-and-upsert on `UNIQUE(source, symbol,
 //     evidence_tag)`, deliberately NOT the `ignoreDuplicates: true`
 //     idempotent-insert pattern `decision_evaluations` uses. Unlike a
 //     per-decision evaluation, a failure-pattern candidate is AGGREGATE
@@ -62,15 +62,15 @@ export async function getFailurePatternObservations(): Promise<readonly FailureP
   if (!learningDb) return null;
 
   const [experiencesResult, evaluationsResult] = await Promise.all([
-    learningDb.from("decision_experiences").select("source_signal_id, source, decision_timestamp"),
+    learningDb.from("decision_experiences").select("source_signal_id, source, symbol, decision_timestamp"),
     learningDb.from("decision_evaluations").select("source_signal_id, evaluation_class, evidence"),
   ]);
 
   if (experiencesResult.error || !experiencesResult.data || evaluationsResult.error || !evaluationsResult.data) return [];
 
-  const experienceBySignalId = new Map<string, { source: FailurePatternSource; decisionTimestamp: string }>();
+  const experienceBySignalId = new Map<string, { source: FailurePatternSource; symbol: string; decisionTimestamp: string }>();
   for (const row of experiencesResult.data) {
-    experienceBySignalId.set(row.source_signal_id, { source: row.source, decisionTimestamp: row.decision_timestamp });
+    experienceBySignalId.set(row.source_signal_id, { source: row.source, symbol: row.symbol, decisionTimestamp: row.decision_timestamp });
   }
 
   const observations: FailurePatternObservationInput[] = [];
@@ -80,6 +80,7 @@ export async function getFailurePatternObservations(): Promise<readonly FailureP
 
     observations.push({
       source: experience.source,
+      symbol: experience.symbol,
       sourceSignalId: row.source_signal_id,
       evaluationClass: row.evaluation_class,
       evidenceTags: row.evidence ?? [],
@@ -98,7 +99,7 @@ export type PersistFailurePatternCandidatesResult = { persisted: true; count: nu
 
 /**
  * Full recompute-and-upsert into `failure_pattern_candidates` on
- * `UNIQUE(source, evidence_tag)` — an existing row for the same group is
+ * `UNIQUE(source, symbol, evidence_tag)` — an existing row for the same group is
  * safely overwritten with the freshly-computed aggregate (not merged,
  * not incremented); a new group creates a new row. This is safe
  * specifically because `detectFailurePatternCandidates()` is pure and
@@ -118,6 +119,7 @@ export async function persistFailurePatternCandidates(candidates: readonly Failu
 
   const rows = candidates.map((candidate) => ({
     source: candidate.source,
+    symbol: candidate.symbol,
     evidence_tag: candidate.evidenceTag,
     version: candidate.version,
     dominant_evaluation_class: candidate.dominantEvaluationClass,
@@ -129,7 +131,7 @@ export async function persistFailurePatternCandidates(candidates: readonly Failu
     computed_at: candidate.computedAt,
   }));
 
-  const { error } = await learningDb.from("failure_pattern_candidates").upsert(rows, { onConflict: "source,evidence_tag" });
+  const { error } = await learningDb.from("failure_pattern_candidates").upsert(rows, { onConflict: "source,symbol,evidence_tag" });
 
   if (error) return { persisted: false, reason: "error", error: error.message };
   return { persisted: true, count: rows.length };

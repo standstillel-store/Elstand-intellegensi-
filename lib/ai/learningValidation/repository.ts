@@ -68,7 +68,7 @@ export async function getValidationBasisConstraints(): Promise<readonly Adaptive
 
   const { data, error } = await learningDb
     .from("adaptive_constraints")
-    .select("source, evidence_tag, version, constraint_type, occurrence_count, dominant_class_share, statistical_confidence, first_observed_at, last_observed_at, generated_at");
+    .select("source, symbol, evidence_tag, version, constraint_type, occurrence_count, dominant_class_share, statistical_confidence, first_observed_at, last_observed_at, generated_at");
 
   if (error || !data) return [];
 
@@ -76,6 +76,7 @@ export async function getValidationBasisConstraints(): Promise<readonly Adaptive
     (row): AdaptiveConstraint => ({
       version: row.version,
       source: row.source,
+      symbol: row.symbol,
       evidenceTag: row.evidence_tag,
       constraintType: row.constraint_type,
       basis: {
@@ -108,16 +109,26 @@ export async function getValidationBasisConstraints(): Promise<readonly Adaptive
 // itself is required to narrow to VALID).
 // ---------------------------------------------------------------------------
 
-export async function getConstraintValidations(source: ConstraintValidation["source"]): Promise<readonly ConstraintValidation[] | null> {
+/**
+ * Phase 8.3.0.1 §7 — SYMBOL-SCOPED read, by construction rather than by
+ * caller discipline: `symbol` is a required parameter (not optional), so
+ * a caller can never silently fall back to a pooled, cross-symbol read by
+ * simply forgetting to pass it. Filters to `.eq("source", source).eq(
+ * "symbol", symbol)` — a BTC caller only ever sees BTC-validated
+ * constraints, never DOGE's or ETH's, even though every row shares the
+ * same `source`.
+ */
+export async function getConstraintValidations(source: ConstraintValidation["source"], symbol: string): Promise<readonly ConstraintValidation[] | null> {
   const learningDb = getLearningSupabase();
   if (!learningDb) return null;
 
   const { data, error } = await learningDb
     .from("constraint_validations")
     .select(
-      "source, evidence_tag, version, constraint_type, status, sample_size_adequate, within_freshness_window, structurally_consistent, overfit_risk_flag, occurrence_count, dominant_class_share, statistical_confidence, first_observed_at, last_observed_at, validated_at"
+      "source, symbol, evidence_tag, version, constraint_type, status, sample_size_adequate, within_freshness_window, structurally_consistent, overfit_risk_flag, occurrence_count, dominant_class_share, statistical_confidence, first_observed_at, last_observed_at, validated_at"
     )
-    .eq("source", source);
+    .eq("source", source)
+    .eq("symbol", symbol);
 
   if (error || !data) return [];
 
@@ -125,6 +136,7 @@ export async function getConstraintValidations(source: ConstraintValidation["sou
     (row): ConstraintValidation => ({
       version: row.version,
       source: row.source,
+      symbol: row.symbol,
       evidenceTag: row.evidence_tag,
       constraintType: row.constraint_type,
       status: row.status,
@@ -154,7 +166,7 @@ export type PersistConstraintValidationsResult = { persisted: true; count: numbe
 
 /**
  * Full recompute-and-upsert into `constraint_validations` on
- * `UNIQUE(source, evidence_tag)` — an existing snapshot for the same
+ * `UNIQUE(source, symbol, evidence_tag)` — an existing snapshot for the same
  * group is safely overwritten with the freshly-computed validation (not
  * merged, not incremented); a new group creates a new row. Safe
  * specifically because `validateConstraint()` is pure and holds no state
@@ -174,6 +186,7 @@ export async function persistConstraintValidations(validations: readonly Constra
 
   const rows = validations.map((validation) => ({
     source: validation.source,
+    symbol: validation.symbol,
     evidence_tag: validation.evidenceTag,
     version: validation.version,
     constraint_type: validation.constraintType,
@@ -190,7 +203,7 @@ export async function persistConstraintValidations(validations: readonly Constra
     validated_at: validation.validatedAt,
   }));
 
-  const { error } = await learningDb.from("constraint_validations").upsert(rows, { onConflict: "source,evidence_tag" });
+  const { error } = await learningDb.from("constraint_validations").upsert(rows, { onConflict: "source,symbol,evidence_tag" });
 
   if (error) return { persisted: false, reason: "error", error: error.message };
   return { persisted: true, count: rows.length };

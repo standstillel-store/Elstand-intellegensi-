@@ -34,6 +34,7 @@ function constraint(overrides: Partial<AdaptiveConstraint> = {}): AdaptiveConstr
   return {
     version: 1,
     source: "AI_SIGNAL",
+    symbol: "BTC",
     evidenceTag: "HIGH_RISK_PRESENT",
     constraintType: "INCREASE_CAUTION",
     basis: {

@@ -62,9 +62,19 @@ import type { AutonomousCanonicalSnapshot, AutonomousDecisionContext, DecisionSo
  * Exported directly so callers/fixtures can exercise this exact filter in
  * isolation without going through the full assembler.
  */
-export function filterValidConstraints(constraints: readonly ConstraintValidation[] | null, source: DecisionSource): readonly ConstraintValidation[] {
+/**
+ * Phase 8.3.0.1 §7 — defense-in-depth symbol guard, in addition to (not a
+ * replacement for) `getConstraintValidations(source, symbol)`'s own
+ * DB-level `.eq("symbol", symbol)` filter. Even if a future caller ever
+ * passes an unscoped/pooled `constraints` array here by mistake, this
+ * function itself still refuses to let another market's validated
+ * constraint reach `AutonomousDecisionContext` — a BTC cycle can never
+ * see a DOGE constraint through this path, regardless of what the caller
+ * fetched.
+ */
+export function filterValidConstraints(constraints: readonly ConstraintValidation[] | null, source: DecisionSource, symbol: string): readonly ConstraintValidation[] {
   if (constraints === null) return [];
-  return constraints.filter((constraint) => constraint.status === "VALID" && constraint.source === source);
+  return constraints.filter((constraint) => constraint.status === "VALID" && constraint.source === source && constraint.symbol === symbol);
 }
 
 /**
@@ -107,6 +117,6 @@ export function buildAutonomousDecisionContext(source: DecisionSource, symbol: s
     canonical,
     cognitive, // reference — already immutable-by-contract (8.0.5); never re-assembled here
     memory, // reference — already immutable-by-contract (8.1.3); never re-retrieved/re-ranked here
-    validConstraints: filterValidConstraints(constraints, source),
+    validConstraints: filterValidConstraints(constraints, source, symbol),
   };
 }

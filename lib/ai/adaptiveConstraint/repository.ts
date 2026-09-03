@@ -68,13 +68,14 @@ export async function getAdaptiveConstraintBasisCandidates(): Promise<readonly F
 
   const { data, error } = await learningDb
     .from("failure_pattern_candidates")
-    .select("source, evidence_tag, version, dominant_evaluation_class, occurrence_count, dominant_class_share, confidence, first_observed_at, last_observed_at, computed_at");
+    .select("source, symbol, evidence_tag, version, dominant_evaluation_class, occurrence_count, dominant_class_share, confidence, first_observed_at, last_observed_at, computed_at");
 
   if (error || !data) return [];
 
   return data.map((row): FailurePatternCandidate => ({
     version: row.version,
     source: row.source,
+    symbol: row.symbol,
     evidenceTag: row.evidence_tag,
     dominantEvaluationClass: row.dominant_evaluation_class,
     occurrenceCount: row.occurrence_count,
@@ -94,7 +95,7 @@ export type PersistAdaptiveConstraintsResult = { persisted: true; count: number 
 
 /**
  * Full recompute-and-upsert into `adaptive_constraints` on
- * `UNIQUE(source, evidence_tag)` — an existing row for the same group is
+ * `UNIQUE(source, symbol, evidence_tag)` — an existing row for the same group is
  * safely overwritten with the freshly-generated advisory constraint (not
  * merged, not incremented); a new group creates a new row. Safe
  * specifically because `generateAdaptiveConstraints()` is pure and holds
@@ -111,6 +112,7 @@ export async function persistAdaptiveConstraints(constraints: readonly AdaptiveC
 
   const rows = constraints.map((constraint) => ({
     source: constraint.source,
+    symbol: constraint.symbol,
     evidence_tag: constraint.evidenceTag,
     version: constraint.version,
     constraint_type: constraint.constraintType satisfies AdaptiveConstraintType,
@@ -122,7 +124,7 @@ export async function persistAdaptiveConstraints(constraints: readonly AdaptiveC
     generated_at: constraint.generatedAt,
   }));
 
-  const { error } = await learningDb.from("adaptive_constraints").upsert(rows, { onConflict: "source,evidence_tag" });
+  const { error } = await learningDb.from("adaptive_constraints").upsert(rows, { onConflict: "source,symbol,evidence_tag" });
 
   if (error) return { persisted: false, reason: "error", error: error.message };
   return { persisted: true, count: rows.length };

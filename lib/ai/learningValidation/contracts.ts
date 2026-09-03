@@ -87,6 +87,8 @@ export interface ConstraintValidationSignals {
 export interface ConstraintValidationWithoutTimestamp {
   readonly version: 1;
   readonly source: ConstraintValidationSource;
+  /** Phase 8.3.0.1 §7 — inherited verbatim from the originating AdaptiveConstraint.symbol. */
+  readonly symbol: string;
   readonly evidenceTag: ConstraintValidationEvidenceTag;
   readonly constraintType: ConstraintValidationConstraintType;
   readonly status: ConstraintValidationStatus;
@@ -108,7 +110,7 @@ export interface ConstraintValidationWithoutTimestamp {
  *
  * Like `adaptive_constraints` (and unlike append-only
  * `decision_evaluations`), this is AGGREGATE STATE for its
- * `(source, evidenceTag)` group — recompute-and-upsert is the correct and
+ * `(source, symbol, evidenceTag)` group — recompute-and-upsert is the correct and
  * only persistence model; see repository.ts. `validatedAt` is the "as of"
  * marker for the snapshot: because freshness/overfit signals can shift as
  * new evaluations accumulate upstream, a validation is only ever

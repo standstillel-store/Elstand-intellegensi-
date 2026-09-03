@@ -159,6 +159,12 @@ create table if not exists failure_pattern_candidates (
   -- Group identity — AI_SIGNAL and ELVOID_PRO_ORACLE are NEVER merged
   -- into the same group; single evidence tag only, never a combination.
   source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  -- Phase 8.3.0.1 §7 — SYMBOL ISOLATION. Added so one symbol's failure
+  -- patterns can never pool with, or influence, another symbol's
+  -- learning statistics. See the additive migration block below this
+  -- table for how an existing deployment (created before this column
+  -- existed) is safely upgraded without deleting historical rows.
+  symbol text not null,
   evidence_tag text not null,          -- one EvaluationEvidenceTag member — see lib/ai/decisionEvaluation/contracts.ts.
 
   version integer not null,
@@ -182,17 +188,52 @@ create table if not exists failure_pattern_candidates (
   computed_at timestamptz not null,        -- stamped once per recompute batch by repository.ts, shared across every candidate produced by that same recompute run. This IS the "last updated" marker for a row — no separate updated_at column, to avoid a second timestamp that a naive upsert could silently leave stale.
   created_at timestamptz not null default now(),
 
-  -- One row per (source, evidence_tag) group. A recompute UPSERTs this
-  -- key, safely replacing the previous aggregate for the same group.
-  unique (source, evidence_tag)
+  -- Phase 8.3.0.1 §7: one row per (source, symbol, evidence_tag) group —
+  -- widened from (source, evidence_tag) so a recompute UPSERT can never
+  -- pool two symbols' occurrences into the same aggregate row. See the
+  -- migration block below for how a pre-existing (source, evidence_tag)
+  -- unique constraint from before this phase is dropped in favor of this
+  -- one, on a deployment that already has this table.
+  unique (source, symbol, evidence_tag)
 );
 
 create index if not exists failure_pattern_candidates_source_idx on failure_pattern_candidates (source);
+create index if not exists failure_pattern_candidates_symbol_idx on failure_pattern_candidates (symbol);
 create index if not exists failure_pattern_candidates_computed_at_idx on failure_pattern_candidates (computed_at);
 
 alter table failure_pattern_candidates enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.3.0.1 §7 — additive migration for a deployment that already ran
+-- the Phase 8.1.2 `create table if not exists failure_pattern_candidates`
+-- above BEFORE the `symbol` column/constraint existed. `create table if
+-- not exists` is a no-op on such a deployment, so this block explicitly
+-- upgrades it in place. NEVER deletes historical rows — a backfill value
+-- is required (existing rows predate symbol-aware aggregation and cannot
+-- be retroactively attributed to a real symbol), so this migration marks
+-- them `'UNKNOWN'` rather than guessing, and the next
+-- `recomputeFailurePatterns()` run naturally replaces every `'UNKNOWN'`
+-- row with correctly symbol-scoped groups (old rows simply stop being
+-- upserted into, since no future observation ever has `symbol =
+-- 'UNKNOWN'`); a manual cleanup of leftover `'UNKNOWN'` rows once that
+-- has happened is optional, not required for correctness.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name = 'failure_pattern_candidates' and column_name = 'symbol'
+  ) then
+    alter table failure_pattern_candidates add column symbol text;
+    update failure_pattern_candidates set symbol = 'UNKNOWN' where symbol is null;
+    alter table failure_pattern_candidates alter column symbol set not null;
+    alter table failure_pattern_candidates drop constraint if exists failure_pattern_candidates_source_evidence_tag_key;
+    alter table failure_pattern_candidates add constraint failure_pattern_candidates_source_symbol_evidence_tag_key unique (source, symbol, evidence_tag);
+    create index if not exists failure_pattern_candidates_symbol_idx on failure_pattern_candidates (symbol);
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- Phase 8.1.4 — Adaptive Constraint Engine
@@ -228,6 +269,10 @@ create table if not exists adaptive_constraints (
   -- failure_pattern_candidates row. AI_SIGNAL and ELVOID_PRO_ORACLE are
   -- never merged into the same row; single evidence tag only.
   source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  -- Phase 8.3.0.1 §7 — SYMBOL ISOLATION, inherited verbatim from the
+  -- originating failure_pattern_candidates row. See that table's own
+  -- symbol column doc above.
+  symbol text not null,
   evidence_tag text not null,          -- one EvaluationEvidenceTag member, copied verbatim — see lib/ai/decisionEvaluation/contracts.ts.
 
   version integer not null,
@@ -253,18 +298,38 @@ create table if not exists adaptive_constraints (
   generated_at timestamptz not null,       -- stamped once per recompute batch by repository.ts, shared across every constraint produced by that same recompute run — same "no separate updated_at column" convention as failure_pattern_candidates.computed_at.
   created_at timestamptz not null default now(),
 
-  -- One row per (source, evidence_tag) group. A recompute UPSERTs this
-  -- key, safely replacing the previous advisory constraint for the same
-  -- group.
-  unique (source, evidence_tag)
+  -- Phase 8.3.0.1 §7: one row per (source, symbol, evidence_tag) group —
+  -- widened from (source, evidence_tag), mirroring
+  -- failure_pattern_candidates' own widened key above.
+  unique (source, symbol, evidence_tag)
 );
 
 create index if not exists adaptive_constraints_source_idx on adaptive_constraints (source);
+create index if not exists adaptive_constraints_symbol_idx on adaptive_constraints (symbol);
 create index if not exists adaptive_constraints_generated_at_idx on adaptive_constraints (generated_at);
 
 alter table adaptive_constraints enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.3.0.1 §7 — additive migration, same reasoning/UNKNOWN-backfill
+-- convention as failure_pattern_candidates' own migration block above.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name = 'adaptive_constraints' and column_name = 'symbol'
+  ) then
+    alter table adaptive_constraints add column symbol text;
+    update adaptive_constraints set symbol = 'UNKNOWN' where symbol is null;
+    alter table adaptive_constraints alter column symbol set not null;
+    alter table adaptive_constraints drop constraint if exists adaptive_constraints_source_evidence_tag_key;
+    alter table adaptive_constraints add constraint adaptive_constraints_source_symbol_evidence_tag_key unique (source, symbol, evidence_tag);
+    create index if not exists adaptive_constraints_symbol_idx on adaptive_constraints (symbol);
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- Phase 8.1.5 — Learning Validation
@@ -306,6 +371,9 @@ create table if not exists constraint_validations (
   -- adaptive_constraints row. AI_SIGNAL and ELVOID_PRO_ORACLE are never
   -- merged into the same row; single evidence tag only.
   source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  -- Phase 8.3.0.1 §7 — SYMBOL ISOLATION, inherited verbatim from the
+  -- originating adaptive_constraints row.
+  symbol text not null,
   evidence_tag text not null,          -- one EvaluationEvidenceTag member, copied verbatim — see lib/ai/decisionEvaluation/contracts.ts.
 
   version integer not null,
@@ -341,18 +409,40 @@ create table if not exists constraint_validations (
   validated_at timestamptz not null,       -- the "as of" instant this snapshot was computed against, stamped once per recompute batch by repository.ts, shared across every validation produced by that same recompute run. Freshness/overfit signals can decay after this instant — this column is what makes the row a snapshot rather than a permanently-current judgment.
   created_at timestamptz not null default now(),
 
-  -- One row per (source, evidence_tag) group. A recompute UPSERTs this
-  -- key, safely replacing the previous validation snapshot for the same
-  -- group.
-  unique (source, evidence_tag)
+  -- One row per (source, symbol, evidence_tag) group (Phase 8.3.0.1 §7 —
+  -- widened from (source, evidence_tag)). A recompute UPSERTs this key,
+  -- safely replacing the previous validation snapshot for the same group.
+  unique (source, symbol, evidence_tag)
 );
 
 create index if not exists constraint_validations_source_idx on constraint_validations (source);
+create index if not exists constraint_validations_symbol_idx on constraint_validations (symbol);
 create index if not exists constraint_validations_status_idx on constraint_validations (status);
 create index if not exists constraint_validations_validated_at_idx on constraint_validations (validated_at);
 
 alter table constraint_validations enable row level security;
 -- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.3.0.1 §7 — additive migration, same reasoning/UNKNOWN-backfill
+-- convention as failure_pattern_candidates'/adaptive_constraints' own
+-- migration blocks above.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name = 'constraint_validations' and column_name = 'symbol'
+  ) then
+    alter table constraint_validations add column symbol text;
+    update constraint_validations set symbol = 'UNKNOWN' where symbol is null;
+    alter table constraint_validations alter column symbol set not null;
+    alter table constraint_validations drop constraint if exists constraint_validations_source_evidence_tag_key;
+    alter table constraint_validations add constraint constraint_validations_source_symbol_evidence_tag_key unique (source, symbol, evidence_tag);
+    create index if not exists constraint_validations_symbol_idx on constraint_validations (symbol);
+  end if;
+end $$;
 -- table in this schema. Zero public/anon access.
 
 -- ---------------------------------------------------------------------------
@@ -504,5 +594,102 @@ values ('elvoid_pro_oracle_autonomous_cycle', false), ('elvoid_pro_oracle_learni
 on conflict (id) do nothing;
 
 alter table autonomous_runtime_lock enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.3.0.1 — Autonomous Intelligence Snapshot (Module 1)
+--
+-- Bounded, OBSERVATION-ONLY storage: exactly ONE row per (source, symbol),
+-- overwritten every autonomous cycle via upsert on the
+-- `autonomous_intelligence_snapshot_source_symbol_key` unique constraint.
+-- This is deliberately NOT an append-only history table (see decision_traces
+-- for the append-only trace record of the same cycles) — the AI Signal
+-- Intelligence UI reads the single latest row per symbol, nothing else.
+--
+-- AUTHORITY BOUNDARY (mirrors decision_traces' own header):
+--   - Every value here is a VERBATIM copy of an already-computed Phase 7/
+--     8.2.x field (OracleAssessment, ConfluenceResult, MacroIntelligenceContext,
+--     MarketImpactContext, DecisionMemoryResult, AutonomousDecisionEngineResult).
+--     No column here is scored, graded, or decided independently — this
+--     table cannot become a second decision authority because it never
+--     computes anything, only stores what `runAutonomousCycle()` already
+--     produced.
+--   - `decision` mirrors `decision_traces.outcome` for the SAME cycle
+--     (EXECUTE/WAIT/REJECT) — written by the same orchestrator call, from
+--     the same `effectiveDecision.decision` value, never re-derived.
+--   - Written for every `stage: "ASSESSED"` cycle regardless of decision —
+--     WAIT and REJECT are persisted exactly like EXECUTE (spec §15).
+--     A `stage: "NO_ASSESSMENT"` cycle (insufficient candle history, or an
+--     early exception) does NOT overwrite the last good snapshot — an
+--     honest "no fresh read this cycle" is preferred over erasing the most
+--     recent real assessment.
+create table if not exists autonomous_intelligence_snapshot (
+  id uuid primary key default gen_random_uuid(),
+
+  source text not null check (source in ('ELVOID_PRO_ORACLE')),
+  symbol text not null,
+
+  generated_at timestamptz not null,
+  decision text not null check (decision in ('EXECUTE', 'WAIT', 'REJECT')),
+  side text check (side in ('LONG', 'SHORT')),
+  grade text not null,
+  confidence numeric not null,
+  risk_status text not null check (risk_status in ('unavailable', 'valid', 'invalid')),
+
+  entry numeric,
+  take_profit numeric,
+  stop_loss numeric,
+  risk_reward numeric,
+
+  -- Phase 8.3.0.1 §6 (Mini Chart, Option A) — a small, bounded array of
+  -- real closing prices lifted verbatim from `OracleContext.candles`
+  -- (Binance real candles, already fetched once per symbol per
+  -- autonomous cycle by `assembleOracleContext()` — the SAME candles the
+  -- Oracle pipeline itself grades against). NEVER a second live market
+  -- request per UI card, NEVER decorative/fabricated data — jsonb array
+  -- of numbers, capped small (<=24 points) purely for a sparkline, not a
+  -- full OHLC chart. Null when fewer than 2 real candles were available
+  -- this cycle (never padded/interpolated to look fuller than it is).
+  sparkline jsonb,
+
+  -- Evidence strings, verbatim from ConfluenceResult.factors[].evidence for
+  -- the matching ConfluenceSource — joined with "; " when more than one
+  -- factor of that source fired. Null when no factor of that source
+  -- produced evidence this cycle (never fabricated as an empty string).
+  liquidity_evidence text,
+  structure_evidence text,
+  volume_evidence text,
+
+  -- Short, deterministic strings assembled from MacroIntelligenceContext /
+  -- MarketImpactContext fields verbatim (e.g. "EVENT_LIGHT / LOW") — never
+  -- a fabricated directional read (spec §6/§18).
+  macro_state text,
+  event_state text,
+
+  -- Verbatim from OracleAssessment.
+  reasoning_summary text,
+  invalidation text,
+
+  -- Deterministic, count-based description of DecisionMemoryResult for
+  -- this cycle (e.g. "2 pengalaman serupa, 1 pola kegagalan") — never a
+  -- fabricated narrative. Null when no memory context was available.
+  learning_influence text,
+
+  dedup_applied boolean not null default false,
+  execution_outcome text,
+  paper_trade_id text,
+
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists autonomous_intelligence_snapshot_source_symbol_key
+  on autonomous_intelligence_snapshot (source, symbol);
+create index if not exists autonomous_intelligence_snapshot_decision_idx
+  on autonomous_intelligence_snapshot (decision);
+create index if not exists autonomous_intelligence_snapshot_updated_at_idx
+  on autonomous_intelligence_snapshot (updated_at);
+
+alter table autonomous_intelligence_snapshot enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.

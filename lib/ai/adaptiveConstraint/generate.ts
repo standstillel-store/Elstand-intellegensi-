@@ -80,7 +80,7 @@ function selectConstraintType(candidate: FailurePatternCandidate): AdaptiveConst
  * `evidenceTag` are inherited verbatim, and — because
  * `failure_pattern_candidates` already enforces `UNIQUE(source,
  * evidence_tag)` — a well-formed input array naturally yields at most one
- * constraint per `(source, evidenceTag)` group with no additional
+ * constraint per `(source, symbol, evidenceTag)` group with no additional
  * dedup logic required here. `basis` is a straight, unmodified copy of
  * `occurrenceCount`, `dominantClassShare`, `firstObservedAt`, and
  * `lastObservedAt`, plus `confidence` copied into `statisticalConfidence`
@@ -90,6 +90,7 @@ export function generateAdaptiveConstraints(candidates: readonly FailurePatternC
   const generated: AdaptiveConstraintWithoutTimestamp[] = candidates.map((candidate) => ({
     version: 1,
     source: candidate.source,
+    symbol: candidate.symbol,
     evidenceTag: candidate.evidenceTag,
     constraintType: selectConstraintType(candidate),
     basis: {
@@ -103,7 +104,11 @@ export function generateAdaptiveConstraints(candidates: readonly FailurePatternC
 
   // Fixed, deterministic output order — never dependent on input array
   // order, matching detect.ts's own final-sort convention.
-  generated.sort((a, b) => (a.source === b.source ? a.evidenceTag.localeCompare(b.evidenceTag) : a.source.localeCompare(b.source)));
+  generated.sort((a, b) => {
+    if (a.source !== b.source) return a.source.localeCompare(b.source);
+    if (a.symbol !== b.symbol) return a.symbol.localeCompare(b.symbol);
+    return a.evidenceTag.localeCompare(b.evidenceTag);
+  });
 
   return generated;
 }

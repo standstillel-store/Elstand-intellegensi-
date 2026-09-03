@@ -28,6 +28,7 @@ function check(name: string, pass: boolean, detail: string) {
 function observation(overrides: Partial<FailurePatternObservationInput> = {}): FailurePatternObservationInput {
   return {
     source: "AI_SIGNAL",
+    symbol: "BTC",
     sourceSignalId: "sig-fixture-001",
     evaluationClass: "BAD_DECISION_BAD_OUTCOME",
     evidenceTags: ["HIGH_RISK_PRESENT"],
@@ -174,7 +175,7 @@ function expectedConfidence(occurrenceCount: number): number {
 {
   const rows = spanningDays(MIN_OCCURRENCE_COUNT);
   const [candidate] = detectFailurePatternCandidates(rows);
-  const expectedKeys = ["version", "source", "evidenceTag", "dominantEvaluationClass", "occurrenceCount", "dominantClassShare", "confidence", "firstObservedAt", "lastObservedAt"].sort();
+  const expectedKeys = ["version", "source", "symbol", "evidenceTag", "dominantEvaluationClass", "occurrenceCount", "dominantClassShare", "confidence", "firstObservedAt", "lastObservedAt"].sort();
   const actualKeys = Object.keys(candidate ?? {}).sort();
   check("9a. FailurePatternCandidateWithoutTimestamp has exactly its closed field set — no narrative/explanation/reason field exists to hold a causal claim", JSON.stringify(actualKeys) === JSON.stringify(expectedKeys), JSON.stringify(actualKeys));
 

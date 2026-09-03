@@ -10,9 +10,10 @@
 //
 // This file never re-implements or loosens Phase 8.1.2's pattern
 // qualification (MIN_OCCURRENCE_COUNT / temporal-spread / confidence cap)
-// — patterns are filtered here ONLY by `source` and, optionally,
-// `evidenceTags`; every other field on a `FailurePatternCandidate` passes
-// through completely unmodified.
+// — patterns are filtered here ONLY by `source`, `symbol` (Phase 8.3.0.1
+// §7 — mirrors the experience filter's own optional-but-applied
+// convention), and, optionally, `evidenceTags`; every other field on a
+// `FailurePatternCandidate` passes through completely unmodified.
 // ---------------------------------------------------------------------------
 
 import type { DecisionMemoryQuery, DecisionMemoryJoinedRow, DecisionMemoryResult, FailurePatternCandidate } from "./contracts";
@@ -45,10 +46,12 @@ import type { DecisionMemoryQuery, DecisionMemoryJoinedRow, DecisionMemoryResult
  * than `matchedExperiences`, and never contains an evaluation for a row
  * that didn't make the cut.
  *
- * Pattern filtering: `source` (mandatory) and, if provided, `evidenceTags`
- * (a pattern's single `evidenceTag` must be among the requested set) —
- * nothing else. Ranked by `confidence` (descending), then `evidenceTag`
- * (ascending) for determinism. Never capped by `limit`.
+ * Pattern filtering: `source` (mandatory), `symbol` (Phase 8.3.0.1 §7 —
+ * applied when the query provides one, same convention as the experience
+ * filter above), and, if provided, `evidenceTags` (a pattern's single
+ * `evidenceTag` must be among the requested set) — nothing else. Ranked
+ * by `confidence` (descending), then `evidenceTag` (ascending) for
+ * determinism. Never capped by `limit`.
  *
  * Mutates nothing: `joinedRows`, `patterns`, and every object reachable
  * from them are read-only inputs — every array produced here (`filter`,
@@ -92,6 +95,20 @@ export function retrieveDecisionMemory(query: DecisionMemoryQuery, joinedRows: r
 
   const matchedPatterns = patterns
     .filter((pattern) => pattern.source === query.source)
+    // Phase 8.3.0.1 §7 — SYMBOL ISOLATION. `FailurePatternCandidate` did
+    // not carry a `symbol` field at all when this file was first written
+    // (Phase 8.1.3) — pooling across every symbol was the only possible
+    // behavior then, not a deliberate cross-market-sharing design choice
+    // (no comment anywhere in this module ever asserted intentional
+    // cross-symbol pattern sharing). Now that `symbol` exists upstream
+    // (lib/ai/failurePatterns/contracts.ts), this mirrors the experience
+    // filter's own `query.symbol !== undefined` convention above — an
+    // explicit unscoped read (`query.symbol` omitted) is still possible
+    // for a future dashboard/debug consumer, but every real caller today
+    // (the orchestrator) already always supplies `symbol`, so in practice
+    // a BTC cycle's `matchedPatterns` can no longer include a DOGE/ETH
+    // aggregate.
+    .filter((pattern) => query.symbol === undefined || pattern.symbol === query.symbol)
     .filter((pattern) => requestedTags.length === 0 || requestedTags.includes(pattern.evidenceTag))
     .slice()
     .sort((a, b) => {

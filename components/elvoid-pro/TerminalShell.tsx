@@ -12,9 +12,10 @@ import { ComingSoonPanel } from "./Analytics/ComingSoonPanel";
 import { TradingOverviewPanel } from "./Intelligence/TradingOverviewPanel";
 import { NewsFeedPanel } from "./News/NewsFeedPanel";
 import { WhaleTrackerPanel } from "@/features/whale-tracker/components/WhaleTrackerPanel";
+import { AISignalIntelligencePanel } from "./AISignalIntelligence/AISignalIntelligencePanel";
 import type { ChartMode } from "./ChartEngine/chartModes";
 
-type ShellView = "terminal" | "whale-tracker";
+type ShellView = "terminal" | "whale-tracker" | "ai-signal-intelligence";
 
 const TF_TO_INTERVAL: Record<string, string> = {
   "1m": "1m",
@@ -47,6 +48,7 @@ export function TerminalShell() {
           [
             { key: "terminal", label: "Terminal" },
             { key: "whale-tracker", label: "Whale Tracker" },
+            { key: "ai-signal-intelligence", label: "AI Signal Intelligence" },
           ] as const
         ).map((tab) => (
           <button
@@ -61,7 +63,9 @@ export function TerminalShell() {
         ))}
       </div>
 
-      {view === "whale-tracker" ? (
+      {view === "ai-signal-intelligence" ? (
+        <AISignalIntelligencePanel />
+      ) : view === "whale-tracker" ? (
         // Fixed height + internal scroll only from sm: up. On mobile, the
         // stacked SummaryCards + wrapped FilterBar eat far more vertical
         // space than this budget assumes (they're single-row on desktop,
