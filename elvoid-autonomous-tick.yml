@@ -1,0 +1,62 @@
+name: ELVOID Autonomous Runtime Tick
+
+# ---------------------------------------------------------------------------
+# Phase 8.3.0.1, Module 3 — genuine background trigger, independent of the
+# browser tab.
+#
+# WHY THIS EXISTS: vercel.json's own cron entry for
+# `/api/elvoid-pro/autonomous/tick` runs once a day (`0 21 * * *`) — every
+# other cron route in this repo (app/api/binance/auto-trade/tick,
+# app/api/whale/indexer/run) documents in its own comments why: a
+# sub-daily Vercel Cron schedule requires a Vercel Pro plan, and this
+# repo's deploy configuration cannot assume that tier without breaking a
+# Hobby-plan deploy (Hobby rejects a `*/15 * * * *`-style schedule
+# outright). A once-a-day cron does NOT satisfy "autonomous intelligence
+# that keeps running while the browser is closed" (spec §8) — GitHub
+# Actions is used here instead specifically because it is a genuinely
+# server-side scheduler that works identically regardless of which
+# Vercel plan is deployed underneath, so it does not need to guess or
+# wait on that answer.
+#
+# This workflow does ONE thing: call the EXISTING, UNCHANGED
+# `GET /api/elvoid-pro/autonomous/tick` route on a schedule. It contains
+# no analysis logic, no decision logic, and no execution logic of its
+# own — `runAutonomousBatch()` (lib/ai/autonomousRuntime/batch.ts) remains
+# the single execution authority, with its own runtime lock
+# (lib/ai/autonomousRuntime/lock.ts) already making a client-tick /
+# cron overlap a safe no-op. This workflow is just one more caller of
+# that same lock-protected route — not a second autonomous pipeline.
+#
+# REQUIRED REPO SECRETS (Settings -> Secrets and variables -> Actions):
+#   ELVOID_PRO_BASE_URL  - e.g. https://your-deployment.vercel.app
+#   CRON_SECRET           - same value as the CRON_SECRET env var set on
+#                            the Vercel deployment (route.ts's own
+#                            isAuthorizedCron() check). If CRON_SECRET is
+#                            not set on the Vercel side, the route stays
+#                            open and this secret can be left empty.
+#
+# CADENCE: every 15 minutes. GitHub's own scheduler is best-effort and can
+# delay a queued run by several minutes on the free tier under load —
+# this is an accepted, honest limitation of GitHub Actions cron, not a
+# gap in this repo's own logic. Change the cron expression below to
+# adjust cadence.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call autonomous runtime tick
+        run: |
+          if [ -z "${{ secrets.ELVOID_PRO_BASE_URL }}" ]; then
+            echo "ELVOID_PRO_BASE_URL secret is not set — skipping. See this workflow file's header comment."
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.ELVOID_PRO_BASE_URL }}/api/elvoid-pro/autonomous/tick"
