@@ -58,12 +58,21 @@
 // ---------------------------------------------------------------------------
 
 import type { EconomicEvent } from "@/lib/types";
+// ADDITIVE (architecture correction, Phase A-F) — types backing the
+// optional clusters/economicRegime/riskEnvironment/dataCompleteness
+// fields on MacroIntelligenceContext, below. See that field group's own
+// comment for the naming/boundary rationale.
+import type { EconomicRegime, RiskEnvironment } from "@/lib/economicData/regime";
+import type { DataCompleteness } from "@/lib/economicData/types";
+import type { GrowthClusterState, InflationClusterState, LaborClusterState, MonetaryPolicyClusterState } from "@/lib/economicData/clusters";
 
 // Re-exported so analyze.ts/fixtures have a single import source for the
 // upstream shape they consume — this module does not define its own
 // competing calendar-entry type, matching `autonomous/contracts.ts`'s and
 // `decisionQualification/contracts.ts`'s own re-export convention.
 export type { EconomicEvent };
+export type { EconomicRegime, RiskEnvironment } from "@/lib/economicData/regime";
+export type { DataCompleteness } from "@/lib/economicData/types";
 
 /**
  * Proximity-bucket thresholds, in hours. `IMMINENT_HOURS` (6) mirrors
@@ -205,4 +214,38 @@ export interface MacroIntelligenceContext {
    * supports a directional call, without a breaking schema change.
    */
   readonly directionalBias: MacroDirectionalBias | null;
+
+  // -------------------------------------------------------------------
+  // ADDITIVE — lib/economicData/* integration (architecture correction,
+  // Phase A-F). All fields below are OPTIONAL and are never set by
+  // analyze.ts's pure analyzeMacroIntelligence() — they are populated only
+  // by the async lib/ai/macroIntelligence/composeMacroContext.ts, which
+  // merges this pure calendar-density context with the separate,
+  // DB/provider-backed lib/economicData cluster/regime pipeline. See
+  // composeMacroContext.ts's header for why this merge happens outside
+  // analyze.ts rather than inside it (analyze.ts's zero-DB/zero-network
+  // purity contract, restated above, is preserved untouched).
+  //
+  // NAMING: `economicRegime`/`riskEnvironment` are deliberately NOT named
+  // `macroRegime`/`eventRisk` — those two existing fields above remain
+  // calendar-density/event-proximity reads and are never reinterpreted.
+  // See lib/economicData/regime.ts's header for the full explanation.
+  // -------------------------------------------------------------------
+
+  /** Present only when the lib/economicData cluster pipeline ran (composeMacroContext.ts). Absent (not merely empty) when providers/storage were unavailable — an absent field is the honest "not computed", never a fabricated zero/default cluster set. */
+  readonly clusters?: MacroClustersSummary;
+  /** Economic-conditions regime derived from `clusters` — see lib/economicData/regime.ts. Distinct concept from `macroRegime` above. */
+  readonly economicRegime?: EconomicRegime;
+  /** Macro risk posture derived from `economicRegime` + policy/labor clusters — NOT an asset-price prediction. See lib/economicData/regime.ts's header. */
+  readonly riskEnvironment?: RiskEnvironment;
+  /** How much of the underlying actual/forecast/previous data was available when `clusters`/`economicRegime`/`riskEnvironment` were computed — DATA COMPLETENESS, never market-prediction confidence. See lib/economicData/interpret.ts's header for the same distinction restated where it's first computed. */
+  readonly dataCompleteness?: DataCompleteness;
+}
+
+/** Flat summary of the four cluster reads — narrow, closed-enum only, mirroring this file's own "no free-text/reason field" convention (drivers/explanation live on the richer ClusterResult in lib/economicData/clusters.ts, not duplicated here). */
+export interface MacroClustersSummary {
+  readonly inflation: InflationClusterState;
+  readonly labor: LaborClusterState;
+  readonly growth: GrowthClusterState;
+  readonly monetaryPolicy: MonetaryPolicyClusterState;
 }
