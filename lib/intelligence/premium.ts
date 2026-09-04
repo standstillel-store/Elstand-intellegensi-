@@ -13,6 +13,8 @@ import { getStocksReading, type StockQuote } from "./sources/stocks";
 import { getUs10Y, getFedFundsRate, getUsNationalDebt, type Us10yReading, type FedFundsReading, type UsDebtReading } from "@/lib/macro";
 import { getMacroEventsView, getNextHighImpactEvent } from "./macroEvents";
 import { deriveGlobalSentiment, type GlobalSentimentReading } from "./globalSentiment";
+import { composeMacroContext } from "@/lib/ai/macroIntelligence/composeMacroContext";
+import type { MacroIntelligenceContext } from "@/lib/ai/macroIntelligence/contracts";
 
 // ---------------------------------------------------------------------------
 // ELSTAND PREMIUM — single entry point for the whole dashboard (mirrors
@@ -112,8 +114,22 @@ export interface PremiumIntelligenceSnapshot {
   rugpullRisks: RugpullRisk[];
   rugpullRisksState: DataState;
   news: NewsItem[];
+  /** ADDITIVE (Phase G) — the same MacroIntelligenceContext produced by lib/ai/macroIntelligence/composeMacroContext.ts (reused, never recomputed here — this file is an integration consumer, not a calculation engine). "real" when the cluster/regime pipeline had usable economic data (dataCompleteness !== "UNAVAILABLE"), "proxy" when only the calendar-density fields (macroRegime/eventRisk) are populated (economic data not yet ingested — see lib/economicData/ingest.ts), "unavailable" only if composition failed outright. */
+  macroIntelligence: Reading<MacroIntelligenceContext>;
   /** Footer strip — which upstream providers actually returned data this load, so a missing key shows up at a glance instead of a silently-empty card. */
   sources: { label: string; state: DataState }[];
+}
+
+function macroIntelligenceReading(ctx: MacroIntelligenceContext | undefined): Reading<MacroIntelligenceContext> {
+  if (!ctx) return { state: "unavailable" };
+  if (ctx.dataCompleteness && ctx.dataCompleteness !== "UNAVAILABLE") {
+    return { state: "real", data: ctx };
+  }
+  return {
+    state: "proxy",
+    data: ctx,
+    note: "Economic cluster/regime data not yet ingested — showing calendar-density signals only. See lib/economicData/ingest.ts.",
+  };
 }
 
 export async function getPremiumIntelligenceSnapshot(): Promise<PremiumIntelligenceSnapshot> {
@@ -133,6 +149,18 @@ export async function getPremiumIntelligenceSnapshot(): Promise<PremiumIntellige
       logged("premium:gtNew", getNewPools(), []),
       logged("premium:funding", getFundingSnapshot(), []),
     ]);
+
+  // ADDITIVE (Phase G) — depends on `calendar` above, so it runs after that
+  // Promise.all rather than inside it; still isolated via logged() so a
+  // macro-composition failure never affects any other field in this
+  // snapshot (composeMacroContext() is itself designed to never throw —
+  // this is the explicit belt-and-suspenders guarantee, same as
+  // context.ts's try/catch around the same call).
+  const macroIntelligenceCtx = await logged(
+    "premium:macroIntelligence",
+    composeMacroContext({ asOf: new Date().toISOString(), calendar }),
+    undefined
+  );
 
   const priceBySymbol: Record<string, number> = {};
   for (const m of markets) priceBySymbol[m.symbol.toLowerCase()] = m.current_price;
@@ -229,6 +257,7 @@ export async function getPremiumIntelligenceSnapshot(): Promise<PremiumIntellige
     rugpullRisks,
     rugpullRisksState: pools.length ? "real" : "unavailable",
     news,
+    macroIntelligence: macroIntelligenceReading(macroIntelligenceCtx),
     sources: [
       { label: "CoinGecko", state: markets.length ? "real" : "unavailable" },
       { label: "FRED (10Y / Fed Funds)", state: us10y || fedFunds ? "real" : "unavailable" },
@@ -240,6 +269,7 @@ export async function getPremiumIntelligenceSnapshot(): Promise<PremiumIntellige
       { label: "Alchemy (Whales)", state: whales.length ? "real" : "unavailable" },
       { label: "News", state: news.length ? "real" : "unavailable" },
       { label: "Fear & Greed", state: fearGreed ? "real" : "unavailable" },
+      { label: "ELVOID Macro Intelligence", state: macroIntelligenceReading(macroIntelligenceCtx).state },
     ],
   };
 }

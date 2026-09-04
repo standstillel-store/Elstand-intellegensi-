@@ -112,6 +112,8 @@ export interface MarketIntelligenceContext {
   /** Matches getNextHighImpactEvent()'s own return shape (lib/intelligence/macroEvents.ts) — no country/date/impact fields exist on it, only these two. */
   nextHighImpactEvent?: { title: string; hoursAway: number } | null;
   topMovers?: { symbol: string; change24h: number }[];
+  /** ADDITIVE (Phase G) — the same MacroIntelligenceContext produced by lib/ai/macroIntelligence/composeMacroContext.ts, reused as-is rather than recomputed here. Optional and may be absent if macro composition failed — see buildMarketIntelligenceContext()'s try/catch; its absence never blocks the rest of this context from being built. */
+  macroIntelligence?: import("@/lib/ai/macroIntelligence/contracts").MacroIntelligenceContext;
 }
 export interface AiMarketIntelligenceCategory {
   category: string;

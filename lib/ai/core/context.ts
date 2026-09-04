@@ -6,6 +6,7 @@ import { getGoldReading } from "@/lib/intelligence/sources/gold";
 import { getStocksReading } from "@/lib/intelligence/sources/stocks";
 import { getNextHighImpactEvent } from "@/lib/intelligence/macroEvents";
 import { isRelevantAsset } from "@/lib/asset-filters";
+import { composeMacroContext } from "@/lib/ai/macroIntelligence/composeMacroContext";
 import type { MarketIntelligenceContext } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,21 @@ export async function buildMarketIntelligenceContext(): Promise<MarketIntelligen
     getInstitutionalFlowData(),
   ]);
   const nextHighImpact = getNextHighImpactEvent(calendar);
+
+  // ADDITIVE (Phase G) — reuses the exact same MacroIntelligenceContext the
+  // dashboard's Reading<> gets (see lib/intelligence/premium.ts), never a
+  // second/duplicate macro pipeline. Wrapped so a macro-composition failure
+  // (provider down, Supabase unreachable, etc.) can never break the rest of
+  // ELVOID AI's context assembly — composeMacroContext() is itself designed
+  // to never throw, but this try/catch is the "must never break existing
+  // ELVOID AI context assembly" guarantee made explicit rather than assumed.
+  let macroIntelligence: MarketIntelligenceContext["macroIntelligence"];
+  try {
+    macroIntelligence = await composeMacroContext({ asOf: new Date().toISOString(), calendar });
+  } catch (err) {
+    console.error(`[ai/core/context] macroIntelligence composition failed: ${err instanceof Error ? err.message : err}`);
+    macroIntelligence = undefined;
+  }
   const stocksChangePct = stocks?.indices.length
     ? stocks.indices.reduce((s, i) => s + (i.changePct ?? 0), 0) / stocks.indices.length
     : undefined;
@@ -90,6 +106,7 @@ export async function buildMarketIntelligenceContext(): Promise<MarketIntelligen
     sentimentConfidence: sentiment.confidence,
     nextHighImpactEvent: nextHighImpact ?? null,
     topMovers,
+    macroIntelligence,
   };
   return ctx;
 }
