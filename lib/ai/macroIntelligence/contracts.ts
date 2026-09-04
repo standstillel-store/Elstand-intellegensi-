@@ -65,6 +65,9 @@ import type { EconomicEvent } from "@/lib/types";
 import type { EconomicRegime, RiskEnvironment } from "@/lib/economicData/regime";
 import type { DataCompleteness } from "@/lib/economicData/types";
 import type { GrowthClusterState, InflationClusterState, LaborClusterState, MonetaryPolicyClusterState } from "@/lib/economicData/clusters";
+import type { EconomicRelease } from "@/lib/economicData/types";
+import type { IndicatorInterpretation } from "@/lib/economicData/interpret";
+import type { EmploymentCompositeSignal } from "@/lib/economicData/employmentComposite";
 
 // Re-exported so analyze.ts/fixtures have a single import source for the
 // upstream shape they consume — this module does not define its own
@@ -240,12 +243,54 @@ export interface MacroIntelligenceContext {
   readonly riskEnvironment?: RiskEnvironment;
   /** How much of the underlying actual/forecast/previous data was available when `clusters`/`economicRegime`/`riskEnvironment` were computed — DATA COMPLETENESS, never market-prediction confidence. See lib/economicData/interpret.ts's header for the same distinction restated where it's first computed. */
   readonly dataCompleteness?: DataCompleteness;
+
+  // -------------------------------------------------------------------
+  // ADDITIVE — Phase H (UI). The `clusters` field above is deliberately a
+  // closed-enum summary only (this file's own "no free-text field"
+  // convention, restated in MacroClustersSummary's comment). The UI
+  // (components/dashboard/premium/macro/*.tsx) legitimately needs more
+  // than a bare state to render an honest, non-empty screen — recent
+  // releases for the event table, and short evidence strings for why
+  // each cluster reads the way it does. Rather than have the UI recompute
+  // any of this (which Phase H's own instructions forbid — the UI must
+  // stay read-only over this pipeline), composeMacroContext.ts already
+  // computes all of it internally (interpret.ts/clusters.ts/
+  // employmentComposite.ts, all UNCHANGED) and simply also surfaces it
+  // here instead of discarding it. No calculation logic changed to add
+  // these fields — see the Phase H final report's "unavoidable
+  // integration defect" section for the full explanation.
+  //
+  // Every string below is a template built from already-computed closed
+  // enums (interpret.ts::buildExplanation(), the same deterministic-
+  // template philosophy as GlobalRiskRegimePanel.tsx's summarize()) —
+  // never LLM output, never a fabricated number.
+  // -------------------------------------------------------------------
+
+  /** Latest release + its interpretation for every indicator this pass tracks (inflation/labor/growth clusters' member indicators). Empty array (not absent) when the cluster pipeline ran but no releases were found in storage — absent entirely only when composition didn't run at all. */
+  readonly recentReleases?: readonly EconomicReleaseWithInterpretation[];
+  /** Per-cluster evidence strings — each contributing indicator's own `interpret.ts` explanation, deduplicated. Empty array for a cluster with no usable evidence yet (renders as "no evidence available" in the UI, never fabricated). */
+  readonly clusterEvidence?: MacroClusterEvidence;
+  /** The employment composite (NFP + Unemployment + AHE) — surfaced separately from `clusters.labor` because it explains WHY the labor cluster reads the way it does, same evidence-not-just-verdict reasoning as `clusterEvidence`. */
+  readonly employmentSummary?: { readonly signal: EmploymentCompositeSignal; readonly explanation: string };
 }
 
-/** Flat summary of the four cluster reads — narrow, closed-enum only, mirroring this file's own "no free-text/reason field" convention (drivers/explanation live on the richer ClusterResult in lib/economicData/clusters.ts, not duplicated here). */
+/** Flat summary of the four cluster reads — narrow, closed-enum only, mirroring this file's own "no free-text/reason field" convention (drivers/explanation live on the richer ClusterResult in lib/economicData/clusters.ts, not duplicated here — the UI-facing `clusterEvidence` field above is a deliberate, separately-considered exception for display purposes only, not a reversal of this convention). */
 export interface MacroClustersSummary {
   readonly inflation: InflationClusterState;
   readonly labor: LaborClusterState;
   readonly growth: GrowthClusterState;
   readonly monetaryPolicy: MonetaryPolicyClusterState;
+}
+
+/** One release + its deterministic interpretation, paired for UI display so components/dashboard/premium/macro/*.tsx never needs to import interpret.ts and recompute anything. */
+export interface EconomicReleaseWithInterpretation {
+  readonly release: EconomicRelease;
+  readonly interpretation: IndicatorInterpretation;
+}
+
+export interface MacroClusterEvidence {
+  readonly inflation: readonly string[];
+  readonly labor: readonly string[];
+  readonly growth: readonly string[];
+  readonly monetaryPolicy: readonly string[];
 }

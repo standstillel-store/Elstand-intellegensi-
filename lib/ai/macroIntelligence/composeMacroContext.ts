@@ -25,7 +25,7 @@
 // ---------------------------------------------------------------------------
 
 import { analyzeMacroIntelligence } from "./analyze";
-import type { MacroClustersSummary, MacroIntelligenceContext, MacroIntelligenceInput } from "./contracts";
+import type { EconomicReleaseWithInterpretation, MacroClusterEvidence, MacroClustersSummary, MacroIntelligenceContext, MacroIntelligenceInput } from "./contracts";
 import { getLatestRelease } from "@/lib/economicData/repository";
 import { interpretRelease, type IndicatorInterpretation } from "@/lib/economicData/interpret";
 import { buildEmploymentComposite } from "@/lib/economicData/employmentComposite";
@@ -39,9 +39,10 @@ const LABOR_INDICATORS: CanonicalIndicatorId[] = ["NFP", "UNEMPLOYMENT_RATE", "A
 const GROWTH_INDICATORS: CanonicalIndicatorId[] = ["REAL_GDP_QOQ", "RETAIL_SALES_HEADLINE", "DURABLE_GOODS_ORDERS", "PMI_MANUFACTURING", "PMI_SERVICES"];
 const COUNTRY = "US"; // this pass's indicator set is entirely US-focused, matching the Alpha Vantage function set in providers/alphaVantageProvider.ts
 
-async function interpretMany(indicatorIds: CanonicalIndicatorId[], country: string): Promise<IndicatorInterpretation[]> {
+/** Fetches + interprets, but (Phase H addition) keeps the release paired with its interpretation rather than discarding it — the UI's Recent Economic Events table (EventSelector.tsx) needs the raw actual/forecast/previous, not just the derived surprise/momentum enums. */
+async function interpretManyPaired(indicatorIds: CanonicalIndicatorId[], country: string): Promise<EconomicReleaseWithInterpretation[]> {
   const releases = await Promise.all(indicatorIds.map((id) => getLatestRelease(id, country)));
-  return releases.filter((r): r is EconomicRelease => r !== undefined).map(interpretRelease);
+  return releases.filter((r): r is EconomicRelease => r !== undefined).map((release) => ({ release, interpretation: interpretRelease(release) }));
 }
 
 function overallCompleteness(interpretations: IndicatorInterpretation[]): DataCompleteness {
@@ -52,6 +53,15 @@ function overallCompleteness(interpretations: IndicatorInterpretation[]): DataCo
   if (avg >= 1.5) return "MEDIUM";
   if (avg > 0) return "LIMITED";
   return "UNAVAILABLE";
+}
+
+/** Deduplicated, non-empty explanation strings from a cluster's own interpretations — the evidence list the UI shows, sourced verbatim from interpret.ts's already-deterministic templates (no new text generation). */
+function evidenceFor(interpretations: IndicatorInterpretation[]): string[] {
+  const seen = new Set<string>();
+  for (const i of interpretations) {
+    if (i.explanation) seen.add(i.explanation);
+  }
+  return [...seen];
 }
 
 export interface ComposeMacroContextOptions {
@@ -75,16 +85,22 @@ export async function composeMacroContext(input: MacroIntelligenceInput, options
   const base = analyzeMacroIntelligence(input);
   const country = options.country ?? COUNTRY;
 
-  const inflationInterpretations = options.releaseOverrides?.inflation
-    ? options.releaseOverrides.inflation.map(interpretRelease)
-    : await interpretMany(INFLATION_INDICATORS, country);
+  const inflationPairs = options.releaseOverrides?.inflation
+    ? options.releaseOverrides.inflation.map((release) => ({ release, interpretation: interpretRelease(release) }))
+    : await interpretManyPaired(INFLATION_INDICATORS, country);
 
   const laborReleases = options.releaseOverrides?.labor;
-  const laborInterpretations = laborReleases ? laborReleases.map(interpretRelease) : await interpretMany(LABOR_INDICATORS, country);
+  const laborPairs = laborReleases
+    ? laborReleases.map((release) => ({ release, interpretation: interpretRelease(release) }))
+    : await interpretManyPaired(LABOR_INDICATORS, country);
 
-  const growthInterpretations = options.releaseOverrides?.growth
-    ? options.releaseOverrides.growth.map(interpretRelease)
-    : await interpretMany(GROWTH_INDICATORS, country);
+  const growthPairs = options.releaseOverrides?.growth
+    ? options.releaseOverrides.growth.map((release) => ({ release, interpretation: interpretRelease(release) }))
+    : await interpretManyPaired(GROWTH_INDICATORS, country);
+
+  const inflationInterpretations = inflationPairs.map((p) => p.interpretation);
+  const laborInterpretations = laborPairs.map((p) => p.interpretation);
+  const growthInterpretations = growthPairs.map((p) => p.interpretation);
 
   const nfp = laborInterpretations.find((i) => i.indicatorId === "NFP");
   const unemploymentRate = laborInterpretations.find((i) => i.indicatorId === "UNEMPLOYMENT_RATE");
@@ -105,11 +121,21 @@ export async function composeMacroContext(input: MacroIntelligenceInput, options
     monetaryPolicy: monetaryPolicyCluster.state,
   };
 
+  const clusterEvidence: MacroClusterEvidence = {
+    inflation: evidenceFor(inflationInterpretations),
+    labor: evidenceFor(laborInterpretations),
+    growth: evidenceFor(growthInterpretations),
+    monetaryPolicy: evidenceFor([...inflationInterpretations, ...laborInterpretations, ...growthInterpretations]),
+  };
+
   return {
     ...base,
     clusters,
     economicRegime: regime.economicRegime,
     riskEnvironment: regime.riskEnvironment,
     dataCompleteness: overallCompleteness([...inflationInterpretations, ...laborInterpretations, ...growthInterpretations]),
+    recentReleases: [...inflationPairs, ...laborPairs, ...growthPairs],
+    clusterEvidence,
+    employmentSummary: { signal: employmentComposite.signal, explanation: employmentComposite.explanation },
   };
 }

@@ -6,6 +6,7 @@ import { FuturesMicrostructurePanel } from "@/components/dashboard/premium/futur
 import { AltcoinScreenerPro } from "@/components/dashboard/premium/AltcoinScreenerPro";
 import { FomcPanel } from "@/components/dashboard/premium/FomcPanel";
 import { MacroNewsPanel } from "@/components/dashboard/MacroNewsPanel";
+import { EconomicIntelligenceEngine } from "@/components/dashboard/premium/macro/EconomicIntelligenceEngine";
 import { getPremiumIntelligenceSnapshot } from "@/lib/intelligence/premium";
 import { MembershipLocked } from "@/components/membership/MembershipLocked";
 import { getMembershipStatus } from "@/lib/membership";
@@ -69,6 +70,8 @@ export default async function ElstandPremiumPage() {
           <MacroNewsPanel news={snapshot.news} />
         </div>
       </section>
+
+      <EconomicIntelligenceEngine macroIntelligence={snapshot.macroIntelligence} />
 
       <section className="panel flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">ELSTAND PREMIUM · Data Sources</span>
