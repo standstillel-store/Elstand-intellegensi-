@@ -1368,3 +1368,33 @@ body {
 /* prefers-reduced-motion is already handled globally (see the blanket
    `*` rule earlier in this file) — every @keyframes animation added above
    is automatically covered, no extra rule needed here. */
+
+/* ELVOID Cognitive Visualization (Phase 8.3.1) — edge/node pulse. CSS-only
+   animations, so the blanket prefers-reduced-motion rule above already
+   neutralizes them; components/ai-performance/cognitive/CognitiveGraph.tsx
+   additionally gates the classNames on usePrefersReducedMotion() so a
+   reduced-motion user never even receives the animated className. */
+@keyframes cognitiveEdgeFlow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.cognitive-edge-active {
+  stroke-dasharray: 6 6;
+  animation: cognitiveEdgeFlow 1.1s linear infinite;
+}
+@keyframes cognitiveNodePing {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+.cognitive-node-ping {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: cognitiveNodePing 2.2s ease-out infinite;
+}

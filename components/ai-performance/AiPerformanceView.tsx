@@ -4,6 +4,7 @@ import { LayoutDashboard, ClipboardList, Wallet, Briefcase, LineChart } from "lu
 import { StatCard } from "@/components/StatCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { EquityCurveChart } from "@/components/paper-trader/EquityCurveChart";
+import { CognitiveMapSection } from "@/components/ai-performance/cognitive/CognitiveMapSection";
 import { Disclaimer } from "@/components/Disclaimer";
 import { formatUsd } from "@/lib/format";
 import type { AiStatistics, PaperWallet } from "@/lib/elvoid/types";
@@ -161,6 +162,9 @@ export function AiPerformanceView({
           )}
         </div>
       </div>
+
+      {/* ===== ELVOID COGNITIVE VISUALIZATION (Phase 8.3.1) — additive, real-data-only ===== */}
+      <CognitiveMapSection />
 
       {/* ===== RECENT AI TRADES (from ai_journal x ai_signals — real data) ===== */}
       <div id="ai-journal" className="glow-card scroll-mt-20 p-4">
