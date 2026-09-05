@@ -69,6 +69,7 @@ import { executeAutonomousPaperTrade } from "@/lib/ai/autonomousExecution/execut
 import { classifyAutonomousLearningLifecycle } from "@/lib/ai/autonomousLearning/lifecycle";
 import { buildAutonomousSetupIdentity, getLastExecutedSetup, isDuplicateSetup, recordExecutedSetup } from "./dedup";
 import { upsertAutonomousIntelligenceSnapshot } from "@/lib/ai/autonomousSnapshot/repository";
+import { persistCognitiveTrace } from "@/lib/ai/cognitiveTrace/repository";
 import type { EconomicEvent } from "@/lib/ai/macroIntelligence/contracts";
 import type { NewsItem } from "@/lib/ai/eventImpact/contracts";
 import type { AutonomousDecisionEngineResult } from "@/lib/ai/autonomousDecision/contracts";
@@ -130,9 +131,45 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   try {
     context = await assembleOracleContext(symbol, interval);
     if (context.candles.length < 30) {
+      // Phase 8.3.2 — a NO_ASSESSMENT cycle is still a real cycle attempt;
+      // record it (INPUT stage only) rather than leaving no trace at all.
+      await persistCognitiveTrace({
+        source: AUTONOMOUS_SOURCE,
+        symbol,
+        cycleAt: asOf,
+        input: { interval, candleCount: context.candles.length, currentPrice: context.currentPrice ?? null, sufficientHistory: false, insufficientReason: `Candle history untuk ${symbol} tidak cukup untuk analisis Oracle.` },
+        analysis: null,
+        analysisAt: null,
+        evidence: null,
+        evidenceAt: null,
+        conflict: null,
+        conflictAt: null,
+        decision: null,
+        decisionAt: null,
+        execution: null,
+        executionAt: null,
+      }).catch(() => {});
       return { version: 1, symbol, generatedAt: asOf, stage: "NO_ASSESSMENT", decision: null, dedupApplied: false, executionOutcome: null, paperTradeId: null, learningLifecycleStatus: null, error: `Candle history untuk ${symbol} tidak cukup untuk analisis Oracle.` };
     }
   } catch (err) {
+    // Phase 8.3.2 — same rationale as the insufficient-history branch above:
+    // this cycle attempt genuinely happened and is worth an honest record.
+    await persistCognitiveTrace({
+      source: AUTONOMOUS_SOURCE,
+      symbol,
+      cycleAt: asOf,
+      input: { interval, candleCount: 0, currentPrice: null, sufficientHistory: false, insufficientReason: err instanceof Error ? err.message : String(err) },
+      analysis: null,
+      analysisAt: null,
+      evidence: null,
+      evidenceAt: null,
+      conflict: null,
+      conflictAt: null,
+      decision: null,
+      decisionAt: null,
+      execution: null,
+      executionAt: null,
+    }).catch(() => {});
     return { version: 1, symbol, generatedAt: asOf, stage: "NO_ASSESSMENT", decision: null, dedupApplied: false, executionOutcome: null, paperTradeId: null, learningLifecycleStatus: null, error: err instanceof Error ? err.message : String(err) };
   }
 
@@ -140,6 +177,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   const dominantSide = confluence.dominantSide === "NEUTRAL" ? null : confluence.dominantSide;
   const risk = buildOracleRiskPlan(context, dominantSide);
   const assessment = gradeConfluence(confluence, risk ?? undefined);
+  const analysisAt = nowIso(); // Phase 8.3.2 — real instant the canonical assessment resolved this cycle.
 
   // --- Step 2: Phase 7.2-7.9 / 8.0.x context layer — defensive, exactly mirroring the oracle route. ---
   const mtf = await buildMtfContext(symbol, interval, context.candles, context.currentPrice).catch(() => null);
@@ -164,6 +202,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   } catch {
     scenarios = null;
   }
+  const evidenceAt = nowIso(); // Phase 8.3.2 — real instant the mtf/regime/liquidity/scenario block finished this cycle.
 
   let contradictions: ReturnType<typeof classifyContradictions> | null = null;
   try {
@@ -213,6 +252,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   } catch {
     cognitiveConflictInternal = null;
   }
+  const conflictAt = nowIso(); // Phase 8.3.2 — real instant resolveCognitiveConflict() returned this cycle.
 
   let decisionContext: ReturnType<typeof buildDecisionContext> | null = null;
   try {
@@ -260,6 +300,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
       effectiveDecision = { ...decision, decision: "WAIT" };
     }
   }
+  const decisionAt = nowIso(); // Phase 8.3.2 — real instant this cycle's effective (post-dedup) decision was finalized.
 
   // --- Step 7 (Phase 8.2.7): execute or safely no-op; persists the decision trace internally for every outcome. ---
   const execution = await executeAutonomousPaperTrade({
@@ -269,6 +310,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     confluence,
     learningContext,
   });
+  const executionAt = nowIso(); // Phase 8.3.2 — real instant executeAutonomousPaperTrade() resolved this cycle.
 
   if (execution.outcome === "EXECUTED" && candidateSetupIdentity) {
     await recordExecutedSetup(AUTONOMOUS_SOURCE, symbol, candidateSetupIdentity, execution.paperTradeId).catch(() => {});
@@ -308,6 +350,38 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     dedupApplied,
     executionOutcome: execution.outcome,
     paperTradeId: execution.paperTradeId,
+  }).catch(() => {});
+
+  // --- Step 10 (Phase 8.3.2): persist this cycle's append-only Cognitive
+  // Trace — INPUT/ANALYSIS/EVIDENCE/CONFLICT/DECISION/EXECUTION, each a
+  // verbatim copy of a value already computed in steps 1-7 above,
+  // timestamped at the real instant this cycle reached that stage.
+  // OUTCOME/LEARNING are deliberately not written here — see
+  // lib/ai/cognitiveTrace/contracts.ts. Best-effort, exactly like step 9 —
+  // a Learning DB outage here can never fail this cycle. ---
+  await persistCognitiveTrace({
+    source: AUTONOMOUS_SOURCE,
+    symbol,
+    cycleAt: asOf,
+    input: { interval, candleCount: context.candles.length, currentPrice: context.currentPrice ?? null, sufficientHistory: true, insufficientReason: null },
+    analysis: { dominantSide, grade: assessment.grade, confidence: assessment.confidence, riskStatus: assessment.riskStatus, riskPlanPresent: risk !== null },
+    analysisAt,
+    evidence: {
+      liquidityEvidence: evidenceForSource(confluence.factors, "liquidity"),
+      structureEvidence: evidenceForSource(confluence.factors, "market_structure"),
+      volumeEvidence: evidenceForSource(confluence.factors, "footprint"),
+      mtfAvailable: mtf !== null,
+      regimeAvailable: regime !== null,
+      scenariosAvailable: scenarios !== null,
+      liquidityOrderFlowAvailable: liquidityOrderFlow !== null,
+    },
+    evidenceAt,
+    conflict: cognitiveConflictInternal,
+    conflictAt,
+    decision: { decision: effectiveDecision.decision, side: assessment.side, dedupApplied },
+    decisionAt,
+    execution: { outcome: execution.outcome, paperTradeId: execution.paperTradeId, error: execution.error },
+    executionAt,
   }).catch(() => {});
 
   return {

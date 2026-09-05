@@ -697,3 +697,59 @@ create index if not exists autonomous_intelligence_snapshot_updated_at_idx
 alter table autonomous_intelligence_snapshot enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- ELVOID Learning Database — Phase 8.3.2 addition: Cognitive Trace
+--
+-- Append-only, ONE ROW PER AUTONOMOUS CYCLE ATTEMPT (including
+-- NO_ASSESSMENT cycles) — see lib/ai/cognitiveTrace/contracts.ts for the
+-- full architecture/authority boundary. Distinct from both tables above:
+--   - decision_traces (8.2.1): one terminal-outcome row, with conflict
+--     narrowed to a single enum value — no reasons/contributingFactors.
+--   - autonomous_intelligence_snapshot (8.3.0.1): one LATEST-STATE row per
+--     symbol, upserted/overwritten every cycle — explicitly not history.
+--
+-- Immutable: INSERT-only. No UPDATE path exists in
+-- lib/ai/cognitiveTrace/repository.ts. `analysis`/`evidence`/`conflict`/
+-- `decision`/`execution` and their *_at timestamps are null together only
+-- on a NO_ASSESSMENT cycle — never a fabricated empty object standing in
+-- for a stage that never ran. OUTCOME/LEARNING are deliberately not
+-- columns here — see the module header for why.
+-- ---------------------------------------------------------------------------
+create table if not exists cognitive_trace (
+  id uuid primary key default gen_random_uuid(),
+
+  source text not null check (source in ('ELVOID_PRO_ORACLE')),
+  symbol text not null,
+  cycle_at timestamptz not null,
+
+  -- Always present — even a NO_ASSESSMENT cycle reached this stage.
+  input jsonb not null,
+
+  -- The remaining five stages are null together only on a NO_ASSESSMENT
+  -- cycle (insufficient candle history, or an exception in step 1 of
+  -- runAutonomousCycle()).
+  analysis jsonb,
+  analysis_at timestamptz,
+  evidence jsonb,
+  evidence_at timestamptz,
+  -- Full CognitiveConflictState (state + reasons + contributingFactors),
+  -- verbatim from resolveCognitiveConflict() — never the narrowed enum
+  -- decision_traces.snapshot stores.
+  conflict jsonb,
+  conflict_at timestamptz,
+  decision jsonb,
+  decision_at timestamptz,
+  execution jsonb,
+  execution_at timestamptz,
+
+  created_at timestamptz not null default now()
+);
+
+create index if not exists cognitive_trace_symbol_idx on cognitive_trace (symbol);
+create index if not exists cognitive_trace_cycle_at_idx on cognitive_trace (cycle_at);
+create index if not exists cognitive_trace_source_idx on cognitive_trace (source);
+
+alter table cognitive_trace enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
