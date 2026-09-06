@@ -68,6 +68,7 @@ function trace(overrides: Partial<CognitiveTraceRecord>): CognitiveTraceRecord {
     evidenceAt: null,
     conflict: null,
     conflictAt: null,
+    contradictions: null,
     decision: null,
     decisionAt: null,
     execution: null,

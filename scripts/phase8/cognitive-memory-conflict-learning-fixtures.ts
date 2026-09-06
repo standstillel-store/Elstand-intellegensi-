@@ -46,7 +46,7 @@ function trace(overrides: Partial<CognitiveTraceRecord> = {}): CognitiveTraceRec
     contradictions: [],
     decision: { decision: "WAIT", side: "LONG", dedupApplied: false },
     decisionAt: now,
-    execution: { outcome: "SKIPPED", paperTradeId: null, error: null },
+    execution: { outcome: "SKIPPED_WAIT", paperTradeId: null, error: null },
     executionAt: now,
     createdAt: now,
     ...overrides,
@@ -133,7 +133,7 @@ function emptyMemory(): DecisionMemoryResult {
       version: 1,
       source: "ELVOID_PRO_ORACLE",
       symbol: "BTCUSDT",
-      evidenceTag: "liquidity",
+      evidenceTag: "HIGH_RISK_PRESENT",
       constraintType: "INCREASE_CAUTION",
       status: "VALID",
       signals: { sampleSizeAdequate: true, withinFreshnessWindow: true, structurallyConsistent: true, overfitRiskFlag: false },
@@ -149,11 +149,11 @@ function emptyMemory(): DecisionMemoryResult {
   const staleChain = buildLearningLoopChains([validation({ status: "STALE" })], emptyMemory());
   check("8.3.6-2. STALE validation -> currentlyInfluencesDecisions=false, citation null", staleChain[0].currentlyInfluencesDecisions === false && staleChain[0].influenceCitation === null, JSON.stringify(staleChain[0]));
 
-  const memWithMatch: DecisionMemoryResult = { matchedExperiences: [], matchedEvaluations: [{ sourceSignalId: "s1", evaluationClass: "GOOD_DECISION_BAD_OUTCOME", evidence: ["liquidity"] } as never], matchedPatterns: [{ evidenceTag: "liquidity", confidence: 0.6 } as never] };
+  const memWithMatch: DecisionMemoryResult = { matchedExperiences: [], matchedEvaluations: [{ sourceSignalId: "s1", evaluationClass: "GOOD_DECISION_BAD_OUTCOME", evidence: ["HIGH_RISK_PRESENT"] } as never], matchedPatterns: [{ evidenceTag: "HIGH_RISK_PRESENT", confidence: 0.6 } as never] };
   const joined = buildLearningLoopChains([validation()], memWithMatch);
   check("8.3.6-3. memory evidence joins by real evidenceTag overlap (matchedEvaluationCount=1, matchedPatternConfidence=0.6)", joined[0].memoryEvidence?.matchedEvaluationCount === 1 && joined[0].memoryEvidence?.matchedPatternConfidence === 0.6, JSON.stringify(joined[0].memoryEvidence));
 
-  const noMatch = buildLearningLoopChains([validation({ evidenceTag: "footprint" })], memWithMatch);
+  const noMatch = buildLearningLoopChains([validation({ evidenceTag: "LOW_RISK_PRESENT" })], memWithMatch);
   check("8.3.6-4. no evidenceTag overlap -> memoryEvidence is null, never a fabricated zero-object", noMatch[0].memoryEvidence === null, JSON.stringify(noMatch[0].memoryEvidence));
 
   const nullMemChain = buildLearningLoopChains([validation()], null);
