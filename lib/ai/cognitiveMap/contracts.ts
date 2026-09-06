@@ -52,6 +52,19 @@ export interface IntelligenceNode {
   readonly recentEventIds: readonly string[];
 }
 
+/** Closed set — see lib/ai/cognitiveMap/edgeIntelligence.ts's module header for how each is traced back to real orchestrator.ts call-graph evidence or persisted Cognitive Trace (8.3.2) / snapshot (8.3.0.1) data. */
+export type SemanticEdgeType = "DATA_FLOW" | "DEPENDENCY" | "SUPPORT" | "CONTRADICTION" | "LEARNING_INFLUENCE";
+export type EdgeDirection = "FORWARD" | "BIDIRECTIONAL";
+
+export interface EdgeEvidenceRef {
+  /** Where this evidence came from — a real table/field, never a description of intent. */
+  readonly kind: "orchestrator_call_graph" | "cognitive_trace" | "autonomous_intelligence_snapshot";
+  /** Real identifier of the evidence source — a symbol+cycle, or a source-code call-site description. */
+  readonly ref: string;
+  /** Verbatim (never paraphrased into a stronger claim) fact this evidence shows. */
+  readonly detail: string;
+}
+
 export interface IntelligenceConnection {
   readonly id: string;
   readonly from: string;
@@ -60,6 +73,17 @@ export interface IntelligenceConnection {
   readonly active: boolean;
   /** ISO timestamp of the real event that last activated this edge, if any. */
   readonly lastActivatedAt: string | null;
+  /** Phase 8.3.3 — `null` when no real, traced call-graph or persisted evidence supports a classification for this pair; see `unsupportedReason`. Never guessed. */
+  readonly relationshipType: SemanticEdgeType | null;
+  readonly direction: EdgeDirection;
+  /** 0-1, only when a real, already-computed numeric value naturally provides one. `null` — never a fabricated default — when no such value exists. */
+  readonly strength: number | null;
+  readonly evidenceRefs: readonly EdgeEvidenceRef[];
+  /** `false` exactly when `relationshipType` is `null`; `unsupportedReason` is non-null exactly when this is `false`. */
+  readonly evidenceGrounded: boolean;
+  readonly unsupportedReason: string | null;
+  /** `true` only for the additional, evidence-conditional edges Phase 8.3.3 appends beyond the nine structural `edgeDefs` pairs — those nine are always present regardless of cycle outcome. */
+  readonly isDynamic: boolean;
 }
 
 export type EventSeverity = "INFO" | "SUCCESS" | "WARNING" | "ERROR";

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { hasActiveMembership } from "@/lib/membership";
 import { listAutonomousIntelligenceSnapshots } from "@/lib/ai/autonomousSnapshot/repository";
 import { getConstraintValidations } from "@/lib/ai/learningValidation/repository";
+import { listCognitiveTracesBySymbol } from "@/lib/ai/cognitiveTrace/repository";
 import { getStatistics } from "@/lib/elvoid/paperTrader";
 import { buildCognitiveMap } from "@/lib/ai/cognitiveMap/build";
 
@@ -18,6 +19,12 @@ import { buildCognitiveMap } from "@/lib/ai/cognitiveMap/build";
 // matching the same guarantee documented on
 // app/api/elvoid-pro/autonomous/{snapshots,status}/route.ts.
 //
+// Phase 8.3.3 addition: also reads `cognitive_trace` (8.3.2, one row per
+// symbol, most recent only) — purely for evidence-grounded dynamic edge
+// classification in buildCognitiveMap(). Same read-only guarantee: this
+// never triggers a fresh cycle, it only reads what the autonomous runtime
+// already wrote.
+//
 // ELVOID PRO Oracle telemetry (snapshots + validations) is membership-gated,
 // same as the existing autonomous routes — but paper trader statistics are
 // NOT gated (see lib/elvoid/paperTrader.ts), so a non-member still sees an
@@ -33,12 +40,19 @@ export async function GET() {
   const validationLists = hasOracleMembership && symbols.length > 0 ? await Promise.all(symbols.map((symbol) => getConstraintValidations("ELVOID_PRO_ORACLE", symbol))) : [];
   const validations = validationLists.flatMap((list) => list ?? []);
 
+  // Phase 8.3.3 — most-recent trace per symbol only (limit 1); the same
+  // membership gate as snapshots/validations, since cognitive_trace is
+  // ELVOID_PRO_ORACLE-only data (see lib/ai/cognitiveTrace/contracts.ts).
+  const traceLists = hasOracleMembership && symbols.length > 0 ? await Promise.all(symbols.map((symbol) => listCognitiveTracesBySymbol(symbol, 1))) : [];
+  const traces = traceLists.flatMap((list) => list ?? []);
+
   const snapshot = buildCognitiveMap({
     now: new Date().toISOString(),
     hasOracleMembership,
     snapshots,
     validations,
     stats,
+    traces,
   });
 
   return NextResponse.json(snapshot);

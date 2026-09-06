@@ -16,8 +16,10 @@
 
 import type { AutonomousIntelligenceSnapshotRecord } from "@/lib/ai/autonomousSnapshot/contracts";
 import type { ConstraintValidation } from "@/lib/ai/learningValidation/contracts";
+import type { CognitiveTraceRecord } from "@/lib/ai/cognitiveTrace/contracts";
 import type { AiStatistics } from "@/lib/elvoid/types";
 import { COGNITIVE_MODULE_REGISTRY } from "./registry";
+import { classifyStructuralEdges, deriveDynamicEdges } from "./edgeIntelligence";
 import type { CognitiveEvent, CognitiveMapSnapshot, CoreState, IntelligenceConnection, IntelligenceNode, NodeStatus } from "./contracts";
 
 /** A snapshot's real telemetry is only considered "fresh" within this window. Beyond it, the module still HAS data (IDLE), it just isn't recent. */
@@ -30,6 +32,8 @@ export interface CognitiveMapInputs {
   readonly snapshots: readonly AutonomousIntelligenceSnapshotRecord[]; // ELVOID_PRO_ORACLE, one row per symbol
   readonly validations: readonly ConstraintValidation[]; // ELVOID_PRO_ORACLE, across the symbols in `snapshots`
   readonly stats: AiStatistics | null; // paper trader account statistics (ungated)
+  /** Phase 8.3.3 — most-recent Cognitive Trace (8.3.2) row per symbol, for evidence-grounded dynamic edges only. Optional and defaults to `[]`; omitting it degrades to the nine structural edges with no dynamic overlay — never an error. */
+  readonly traces?: readonly CognitiveTraceRecord[];
 }
 
 function isFresh(iso: string | null, now: number): boolean {
@@ -307,6 +311,20 @@ export function buildCognitiveMap(input: CognitiveMapInputs): CognitiveMapSnapsh
     return { id: `${from}->${to}`, from, to, active, lastActivatedAt };
   });
 
+  // --- Phase 8.3.3 — Neural Edge Intelligence: classify the nine structural
+  // edges above with real, traced evidence, then append (never replace)
+  // dynamic edges only where a real recent cycle's evidence supports one.
+  // Both steps are pure functions of `connections`/`traces`/`snapshots` —
+  // no new I/O, matching this file's own no-fabrication invariant. ---
+  const traces = input.traces ?? [];
+  const latestTraceBySymbol = new Map<string, CognitiveTraceRecord>();
+  for (const t of traces) {
+    const current = latestTraceBySymbol.get(t.symbol);
+    if (!current || Date.parse(t.cycleAt) > Date.parse(current.cycleAt)) latestTraceBySymbol.set(t.symbol, t);
+  }
+  const latestSnapshotBySymbol = new Map(snapshots.map((s) => [s.symbol, { symbol: s.symbol, updatedAt: s.updatedAt, learningInfluence: s.learningInfluence }]));
+  const semanticEdges = [...classifyStructuralEdges(connections), ...deriveDynamicEdges(latestTraceBySymbol, latestSnapshotBySymbol)];
+
   // --- Core state ---
   let coreState: CoreState = "IDLE";
   let coreReason = "Waiting for the first observed cycle.";
@@ -328,11 +346,19 @@ export function buildCognitiveMap(input: CognitiveMapInputs): CognitiveMapSnapsh
     coreReason = "ELVOID PRO Oracle telemetry requires an active membership.";
   }
 
+  if (traces.length === 0) {
+    limitations.push("Phase 8.3.3 dynamic edge evidence (CONTRADICTION/LEARNING_INFLUENCE) unavailable — no Cognitive Trace rows were provided to buildCognitiveMap() this call.");
+  }
+  const unsupportedEdgeCount = semanticEdges.filter((e) => !e.evidenceGrounded).length;
+  if (unsupportedEdgeCount > 0) {
+    limitations.push(`${unsupportedEdgeCount} structural edge(s) have no traced call-graph evidence this phase and carry relationshipType: null — see each edge's unsupportedReason.`);
+  }
+
   return {
     generatedAt: input.now,
     core: { state: coreState, reason: coreReason, symbolsTracked: symbols.length, lastCycleAt: latest?.updatedAt ?? null },
     nodes,
-    connections,
+    connections: semanticEdges,
     events: boundedEvents,
     limitations,
   };
