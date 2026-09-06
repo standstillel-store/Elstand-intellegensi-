@@ -86,6 +86,9 @@ export interface IntelligenceConnection {
   readonly isDynamic: boolean;
 }
 
+/** The five structural fields `buildCognitiveMap()` computes before classification — everything `classifyStructuralEdges()` adds (relationshipType, direction, strength, evidenceRefs, evidenceGrounded, unsupportedReason, isDynamic) is deliberately absent until that step runs. */
+export type StructuralEdgeInput = Pick<IntelligenceConnection, "id" | "from" | "to" | "active" | "lastActivatedAt">;
+
 export type EventSeverity = "INFO" | "SUCCESS" | "WARNING" | "ERROR";
 export type EventSource = "MARKET" | "MACRO" | "PATTERN" | "ORACLE" | "RISK" | "EXECUTION" | "LEARNING" | "SYSTEM";
 

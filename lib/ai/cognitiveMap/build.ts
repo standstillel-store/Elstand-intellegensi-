@@ -21,7 +21,7 @@ import type { DecisionMemoryResult } from "@/lib/ai/decisionMemory/contracts";
 import type { AiStatistics } from "@/lib/elvoid/types";
 import { COGNITIVE_MODULE_REGISTRY } from "./registry";
 import { classifyStructuralEdges, deriveDynamicEdges } from "./edgeIntelligence";
-import type { CognitiveEvent, CognitiveMapSnapshot, CoreState, IntelligenceConnection, IntelligenceNode, NodeStatus } from "./contracts";
+import type { CognitiveEvent, CognitiveMapSnapshot, CoreState, IntelligenceNode, NodeStatus, StructuralEdgeInput } from "./contracts";
 
 /** A snapshot's real telemetry is only considered "fresh" within this window. Beyond it, the module still HAS data (IDLE), it just isn't recent. */
 const ACTIVE_WINDOW_MS = 15 * 60 * 1000;
@@ -329,7 +329,7 @@ export function buildCognitiveMap(input: CognitiveMapInputs): CognitiveMapSnapsh
     ["memory", "decision"],
     ["learning", "oracle"],
   ];
-  const connections: IntelligenceConnection[] = edgeDefs.map(([from, to]) => {
+  const connections: StructuralEdgeInput[] = edgeDefs.map(([from, to]) => {
     const a = nodeById.get(from);
     const b = nodeById.get(to);
     const aFresh = !!a && isFresh(a.lastUpdated, now);

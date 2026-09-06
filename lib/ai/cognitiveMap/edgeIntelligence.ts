@@ -41,7 +41,7 @@
 // ---------------------------------------------------------------------------
 
 import type { CognitiveTraceRecord } from "@/lib/ai/cognitiveTrace/contracts";
-import type { EdgeEvidenceRef, IntelligenceConnection, SemanticEdgeType } from "./contracts";
+import type { EdgeEvidenceRef, IntelligenceConnection, SemanticEdgeType, StructuralEdgeInput } from "./contracts";
 
 export type EdgeDirection = "FORWARD" | "BIDIRECTIONAL";
 /** Semantic alias — `IntelligenceConnection` already carries every Phase 8.3.3 field (see contracts.ts). Not a second/parallel edge shape. */
@@ -110,7 +110,7 @@ export const STATIC_EDGE_CLASSIFICATION: Readonly<Record<string, StaticClassific
  * computes (`id`/`from`/`to`/`active`/`lastActivatedAt`) verbatim — this
  * function narrows/adds fields, it never recomputes freshness.
  */
-export function classifyStructuralEdges(connections: readonly IntelligenceConnection[]): readonly SemanticEdge[] {
+export function classifyStructuralEdges(connections: readonly StructuralEdgeInput[]): readonly SemanticEdge[] {
   return connections.map((c) => {
     const classification = STATIC_EDGE_CLASSIFICATION[c.id];
     const evidenceGrounded = !!classification && classification.type !== null;
