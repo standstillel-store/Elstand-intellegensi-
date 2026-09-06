@@ -67,6 +67,40 @@ export async function getDecisionExperienceForEvaluation(sourceSignalId: string)
   };
 }
 
+/**
+ * Phase 8.3.7 addition — read-only, single-row lookup of an already-persisted
+ * `decision_evaluations` row by `source_signal_id` (== `paperTradeId` — see
+ * `lib/ai/autonomousLearning/contracts.ts`'s own doc comment on that
+ * identity). Added for Cognitive Replay's read-time OUTCOME/LEARNING
+ * reconstruction (`lib/ai/cognitiveReplay/repository.ts`), which needs a
+ * single evaluation row keyed by one signal id rather than
+ * `getDecisionMemoryJoinedExperiences()`'s full-table scan. Same
+ * conventions as `getDecisionExperienceForEvaluation()` above: read-only,
+ * returns `null` (never throws) when the Learning DB is unconfigured or no
+ * row matches.
+ */
+export async function getDecisionEvaluationBySignalId(sourceSignalId: string): Promise<DecisionEvaluation | null> {
+  const learningDb = getLearningSupabase();
+  if (!learningDb) return null;
+
+  const { data } = await learningDb.from("decision_evaluations").select("*").eq("source_signal_id", sourceSignalId).maybeSingle();
+  if (!data) return null;
+
+  return {
+    version: data.version,
+    sourceSignalId: data.source_signal_id,
+    decisionQuality: data.decision_quality,
+    marketOutcome: data.market_outcome,
+    evaluationClass: data.evaluation_class,
+    confidenceAlignment: data.confidence_alignment,
+    riskAlignment: data.risk_alignment,
+    conflictAlignment: data.conflict_alignment,
+    hypothesisAlignment: data.hypothesis_alignment,
+    evidence: data.evidence ?? [],
+    evaluatedAt: data.evaluated_at,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Write: decision_evaluations (Learning DB only, idempotent)
 // ---------------------------------------------------------------------------

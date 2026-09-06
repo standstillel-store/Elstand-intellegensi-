@@ -87,6 +87,42 @@ export async function getAdaptiveConstraintBasisCandidates(): Promise<readonly F
   }));
 }
 
+/**
+ * Phase 8.3.8 addition — read-only, single-group lookup of an
+ * already-persisted `adaptive_constraints` row by its
+ * `(source, symbol, evidence_tag)` key. Added for Causal Graph's read-time
+ * lineage reconstruction (`lib/ai/causalGraph/repository.ts`), which needs
+ * one constraint row to compare its `basis` against the originating
+ * `FailurePatternCandidate` and the downstream `ConstraintValidation` —
+ * proving the copy-forward chain by field equality, never by re-deriving
+ * it. Same conventions as every other read function in this file:
+ * read-only, returns `null` (never throws) when the Learning DB is
+ * unconfigured or no row matches.
+ */
+export async function getAdaptiveConstraint(source: AdaptiveConstraint["source"], symbol: string, evidenceTag: AdaptiveConstraint["evidenceTag"]): Promise<AdaptiveConstraint | null> {
+  const learningDb = getLearningSupabase();
+  if (!learningDb) return null;
+
+  const { data } = await learningDb.from("adaptive_constraints").select("*").eq("source", source).eq("symbol", symbol).eq("evidence_tag", evidenceTag).maybeSingle();
+  if (!data) return null;
+
+  return {
+    version: data.version,
+    source: data.source,
+    symbol: data.symbol,
+    evidenceTag: data.evidence_tag,
+    constraintType: data.constraint_type,
+    basis: {
+      occurrenceCount: data.occurrence_count,
+      dominantClassShare: data.dominant_class_share,
+      statisticalConfidence: data.statistical_confidence,
+      firstObservedAt: data.first_observed_at,
+      lastObservedAt: data.last_observed_at,
+    },
+    generatedAt: data.generated_at,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Write: adaptive_constraints (Learning DB only, recompute-and-upsert)
 // ---------------------------------------------------------------------------

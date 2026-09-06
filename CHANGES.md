@@ -2337,3 +2337,89 @@ Every file section 12 lists as protected — Oracle grading/confluence/risk/side
 ### Phase status
 
 - Phase 8.2.9 — Final Autonomous Activation & Closed Learning Loop: **COMPLETE**, with the two items above (orchestrator-level integration tests, Vercel plan-tier confirmation) explicitly flagged as follow-ups rather than silently declared done.
+
+## Phase 8.3.7 + 8.3.8 — Cognitive Replay & Causal Graph
+
+**Goal**: Complete Phase 8.3 by making historical AI reasoning replayable from real persisted evidence (8.3.7), and by building only evidence-backed causal relationships between the existing learning-loop tables (8.3.8). Audit-first: reused Cognitive Trace (8.3.2), Neural Edge Intelligence (8.3.3), and the Memory/Conflict/Learning modules (8.3.4/8.3.5/8.3.6) exactly as they already exist. Phases 8.4/8.5, Oracle grading, risk logic, and autonomous decision behavior were not touched.
+
+**Note on this changelog**: Phases 8.3.1–8.3.6 (commits `d1619d9`…`03266aa`, `086dcbd`, `003fe8d`) were never given their own CHANGES.md entries — this file jumps straight from 8.2.9 to this one. That gap predates this pass and was not backfilled here (out of scope); it is flagged so a future reader isn't confused by the missing entries.
+
+### 8.3.7 — Cognitive Replay (`lib/ai/cognitiveReplay/`)
+
+Read-only reconstruction of one autonomous cycle's real path: INPUT → ANALYSIS → EVIDENCE → CONFLICT → DECISION → EXECUTION, from an already-persisted `CognitiveTraceRecord` (8.3.2), plus OUTCOME/LEARNING joined at read time from `decision_experiences`/`decision_evaluations` by `execution.paperTradeId` (== `source_signal_id` == `ai_signals.id`).
+
+- **`contracts.ts`** — `CognitiveReplayResult`, `ReplayStage<T>`, closed `ReplayUnavailableReason` enum.
+- **`build.ts`** — pure `buildCognitiveReplay()`. Zero executable imports (type-only) — cannot perform I/O even by accident.
+- **`repository.ts`** — `replayCognitiveCycle(traceId)`, `listReplayableCycles(symbol, limit)`. Reuses `getCognitiveTraceById`/`listCognitiveTracesBySymbol` (8.3.2) and `getDecisionExperienceForEvaluation` (8.1.1) verbatim; adds one new read (below).
+
+**MEMORY is permanently unavailable, by design, not a bug**: `lib/ai/decisionMemory` is query-time-only and was never persisted per cycle. Re-querying it "now" for a past cycle would present current state as historical fact — exactly the fabrication this phase forbids. Every `CognitiveReplayResult.memory` is unconditionally `{ available: false, unavailableReason: "MEMORY_NOT_PERSISTED_PER_CYCLE" }`.
+
+**Identity isolation** (added after a self-review pass before writing more code): a joined `decision_experiences`/`decision_evaluations` row is never trusted blindly. If its own `(source, symbol)` or `sourceSignalId` disagrees with the trace/paperTradeId being replayed, the join is refused with `IDENTITY_MISMATCH` rather than silently attached.
+
+**Additive change**: `lib/ai/decisionEvaluation/repository.ts` — added `getDecisionEvaluationBySignalId(sourceSignalId)`, a single-row read by `source_signal_id`. Nothing else in that file was touched.
+
+### 8.3.8 — Causal Graph (`lib/ai/causalGraph/`)
+
+Instance/group-level lineage, complementary to (never duplicating) `cognitiveMap`'s module-level topology graph (8.3.1/8.3.3).
+
+- **`contracts.ts`** — `CausalEdge` (source, target, mechanism, relationshipType, evidence, confidence, limitations), `CausalEdgeRejection`, `CausalChainResult`.
+- **`derive.ts`** — pure `deriveLearningLineage()` (the Outcome→Evaluation→FailurePattern→Constraint→Validation→Qualification→Decision chain) and `deriveMemoryInfluence()` (the Memory→Qualification→Decision code-behavior chain). Reuses `NEGATIVE_EVALUATION_CLASSES`/`MIN_OCCURRENCE_COUNT` (8.1.2) and `buildLearningLoopChains()` (8.3.6) verbatim rather than re-deriving `currentlyInfluencesDecisions` a second way.
+- **`repository.ts`** — `deriveLearningLineageForGroup(key, representativeSourceSignalId?)`, `deriveMemoryInfluenceForSymbol(source, symbol)`. Reuses `getDecisionMemoryPatterns()`/`queryDecisionMemory()` (8.1.3), `getConstraintValidations()` (8.2.9), and the two new additive reads below.
+
+**Proof rule enforced everywhere**: an edge exists only for (1) verbatim copy-forward field equality, (2) a real join on an established identity key, or (3) a cited, unmodified code branch. Naming, correlation, or timestamp proximity alone never produce an edge — every candidate that fails is returned as a `CausalEdgeRejection` with an explicit, checkable reason. `confidence` is `null` on every edge except Evaluation→FailurePattern, which surfaces the real, already-persisted `FailurePatternCandidate.confidence` — never an invented number.
+
+**Additive changes**:
+- `lib/ai/decisionEvaluation/repository.ts` — `getDecisionEvaluationBySignalId()` (shared with 8.3.7, see above).
+- `lib/ai/adaptiveConstraint/repository.ts` — added `getAdaptiveConstraint(source, symbol, evidenceTag)`, a single-group read by key, mirroring the existing `getConstraintValidations()` pattern in the neighboring module. Nothing else in that file was touched.
+
+### Proven causal chains (this pass)
+
+1. `decision_experiences` → `decision_evaluations` (DERIVATION) — `evaluateDecision()` reads the outcome row, joined by `source_signal_id`.
+2. `decision_evaluations` → `failure_pattern_candidates` (AGGREGATION) — negative-class, tag-carrying evaluations group into the persisted aggregate; membership proven by decision-timestamp-within-observed-window, confidence is the real aggregate number.
+3. `failure_pattern_candidates` → `adaptive_constraints` (COPY_FORWARD) — verbatim basis field equality.
+4. `adaptive_constraints` → `constraint_validations` (COPY_FORWARD) — verbatim basis field equality.
+5. `constraint_validations` (VALID) → qualification CAUTION (GATING_INFLUENCE) — reuses 8.3.6's `buildLearningLoopChains()` citation of `qualify.ts::cautionConstraintPresent`.
+6. qualification CAUTION → decision WAIT (GATING_INFLUENCE) — cites `decide.ts::decideAutonomous()`/`selectAutonomousDecision()`'s real branch order.
+7. Memory (negative evaluation or matched pattern) → qualification CONFLICTED → decision REJECT (GATING_INFLUENCE ×2) — code-behavior proof only, explicitly disclaimed as never a historical replay claim (see MEMORY limitation above).
+
+### Rejected causal relationships (representative, fixture-covered)
+
+No evaluation row persisted; evaluation class not in `NEGATIVE_EVALUATION_CLASSES`; evidence tag absent from evaluation; no failure-pattern row / below `MIN_OCCURRENCE_COUNT`; decision timestamp outside the aggregate's observed window; no constraint row; constraint basis stale relative to the latest recompute; identity/group-key mismatch even when other fields coincidentally match (no inference from coincidence); no validation row; validation status not VALID; no memory negative signal; null memory.
+
+### Testing
+
+- `scripts/phase8/cognitive-replay-fixtures.ts` — **61/61 passed**. Real (non-mocked) calls to `buildCognitiveReplay()` — the file has zero executable imports, so nothing here is a shape-only check. Covers: complete chain, MEMORY-always-unavailable (3 cycle shapes), NO_ASSESSMENT, WAIT-cycle (NOT_EXECUTED), 4 broken/missing-join cases, 4 identity-isolation cases (incl. a correct-match control), timestamp verbatim-ness + monotonicity, deterministic rerun (2 paths), and static scans of `repository.ts`/`contracts.ts` for the read-only/no-random-source/architecture-boundary invariants.
+- `scripts/phase8/causal-graph-fixtures.ts` — **38/38 passed**. Real calls to `deriveLearningLineage()`/`deriveMemoryInfluence()`. Covers: the complete 6-edge proven chain, the VALID→CAUTION→WAIT behavioral chain, 9 distinct rejection cases each with a checkable reason, the memory chain (proven ×2 shapes, rejected ×2 shapes) with an explicit "code-behavior only, not historical" limitation assertion, determinism, a coincidental-field-match-still-rejected case, and static scans of `repository.ts`/`contracts.ts`/`derive.ts`.
+
+### Regression
+
+Re-ran every fixture touching the two modified files or their neighbors:
+- `cognitive-trace-fixtures.ts` (8.3.2): 16/16.
+- `neural-edge-intelligence-fixtures.ts` (8.3.3): 17/17.
+- `cognitive-memory-conflict-learning-fixtures.ts` (8.3.4/5/6): 27/27.
+- `decision-evaluation-fixtures.ts`: 36/36.
+- `adaptive-constraint-fixtures.ts`: 21/21.
+- `failure-pattern-fixtures.ts`: 16/16.
+- `decision-memory-fixtures.ts`: 24/24.
+- `learning-validation-fixtures.ts`: 26/27 — the one failure (#19, "reads only `adaptive_constraints`, writes only `constraint_validations`") is **pre-existing**, already documented as expected-stale in the Phase 8.2.9 entry above (that phase added `getConstraintValidations()` reading `constraint_validations` itself). Confirmed identical against the unmodified baseline via `git stash`.
+- `decision-outcome-fixtures.ts`: reports "2 FAILED" (#30, #32) — **pre-existing**, the same `writeClose()` `.then()` staleness already documented as expected in the 8.2.9 entry above. Confirmed identical against the unmodified baseline via `git stash`.
+
+**Zero new regressions.** Both pre-existing failures were independently re-confirmed by stashing this pass's changes and re-running against the untouched baseline — identical failures, identical fixture numbers.
+
+### Files touched this pass
+
+- New: `lib/ai/cognitiveReplay/{contracts,build,repository}.ts`, `lib/ai/causalGraph/{contracts,derive,repository}.ts`, `scripts/phase8/cognitive-replay-fixtures.ts`, `scripts/phase8/causal-graph-fixtures.ts`.
+- Modified (additive only — one new function each, nothing else changed): `lib/ai/decisionEvaluation/repository.ts`, `lib/ai/adaptiveConstraint/repository.ts`.
+- Untouched, confirmed by scope: Phase 8.4, Phase 8.5, `lib/ai/oracle/*`, `lib/ai/autonomousDecision/decide.ts`, `lib/ai/decisionQualification/qualify.ts`, `lib/ai/learningValidation/*` (beyond the pre-existing reader reused), `lib/ai/failurePatterns/*`, `lib/ai/learningLoop/traceChain.ts`, any UI component.
+
+### Known limitations, honestly reported
+
+- MEMORY cannot ever be replayed historically — architectural, not a gap this pass could close (would require `decisionMemory` to start persisting a per-cycle snapshot, itself a new-persistence decision explicitly out of scope here).
+- `deriveLearningLineageForGroup()`'s Outcome/Evaluation hops are proven against one **representative** trade per group, not every historical trade that ever contributed to a `failure_pattern_candidates` aggregate — the aggregate itself is a full recompute-and-upsert, not an incrementally-attributable per-row ledger, so per-row attribution beyond time-window membership is not reconstructable without re-running `detect.ts`'s own grouping (which would not be a "proof", it would be a recomputation).
+- The `learningValidation/contracts.ts` header still says this phase is "deliberately a CONSUMER-FREE validation layer" — stale since 8.2.2/8.2.9 actually wired `constraint_validations` into `qualify.ts`/`decide.ts`. Noted, not fixed (out of scope, doc-only staleness in a file this pass did not modify).
+
+### Phase status
+
+- Phase 8.3.7 — Cognitive Replay: **COMPLETE**.
+- Phase 8.3.8 — Causal Graph: **COMPLETE**.
+- Phase 8.3 (Cognitive Architecture): **COMPLETE** as of this pass — replay + causal lineage now answer, from real persisted evidence, what the AI knew, what conflicted, what memory would influence it (code-behavior only), why it decided, what happened afterward, and which causal links are actually proven vs. honestly unsupported.
