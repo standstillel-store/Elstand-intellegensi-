@@ -59,6 +59,7 @@ import type { AutonomousExecutionOutcome } from "@/lib/ai/autonomousExecution/co
 import type { OracleGrade } from "@/lib/ai/oracle/types";
 import type { OracleRiskStatus } from "@/lib/ai/oracle/gradingTypes";
 import type { CognitiveConflictState } from "@/lib/ai/cognitive/conflict";
+import type { ClassifiedContradiction } from "@/lib/ai/oracle/contradiction";
 
 /** ELVOID Pro only, matching decisionTrace/autonomousSnapshot's own hard boundary this generation of phases. */
 export type CognitiveTraceSource = "ELVOID_PRO_ORACLE";
@@ -134,6 +135,9 @@ export interface CognitiveTraceInput {
   readonly conflict: CognitiveTraceConflictStage | null;
   /** ISO 8601 — real instant `resolveCognitiveConflict()` returned this cycle. May equal `evidenceAt` to the millisecond — both are synchronous, non-awaited steps; never fabricated apart. `null` iff `conflict` is `null`. */
   readonly conflictAt: string | null;
+
+  /** Phase 8.3.5 addition — verbatim `ContradictionReport.contradictions` from `classifyContradictions()`, the same synchronous call `conflict` is derived from. Each entry names the real `ConfluenceSource`s in disagreement (e.g. `["liquidity","market_structure"]`, `["macro","market_structure"]`) — the axis-level detail `CognitiveConflictState.contributingFactors` deliberately does not carry (it names contributing MODULES, e.g. `"arbitration"`, never a source pair). `null` iff `conflict` is `null` (same NO_ASSESSMENT rule as every other stage). Shares `conflictAt` — no separate timestamp; `classifyContradictions()` and `resolveCognitiveConflict()` run in the same synchronous block. */
+  readonly contradictions: readonly ClassifiedContradiction[] | null;
 
   readonly decision: CognitiveTraceDecisionStage | null;
   /** ISO 8601 — real instant this cycle's effective (post-dedup) decision was finalized. `null` iff `decision` is `null`. */

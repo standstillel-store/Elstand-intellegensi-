@@ -23,7 +23,7 @@ function check(name: string, pass: boolean, detail: string) {
   console.log(`${pass ? "PASS" : "FAIL"} — ${name}${pass ? "" : ` | ${detail}`}`);
 }
 
-const REGISTERED_NODE_IDS = new Set(["market", "macro", "pattern", "oracle", "risk", "decision", "execution", "learning"]);
+const REGISTERED_NODE_IDS = new Set(["market", "macro", "pattern", "oracle", "risk", "decision", "execution", "learning", "memory"]);
 
 const STRUCTURAL_EDGE_DEFS: readonly [string, string][] = [
   ["market", "macro"],
@@ -34,6 +34,7 @@ const STRUCTURAL_EDGE_DEFS: readonly [string, string][] = [
   ["risk", "decision"],
   ["decision", "execution"],
   ["execution", "learning"],
+  ["memory", "decision"],
   ["learning", "oracle"],
 ];
 
@@ -160,9 +161,9 @@ const executeSrc = readFileSync(new URL("../../lib/ai/autonomousExecution/execut
   check("6c. orchestrator.ts does not import edgeIntelligence.ts — Phase 8.3.3 has no path into decision authority", !orchestratorSrc.includes("cognitiveMap/edgeIntelligence"), "orchestrator.ts imports edgeIntelligence");
   check("6d. autonomousDecision/decide.ts does not import edgeIntelligence.ts", !decideSrc.includes("cognitiveMap/edgeIntelligence"), "decide.ts imports edgeIntelligence");
   check("6e. autonomousExecution/execute.ts does not import edgeIntelligence.ts", !executeSrc.includes("cognitiveMap/edgeIntelligence"), "execute.ts imports edgeIntelligence");
-  check("6f. STATIC_EDGE_CLASSIFICATION covers exactly the 9 existing edgeDefs pairs — no added/removed static pair", Object.keys(STATIC_EDGE_CLASSIFICATION).length === 9, `found ${Object.keys(STATIC_EDGE_CLASSIFICATION).length}`);
+  check("6f. STATIC_EDGE_CLASSIFICATION covers exactly the 10 existing edgeDefs pairs — no added/removed static pair beyond the documented Phase 8.3.4 memory->decision extension", Object.keys(STATIC_EDGE_CLASSIFICATION).length === 10, `found ${Object.keys(STATIC_EDGE_CLASSIFICATION).length}`);
   const gradedCount = Object.values(STATIC_EDGE_CLASSIFICATION).filter((c) => c.type !== null).length;
-  check("6g. exactly 6 of the 9 static pairs are evidence-grounded, 3 are honestly unsupported", gradedCount === 6, `${gradedCount} grounded of 9`);
+  check("6g. exactly 7 of the 10 static pairs are evidence-grounded, 3 are honestly unsupported", gradedCount === 7, `${gradedCount} grounded of 10`);
 }
 
 // ---------------------------------------------------------------------------

@@ -738,6 +738,12 @@ create table if not exists cognitive_trace (
   -- decision_traces.snapshot stores.
   conflict jsonb,
   conflict_at timestamptz,
+  -- Phase 8.3.5 addition: verbatim ContradictionReport.contradictions from
+  -- classifyContradictions() — the same synchronous call `conflict` is
+  -- derived from. Axis-level detail (which real ConfluenceSource pair
+  -- disagrees) that the aggregate `conflict` state deliberately does not
+  -- carry. Null under the same NO_ASSESSMENT rule as `conflict`.
+  contradictions jsonb,
   decision jsonb,
   decision_at timestamptz,
   execution jsonb,

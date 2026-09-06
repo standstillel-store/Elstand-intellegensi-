@@ -98,6 +98,10 @@ export const STATIC_EDGE_CLASSIFICATION: Readonly<Record<string, StaticClassific
     evidence:
       "unsupported — getConstraintValidations() output only reaches buildAutonomousDecisionContext() (feeding decideAutonomous), never gradeConfluence(), which has already run by that point in the cycle.",
   },
+  "memory->decision": {
+    type: "DATA_FLOW",
+    evidence: "queryDecisionMemory()'s result (`memory`) is passed directly as a field of buildAutonomousDecisionContext()'s input, which produces `autonomousContext` -> decideAutonomous(); the same field qualifyAutonomousDecision() reads as context.memory to compute negativeMemorySignalPresent.",
+  },
 } as const;
 
 /**

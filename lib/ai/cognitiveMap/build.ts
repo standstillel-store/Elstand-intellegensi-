@@ -17,6 +17,7 @@
 import type { AutonomousIntelligenceSnapshotRecord } from "@/lib/ai/autonomousSnapshot/contracts";
 import type { ConstraintValidation } from "@/lib/ai/learningValidation/contracts";
 import type { CognitiveTraceRecord } from "@/lib/ai/cognitiveTrace/contracts";
+import type { DecisionMemoryResult } from "@/lib/ai/decisionMemory/contracts";
 import type { AiStatistics } from "@/lib/elvoid/types";
 import { COGNITIVE_MODULE_REGISTRY } from "./registry";
 import { classifyStructuralEdges, deriveDynamicEdges } from "./edgeIntelligence";
@@ -34,6 +35,8 @@ export interface CognitiveMapInputs {
   readonly stats: AiStatistics | null; // paper trader account statistics (ungated)
   /** Phase 8.3.3 — most-recent Cognitive Trace (8.3.2) row per symbol, for evidence-grounded dynamic edges only. Optional and defaults to `[]`; omitting it degrades to the nine structural edges with no dynamic overlay — never an error. */
   readonly traces?: readonly CognitiveTraceRecord[];
+  /** Phase 8.3.4 — live `queryDecisionMemory()` result per tracked symbol. Optional and defaults to an empty map; omitting it degrades the "memory" node to NO_DATA — never an error, never a fabricated retrieval. */
+  readonly memory?: ReadonlyMap<string, DecisionMemoryResult>;
 }
 
 function isFresh(iso: string | null, now: number): boolean {
@@ -283,6 +286,31 @@ export function buildCognitiveMap(input: CognitiveMapInputs): CognitiveMapSnapsh
           ],
         };
       }
+      case "memory": {
+        // Phase 8.3.4 — decisionMemory is documented as query-time
+        // (dynamic) retrieval, never materialized (see its own
+        // contracts.ts header) — there is no "lastUpdated" timestamp to
+        // read off a stored row. `input.now` here honestly represents
+        // "this read genuinely queried the Learning DB just now", not a
+        // claim about how recently the underlying decision_experiences/
+        // decision_evaluations/failure_pattern_candidates rows changed.
+        const memoryBySymbol = input.memory ?? new Map();
+        const totalExperiences = [...memoryBySymbol.values()].reduce((n, r) => n + r.matchedExperiences.length, 0);
+        const totalPatterns = [...memoryBySymbol.values()].reduce((n, r) => n + r.matchedPatterns.length, 0);
+        const hasData = memoryBySymbol.size > 0 && (totalExperiences > 0 || totalPatterns > 0);
+        return {
+          ...base,
+          status: statusFor(gated, hasData, hasData),
+          lastUpdated: gated || !hasData ? null : now,
+          facts: gated
+            ? []
+            : [
+                { label: "Symbols queried", value: String(memoryBySymbol.size) },
+                { label: "Matched experiences", value: String(totalExperiences) },
+                { label: "Matched failure patterns", value: String(totalPatterns) },
+              ],
+        };
+      }
       default:
         return { ...base, status: "NO_DATA" as NodeStatus, lastUpdated: null, facts: [] };
     }
@@ -298,6 +326,7 @@ export function buildCognitiveMap(input: CognitiveMapInputs): CognitiveMapSnapsh
     ["risk", "decision"],
     ["decision", "execution"],
     ["execution", "learning"],
+    ["memory", "decision"],
     ["learning", "oracle"],
   ];
   const connections: IntelligenceConnection[] = edgeDefs.map(([from, to]) => {

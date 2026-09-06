@@ -14,8 +14,10 @@
 // silently registering them as active):
 //   - lib/ai/decisionQualification (no persistence layer to read from yet)
 //   - lib/ai/insights (live pattern detection, not yet snapshot-backed)
-//   - lib/ai/eventImpact, lib/ai/decisionMemory (read paths not exposed
-//     to this route yet)
+//   - lib/ai/eventImpact (read path not exposed to this route yet)
+//
+// Phase 8.3.4: lib/ai/decisionMemory is now wired (see the "memory" entry
+// below) — removed from the not-yet-wired list above.
 // ---------------------------------------------------------------------------
 
 import type { CognitiveLayer } from "./contracts";
@@ -64,6 +66,13 @@ export const COGNITIVE_MODULE_REGISTRY: readonly RegisteredModule[] = [
     layer: "DECISION",
     modulePath: "lib/ai/oracle (riskStatus, entry/stopLoss/takeProfit/riskReward)",
     description: "Risk validity and trade-plan fields attached to each Oracle assessment.",
+  },
+  {
+    id: "memory",
+    label: "Decision Memory",
+    layer: "REASONING",
+    modulePath: "lib/ai/decisionMemory (queryDecisionMemory)",
+    description: "Query-time retrieval of matched historical decision experiences, evaluations, and qualified failure patterns for the current symbol — read by the autonomous pipeline in Step 3 of every cycle, before qualification/decision.",
   },
   {
     id: "decision",
