@@ -301,7 +301,7 @@ export function buildCognitiveMap(input: CognitiveMapInputs): CognitiveMapSnapsh
         return {
           ...base,
           status: statusFor(gated, hasData, hasData),
-          lastUpdated: gated || !hasData ? null : now,
+          lastUpdated: gated || !hasData ? null : input.now,
           facts: gated
             ? []
             : [
