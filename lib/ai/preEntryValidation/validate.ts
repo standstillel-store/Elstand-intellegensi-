@@ -8,9 +8,12 @@
 // (`decisionQualification/qualify.ts`) never reads a fresh timestamp
 // either. Zero randomness. Zero imports from lib/ai/oracle/*,
 // lib/ai/cognitive/*, lib/elvoid/*, or any trading-execution module — this
-// file depends ONLY on the four plain, already-computed inputs it is
-// given (`AutonomousDecisionContext`, `AutonomousQualificationResult`,
-// `MacroIntelligenceContext`, `MarketImpactContext`).
+// file depends ONLY on the four plain, already-computed Phase 8.2.x
+// inputs it is given (`AutonomousDecisionContext`, `AutonomousQualificationResult`,
+// `MacroIntelligenceContext`, `MarketImpactContext`), plus one additive,
+// independently-nullable Phase 8.3x8.4 wiring input (`ExternalIntelligenceSignal`
+// — see contracts.ts's own header for why it was added and what it can
+// and cannot influence).
 //
 // THIS IS NOT A SECOND ORACLE GRADING ENGINE AND NOT A SECOND
 // QUALIFICATION ENGINE. `validatePreEntry()` never recomputes
@@ -27,16 +30,17 @@
 import type { PreEntryValidationInput, PreEntryValidationResult, PreEntryValidationSignals, PreEntryValidationStatus } from "./contracts";
 
 /**
- * Computes the eleven closed, independently derived booleans this
- * engine's status decision is a pure function of. Each field reads a
- * fixed field off one of the three optional inputs and nothing else — no
- * recomputation, no re-derivation of any upstream value's own internal
- * logic (e.g. `qualificationConflicted` compares `qualification.status`
- * against a fixed literal; it never re-runs Phase 8.2.2's own
- * `selectQualificationStatus()` signal logic).
+ * Computes the fourteen closed, independently derived booleans this
+ * engine's status decision is a pure function of (eleven from Phase 8.2.5
+ * itself, plus three added by the Phase 8.3x8.4 wiring addition — see
+ * `contracts.ts`). Each field reads a fixed field off one of the four
+ * optional inputs and nothing else — no recomputation, no re-derivation
+ * of any upstream value's own internal logic (e.g. `qualificationConflicted`
+ * compares `qualification.status` against a fixed literal; it never
+ * re-runs Phase 8.2.2's own `selectQualificationStatus()` signal logic).
  */
 function computeSignals(input: PreEntryValidationInput): PreEntryValidationSignals {
-  const { qualification, macro, eventImpact } = input;
+  const { qualification, macro, eventImpact, externalIntelligence } = input;
 
   const qualificationPresent = qualification !== null;
   const macroPresent = macro !== null;
@@ -54,6 +58,10 @@ function computeSignals(input: PreEntryValidationInput): PreEntryValidationSigna
   const macroDataIncomplete = macroPresent && macro!.dataAvailability !== "AVAILABLE";
   const newsDataIncomplete = eventImpactPresent && eventImpact!.newsAvailability !== "AVAILABLE";
 
+  const externalIntelligencePresent = externalIntelligence != null;
+  const externalEvidenceConflicted = externalIntelligencePresent && externalIntelligence!.hasConflict === true;
+  const externalEvidenceInsufficient = externalIntelligencePresent && externalIntelligence!.shouldResearch === true && externalIntelligence!.evidenceSatisfied === false;
+
   return {
     qualificationPresent,
     macroPresent,
@@ -67,11 +75,14 @@ function computeSignals(input: PreEntryValidationInput): PreEntryValidationSigna
     conflictingImpactPresent,
     macroDataIncomplete,
     newsDataIncomplete,
+    externalIntelligencePresent,
+    externalEvidenceConflicted,
+    externalEvidenceInsufficient,
   };
 }
 
 /**
- * Deterministic, fail-closed status selection from the eleven
+ * Deterministic, fail-closed status selection from the fourteen
  * independently computed signals. Priority order (first match wins) —
  * most-fundamental concern first, mirroring
  * `decisionQualification/qualify.ts`'s own `selectQualificationStatus()`
@@ -99,7 +110,15 @@ function computeSignals(input: PreEntryValidationInput): PreEntryValidationSigna
  *      context is honestly incomplete, even if nothing above fired).
  *   8. `qualificationCaution` -> `CAUTION` (the qualification engine
  *      itself already flagged a lesser concern).
- *   9. Otherwise -> `VALID` (every concern cleared).
+ *   9. `externalEvidenceConflicted` -> `CAUTION` (Phase 8.3x8.4 wiring
+ *      addition — Phase 8.4 found opposing external evidence/claims for
+ *      this symbol; a lesser concern than any of the internal signals
+ *      above, never escalated to `BLOCKED`).
+ *   10. `externalEvidenceInsufficient` -> `CAUTION` (Phase 8.3x8.4 wiring
+ *      addition — Research Trigger determined external corroboration was
+ *      needed and it was not obtained; the lowest-priority concern here,
+ *      checked last).
+ *   11. Otherwise -> `VALID` (every concern cleared).
  *
  * Exactly one status is ever returned; there is no fallthrough case that
  * silently defaults to `VALID`.
@@ -113,6 +132,8 @@ function selectValidationStatus(signals: PreEntryValidationSignals): PreEntryVal
   if (!signals.riskValid) return "CAUTION";
   if (signals.macroDataIncomplete || signals.newsDataIncomplete) return "CAUTION";
   if (signals.qualificationCaution) return "CAUTION";
+  if (signals.externalEvidenceConflicted) return "CAUTION";
+  if (signals.externalEvidenceInsufficient) return "CAUTION";
   return "VALID";
 }
 
@@ -120,11 +141,11 @@ function selectValidationStatus(signals: PreEntryValidationSignals): PreEntryVal
  * Pure, deterministic, synchronous. The same `input` always produces a
  * byte-identical `PreEntryValidationResult`. Never mutates `input` or
  * anything nested inside it (`decisionContext`/`qualification`/`macro`/
- * `eventImpact` are only ever read, never written). Holds no state across
- * calls.
+ * `eventImpact`/`externalIntelligence` are only ever read, never
+ * written). Holds no state across calls.
  *
  * `symbol`/`source`/`generatedAt` are carried forward verbatim from
- * `input.decisionContext` — never re-derived. `signals` are eleven
+ * `input.decisionContext` — never re-derived. `signals` are fourteen
  * independently computed booleans; `status` is a deterministic function
  * of `signals` alone (see `selectValidationStatus()`).
  *

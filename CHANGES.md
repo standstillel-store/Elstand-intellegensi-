@@ -2423,3 +2423,59 @@ Re-ran every fixture touching the two modified files or their neighbors:
 - Phase 8.3.7 — Cognitive Replay: **COMPLETE**.
 - Phase 8.3.8 — Causal Graph: **COMPLETE**.
 - Phase 8.3 (Cognitive Architecture): **COMPLETE** as of this pass — replay + causal lineage now answer, from real persisted evidence, what the AI knew, what conflicted, what memory would influence it (code-behavior only), why it decided, what happened afterward, and which causal links are actually proven vs. honestly unsupported.
+
+## Phase 8.3 x 8.4 — Autonomous Intelligence Integration
+
+Wires the previously-standalone Phase 8.4 External Intelligence stack (8.4.1 Source Registry, 8.4.2 Research Trigger, 8.4.3 Evidence Normalization, 8.4.4 Community Intelligence, 8.4.5 Altcoin Screener) into the live autonomous runtime, and threads its evidence-conflict signal into Phase 8.3's Cognitive Trace. No Oracle grading/confidence/risk/SL/TP logic touched; external intelligence carries no BUY/SELL/EXECUTE authority of its own.
+
+### Real socket found
+
+`lib/ai/autonomousRuntime/orchestrator.ts`, between `analyzeEventImpact()` (8.2.4) and `validatePreEntry()` (8.2.5) — the one point in a live cycle where `assessment`, `contradictions`, `arbitration`, `cognitiveObservation`, `riskIntelligence`, and `eventImpact` are all already-computed, real, in-memory values.
+
+### New
+
+- `lib/ai/wiring/externalIntelligenceGate.ts` — `assembleExternalIntelligenceSignal()`: assembles a real `ResearchTriggerInput` from the orchestrator's own live values, evaluates it (8.4.2), and — only when a derivatives capability was requested AND the symbol is on Binance's existing `DERIVATIVES_WATCHLIST` — makes the one real, keyless, already-existing fetch this integration performs (`lib/binance.ts::getFundingSnapshot()`), normalizes the result (8.4.3), and checks it against Community Intelligence (8.4.4, always empty — no real community provider exists) for conflict. Every other requested capability is honestly left unfetched (`evidenceSatisfied: false`), never fabricated. Testable via an injectable `fetchFundingSnapshot` dependency (defaults to the real function; production never overrides it).
+- `lib/ai/wiring/externalConflictCorrelation.ts` — `correlateExternalConflict()`: pure, read-only juxtaposition of Phase 8.3.5's `AxisConflictReport` with Phase 8.4.3/8.4.4 external conflict signals for the same symbol, keyed on `symbol`. Never merges or reconciles; exports `findExternalDirectionConflicts()`, reused by the gate above.
+- `lib/ai/externalIntelligence/**` — restored/carried-forward Phase 8.4.1-8.4.5 modules (registry, research trigger, evidence normalization, community intelligence, altcoin screener), unchanged from their own completed phases.
+- `scripts/phase8/{external-source-registry,research-trigger,evidence-normalization,community-intelligence,altcoin-screener,wiring-conflict-correlation,external-intelligence-gate}-fixtures.ts`.
+
+### Additive changes (existing files, backward-compatible)
+
+- `lib/ai/preEntryValidation/contracts.ts` / `validate.ts` — added one new, independently-nullable input field, `externalIntelligence: ExternalIntelligenceSignal | null`, and three new signals (`externalIntelligencePresent`, `externalEvidenceConflicted`, `externalEvidenceInsufficient`) contributing two new `CAUTION`-tier (never `BLOCKED`) branches at the end of `selectValidationStatus()`'s existing priority chain. `null`/omitted behaves identically to before this change — confirmed by the existing 25-fixture suite passing unchanged with `externalIntelligence: null` as the default.
+- `lib/ai/cognitiveTrace/contracts.ts` / `repository.ts` — added `externalIntelligence`/`externalIntelligenceAt` (both nullable), following the exact precedent the Phase 8.3.5 `contradictions` field already set for this file.
+- `supabase/learning/schema.sql` — added the two columns to `cognitive_trace`'s `create table`, plus an idempotent `alter table ... add column if not exists` migration guard for already-deployed databases.
+- `lib/ai/autonomousRuntime/orchestrator.ts` — one new call (`assembleExternalIntelligenceSignal`, wrapped in `.catch(() => null)`) between `analyzeEventImpact` and `validatePreEntry`; its result threaded into `validatePreEntry(...)` and the final `persistCognitiveTrace(...)` call. Every existing scoring/grading/qualification/decision function in this file is untouched.
+- `scripts/phase8/pre-entry-validation-fixtures.ts` — its single shared `input()` builder given an `externalIntelligence: null` default so the existing 25 cases remain type-correct and behaviorally identical.
+
+### Authority boundary (verified by fixture, not assumed)
+
+External intelligence never mutates `OracleAssessment` (object-identity/value check), never appears as a `confidence`/`grade`-shaped field, and produces no `EXECUTE`/`BUY`/`SELL`/`REJECT`-shaped value anywhere in its own output (deep structural scan). Its only live effect is a `CAUTION` status from `validatePreEntry()`, which — through `decideAutonomous()`, completely unmodified — genuinely cascades to a `WAIT` decision (proven end-to-end, not simulated).
+
+### Testing
+
+- `scripts/phase8/external-intelligence-gate-fixtures.ts` — **30/30 passed**. Real calls to `assembleExternalIntelligenceSignal()`, `validatePreEntry()`, and `decideAutonomous()`. Covers all 15 required scenarios: trigger→context flow, available/unavailable capability handling, evidence-normalization-in-the-loop (a "successful" fetch with no matching row still yields no fabricated satisfaction), internal-vs-external conflict provenance separation, conflict/insufficiency → real `CAUTION`→`WAIT`, no Oracle confidence/grade mutation, no EXECUTE authority, symbol isolation, deterministic rerun, fetch-failure fail-safe, honest UNAVAILABLE for unfetched capabilities, full end-to-end chain, and a static no-random/mock/fake/bullish/bearish scan of the two production files touched.
+- `scripts/phase8/wiring-conflict-correlation-fixtures.ts` — **16/16 passed** (carried forward from the prior wiring pass; synthetic trace fixture updated for the two new additive `CognitiveTraceInput` fields).
+
+### Regression — every suite re-run for real, none skipped
+
+- Phase 8.3: `cognitive-trace-fixtures` 16/16, `neural-edge-intelligence-fixtures` 17/17, `cognitive-memory-conflict-learning-fixtures` 27/27, `causal-graph-fixtures` 38/38, `cognitive-replay-fixtures` 61/61.
+- Phase 8.4: 8.4.1 22/22, 8.4.2 30/30, 8.4.3 39/39, 8.4.4 27/27, 8.4.5 30/30.
+- Decision pipeline touched by this pass: `pre-entry-validation-fixtures` 25/25, `autonomous-runtime-fixtures` 15/15, `autonomous-decision-fixtures` 25/25.
+
+**Zero regressions.**
+
+### TypeScript
+
+Project-wide `tsc --noEmit` shows only the pre-existing, environment-wide `@types/node`/`next` absence (identical across every Phase 7/8 fixture file, unrelated to this work — this sandbox has no `node_modules`). Two genuine issues were found during this pass's own scoped check and fixed (a fixture's `DecisionArbitration` object was structurally incomplete; another fixture's synthetic trace was missing the two new additive fields) — zero genuine errors remain in any file this pass touched.
+
+### Known limitations, honestly reported
+
+- Only ONE capability (`funding_rate`/`open_interest`/`long_short_ratio`, via the existing `getFundingSnapshot()`) is actually live-fetched by this integration; every other Research Trigger-requested capability (crypto_news, general_news, economic_release, whale_transfer, exchange_flow, dex_pool_activity, spot_price, all community capabilities) is honestly reported unsatisfied rather than fetched — building six more live-fetch paths was judged out of "minimal invasive wiring" scope for this pass.
+- Community Intelligence is always called with zero evidence — no real community/social provider exists anywhere in this repository (reconfirmed this pass).
+- Neural Edge Intelligence, Cognitive Replay, and Causal Graph remain standalone with respect to Phase 8.4 — no real call-graph edge, persisted join key, or citable code behavior connects them (see the prior Phase 8.3 x 8.4 wiring pass's own report for the full per-module audit); forcing one would have required rewriting a closed Phase 8.3 contract or DB schema for data that still has no live producer.
+- The live funding-rate fetch only succeeds for symbols on Binance's existing, curated `DERIVATIVES_WATCHLIST` (~15 major pairs) — an honest, pre-existing boundary, not new to this pass.
+
+### Phase status
+
+- Phase 8.4 (External Intelligence): **WIRED** into the live autonomous runtime as an evidence/caution layer — genuinely autonomous where previously entirely dormant/standalone.
+- Authority boundary: **VERIFIED** — no Oracle/decision-authority change, fixture-proven.

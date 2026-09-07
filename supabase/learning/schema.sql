@@ -744,6 +744,15 @@ create table if not exists cognitive_trace (
   -- disagrees) that the aggregate `conflict` state deliberately does not
   -- carry. Null under the same NO_ASSESSMENT rule as `conflict`.
   contradictions jsonb,
+  -- Phase 8.3x8.4 wiring addition: verbatim ExternalIntelligenceSignal from
+  -- assembleExternalIntelligenceSignal() (lib/ai/wiring/externalIntelligenceGate.ts),
+  -- captured between eventImpact and validatePreEntry() in the
+  -- orchestrator. A real {shouldResearch:false,...} object is stored when
+  -- Research Trigger found no reason to seek external corroboration this
+  -- cycle -- null means the gate call itself did not run (NO_ASSESSMENT
+  -- cycle, or the orchestrator's own defensive .catch(() => null)).
+  external_intelligence jsonb,
+  external_intelligence_at timestamptz,
   decision jsonb,
   decision_at timestamptz,
   execution jsonb,
@@ -755,6 +764,24 @@ create table if not exists cognitive_trace (
 create index if not exists cognitive_trace_symbol_idx on cognitive_trace (symbol);
 create index if not exists cognitive_trace_cycle_at_idx on cognitive_trace (cycle_at);
 create index if not exists cognitive_trace_source_idx on cognitive_trace (source);
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.3x8.4 wiring addition: add external_intelligence/external_intelligence_at
+-- to an already-deployed cognitive_trace table (the create table above only
+-- covers a fresh install). Nullable, additive, no backfill needed -- every
+-- pre-existing row simply has null in both columns, honestly meaning "this
+-- cycle predates the wiring", never a fabricated value.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name = 'cognitive_trace' and column_name = 'external_intelligence'
+  ) then
+    alter table cognitive_trace add column external_intelligence jsonb;
+    alter table cognitive_trace add column external_intelligence_at timestamptz;
+  end if;
+end $$;
 
 alter table cognitive_trace enable row level security;
 -- No policies defined — same service-role-only convention as every other

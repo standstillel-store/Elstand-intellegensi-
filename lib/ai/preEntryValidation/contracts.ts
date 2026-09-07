@@ -44,6 +44,17 @@
 //     unchanged, or one of the independently computed booleans in
 //     `PreEntryValidationSignals`. Nothing is fabricated, nothing is
 //     recomputed from a source outside the four inputs themselves.
+//   - ADDITIVE PHASE 8.3x8.4 WIRING NOTE: a fifth, independently-nullable
+//     input, `externalIntelligence` (`ExternalIntelligenceSignal`, from
+//     `lib/ai/wiring/externalIntelligenceGate.ts`), was added so Phase
+//     8.4's Research Trigger/Evidence Normalization/Community
+//     Intelligence can honestly influence this phase's existing `CAUTION`
+//     tier — never `BLOCKED`, never `VALID`-when-it-shouldn't-be, and
+//     never any of `grade`/`confidence`/`side`/`riskStatus`/`entry`/
+//     `stopLoss`/`takeProfit`/`QualificationStatus`. Every existing
+//     caller that omits it is unaffected — `null` (or absent) behaves
+//     identically to how this file worked before this addition; see
+//     `computeSignals()`/`selectValidationStatus()` in `validate.ts`.
 //   - Pure data shape only — no logic lives in this file. See `validate.ts`
 //     for the pure, deterministic evaluator function.
 //   - UNWIRED: nothing in the app imports from
@@ -57,13 +68,14 @@ import type { AutonomousDecisionContext, AutonomousCanonicalSnapshot, DecisionSo
 import type { AutonomousQualificationResult, QualificationStatus } from "@/lib/ai/decisionQualification/contracts";
 import type { MacroIntelligenceContext, MacroEventRiskLevel, MacroDataAvailability } from "@/lib/ai/macroIntelligence/contracts";
 import type { MarketImpactContext, ImpactRisk, NewsDataAvailability } from "@/lib/ai/eventImpact/contracts";
+import type { ExternalIntelligenceSignal } from "@/lib/ai/wiring/externalIntelligenceGate";
 
 // Re-exported so validate.ts/fixtures have a single import source for the
 // upstream shapes they consume — this module does not define its own
 // competing decision-context/qualification/macro/event-impact type,
 // matching every earlier 8.2.x contracts module's own re-export
 // convention.
-export type { AutonomousDecisionContext, AutonomousCanonicalSnapshot, DecisionSource, AutonomousQualificationResult, QualificationStatus, MacroIntelligenceContext, MacroEventRiskLevel, MacroDataAvailability, MarketImpactContext, ImpactRisk, NewsDataAvailability };
+export type { AutonomousDecisionContext, AutonomousCanonicalSnapshot, DecisionSource, AutonomousQualificationResult, QualificationStatus, MacroIntelligenceContext, MacroEventRiskLevel, MacroDataAvailability, MarketImpactContext, ImpactRisk, NewsDataAvailability, ExternalIntelligenceSignal };
 
 /**
  * Closed set of terminal pre-entry validation outcomes. Exactly one is
@@ -78,9 +90,11 @@ export type { AutonomousDecisionContext, AutonomousCanonicalSnapshot, DecisionSo
  *     EXECUTE instruction.
  *   - `CAUTION` — market context is present and usable, but at least one
  *     lesser concern applies (an invalid/unavailable risk plan, a
- *     `CAUTION`-qualified signal, conflicting recent news impact, or
- *     partial macro/news data availability). Proceed, if at all, with
- *     reduced trust.
+ *     `CAUTION`-qualified signal, conflicting recent news impact, partial
+ *     macro/news data availability, or — Phase 8.3x8.4 wiring addition —
+ *     Phase 8.4's Research Trigger determining external corroboration was
+ *     needed and either not obtaining it or finding it conflicting).
+ *     Proceed, if at all, with reduced trust.
  *   - `BLOCKED` — a strong, closed-signal concern makes proceeding
  *     unsuitable: the upstream qualification itself is `CONFLICTED`
  *     (documented historical evidence conflicts with trusting this
@@ -179,6 +193,24 @@ export interface PreEntryValidationSignals {
    * 8.2.4's own closed enum, never re-derived.
    */
   readonly newsDataIncomplete: boolean;
+  /** Phase 8.3x8.4 wiring addition. `input.externalIntelligence !== null` — a Phase 8.4 signal was supplied at all (most cycles will have one with `shouldResearch: false`, which is still "present"). */
+  readonly externalIntelligencePresent: boolean;
+  /**
+   * Only meaningful when `externalIntelligencePresent`.
+   * `input.externalIntelligence.hasConflict` — copied verbatim from
+   * `assembleExternalIntelligenceSignal()`'s own already-computed
+   * opposing-evidence/claim-conflict check (Phase 8.4.3/8.4.4). Never
+   * re-derived from raw evidence here.
+   */
+  readonly externalEvidenceConflicted: boolean;
+  /**
+   * Only meaningful when `externalIntelligencePresent`.
+   * `input.externalIntelligence.shouldResearch && !input.externalIntelligence.evidenceSatisfied`
+   * — Phase 8.4.2's Research Trigger determined external corroboration
+   * was needed for this cycle, and it was not obtained. `shouldResearch:
+   * false` never sets this — nothing was needed, so nothing is missing.
+   */
+  readonly externalEvidenceInsufficient: boolean;
 }
 
 /**
@@ -203,6 +235,8 @@ export interface PreEntryValidationInput {
   readonly macro: MacroIntelligenceContext | null;
   /** Phase 8.2.4's already-computed output, or `null` when not supplied. Read-only; never mutated, never re-derived. */
   readonly eventImpact: MarketImpactContext | null;
+  /** Phase 8.3x8.4 wiring addition (`lib/ai/wiring/externalIntelligenceGate.ts`). `null` when not supplied — behaves identically to how this file worked before this field existed (see this file's header). Read-only; never mutated, never re-derived. */
+  readonly externalIntelligence: ExternalIntelligenceSignal | null;
 }
 
 /**

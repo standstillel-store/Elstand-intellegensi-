@@ -1,17 +1,26 @@
 // ---------------------------------------------------------------------------
 // ELVOID Intelligence — Autonomous Runtime Orchestrator (Phase 8.2.9)
 //
-// ORCHESTRATION LAYER ONLY. Every scoring/grading/qualification/decision
-// function called below is an EXISTING, UNCHANGED Phase 7/8.0-8.2.8
-// module — this file computes nothing new. It sequences them in the one
-// order the pipeline requires, in the same defensive "a bug in one
-// sub-phase can never break the ones before it" style
-// `app/api/elvoid-pro/oracle/route.ts` already established for the
-// Phase 7/8.0 half of this exact chain (this file mirrors that route's
-// own composition for the assessment/cognitive-context half rather than
-// duplicating its logic under a new name).
+// ORCHESTRATION LAYER, PLUS ONE PHASE 8.3x8.4 WIRING ADDITION. Every
+// scoring/grading/qualification/decision function called below is an
+// EXISTING, UNCHANGED Phase 7/8.0-8.2.8 module — this file computes
+// nothing new for any of them. The ONE exception is the new call to
+// `assembleExternalIntelligenceSignal()` (Phase 8.3x8.4 wiring,
+// `lib/ai/wiring/externalIntelligenceGate.ts`) inserted between
+// `analyzeEventImpact` and `validatePreEntry`, whose result is passed
+// into `validatePreEntry` as one new, additive, independently-nullable
+// input field (`externalIntelligence`) — `validatePreEntry` itself was
+// extended additively (a new `CAUTION`-only signal on top of its
+// existing eleven), never rewritten; every field it already computed is
+// unchanged (see `lib/ai/preEntryValidation/contracts.ts`'s own header).
+// It sequences everything else in the one order the pipeline requires,
+// in the same defensive "a bug in one sub-phase can never break the ones
+// before it" style `app/api/elvoid-pro/oracle/route.ts` already
+// established for the Phase 7/8.0 half of this exact chain (this file
+// mirrors that route's own composition for the assessment/cognitive-
+// context half rather than duplicating its logic under a new name).
 //
-// PIPELINE (Phase 8.2.9 §2):
+// PIPELINE (Phase 8.2.9 §2, + Phase 8.3x8.4 wiring):
 //   assembleOracleContext -> computeConfluence -> buildOracleRiskPlan
 //   -> gradeConfluence                                     (Phase 7, canonical)
 //   -> [mtf, regime, liquidityOrderFlow, scenarios, contradictions,
@@ -23,7 +32,12 @@
 //   -> qualifyAutonomousDecision                            (Phase 8.2.2)
 //   -> analyzeMacroIntelligence                             (Phase 8.2.3)
 //   -> analyzeEventImpact                                   (Phase 8.2.4)
-//   -> validatePreEntry                                     (Phase 8.2.5)
+//   -> assembleExternalIntelligenceSignal                   (Phase 8.3x8.4
+//      wiring — Research Trigger + real, keyless funding-rate observation
+//      only, if requested and watchlisted + honest Community Intelligence
+//      + conflict check; never mutates anything computed above)
+//   -> validatePreEntry                                     (Phase 8.2.5,
+//      additively extended to read the wiring's result)
 //   -> decideAutonomous                                     (Phase 8.2.6)
 //   -> [Phase 8.2.9 §6 dedup gate — orchestration only, see dedup.ts]
 //   -> executeAutonomousPaperTrade                          (Phase 8.2.7 —
@@ -64,6 +78,7 @@ import { qualifyAutonomousDecision } from "@/lib/ai/decisionQualification/qualif
 import { analyzeMacroIntelligence } from "@/lib/ai/macroIntelligence/analyze";
 import { analyzeEventImpact } from "@/lib/ai/eventImpact/analyze";
 import { validatePreEntry } from "@/lib/ai/preEntryValidation/validate";
+import { assembleExternalIntelligenceSignal } from "@/lib/ai/wiring/externalIntelligenceGate";
 import { decideAutonomous } from "@/lib/ai/autonomousDecision/decide";
 import { executeAutonomousPaperTrade } from "@/lib/ai/autonomousExecution/execute";
 import { classifyAutonomousLearningLifecycle } from "@/lib/ai/autonomousLearning/lifecycle";
@@ -145,6 +160,8 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
         conflict: null,
         conflictAt: null,
         contradictions: null,
+        externalIntelligence: null,
+        externalIntelligenceAt: null,
         decision: null,
         decisionAt: null,
         execution: null,
@@ -167,6 +184,8 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
       conflict: null,
       conflictAt: null,
       contradictions: null,
+      externalIntelligence: null,
+      externalIntelligenceAt: null,
       decision: null,
       decisionAt: null,
       execution: null,
@@ -281,7 +300,21 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   const qualification = qualifyAutonomousDecision(autonomousContext);
   const macro = analyzeMacroIntelligence({ asOf, calendar });
   const eventImpact = analyzeEventImpact({ asOf, macro, news });
-  const preEntry = validatePreEntry({ decisionContext: autonomousContext, qualification, macro, eventImpact });
+
+  // --- Phase 8.3x8.4 wiring: Research Trigger -> capability availability -> (real, keyless funding-rate observation only, if requested and watchlisted) -> Evidence Normalization -> Community Intelligence (always empty, honestly) -> conflict check. Never throws; a total failure degrades to null, the same as every other Step-2 sub-analysis above. ---
+  const externalIntelligenceAt = nowIso();
+  const externalIntelligence = await assembleExternalIntelligenceSignal({
+    symbol,
+    asOf: externalIntelligenceAt,
+    assessment,
+    contradictions,
+    arbitration,
+    cognitiveObservation,
+    riskIntelligence,
+    marketImpact: eventImpact,
+  }).catch(() => null);
+
+  const preEntry = validatePreEntry({ decisionContext: autonomousContext, qualification, macro, eventImpact, externalIntelligence });
   const decision: AutonomousDecisionEngineResult = decideAutonomous({ decisionContext: autonomousContext, qualification, macro, eventImpact, preEntry });
 
   // --- Step 6 (Phase 8.2.9 §6): duplicate-execution protection — orchestration only, never a second decision engine. ---
@@ -381,6 +414,8 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     conflict: cognitiveConflictInternal,
     conflictAt,
     contradictions: contradictions?.contradictions ?? null,
+    externalIntelligence,
+    externalIntelligenceAt: externalIntelligence ? externalIntelligenceAt : null,
     decision: { decision: effectiveDecision.decision, side: assessment.side, dedupApplied },
     decisionAt,
     execution: { outcome: execution.outcome, paperTradeId: execution.paperTradeId, error: execution.error },

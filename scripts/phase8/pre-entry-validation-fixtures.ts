@@ -120,6 +120,7 @@ function input(overrides: Partial<PreEntryValidationInput> = {}): PreEntryValida
     qualification: qualification(),
     macro: macro(),
     eventImpact: eventImpact(),
+    externalIntelligence: null,
     ...overrides,
   };
 }

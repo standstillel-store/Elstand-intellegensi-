@@ -25,7 +25,9 @@
 //       * cognitive_trace (this module) — ONE row PER CYCLE ATTEMPT,
 //         append-only, carrying the FULL, unnarrowed `CognitiveConflictState`
 //         (state + reasons + contributingFactors) plus real per-stage
-//         wall-clock timestamps for the six stages that are genuinely
+//         wall-clock timestamps for the seven stages (six from Phase
+//         8.3.2, plus the Phase 8.3x8.4 wiring addition, `externalIntelligence`)
+//         that are genuinely
 //         resolved synchronously within one cycle run. This is the gap
 //         neither existing table fills: reconstructing "what did the
 //         system see, and when, this specific cycle" without re-running
@@ -60,6 +62,7 @@ import type { OracleGrade } from "@/lib/ai/oracle/types";
 import type { OracleRiskStatus } from "@/lib/ai/oracle/gradingTypes";
 import type { CognitiveConflictState } from "@/lib/ai/cognitive/conflict";
 import type { ClassifiedContradiction } from "@/lib/ai/oracle/contradiction";
+import type { ExternalIntelligenceSignal } from "@/lib/ai/wiring/externalIntelligenceGate";
 
 /** ELVOID Pro only, matching decisionTrace/autonomousSnapshot's own hard boundary this generation of phases. */
 export type CognitiveTraceSource = "ELVOID_PRO_ORACLE";
@@ -138,6 +141,24 @@ export interface CognitiveTraceInput {
 
   /** Phase 8.3.5 addition — verbatim `ContradictionReport.contradictions` from `classifyContradictions()`, the same synchronous call `conflict` is derived from. Each entry names the real `ConfluenceSource`s in disagreement (e.g. `["liquidity","market_structure"]`, `["macro","market_structure"]`) — the axis-level detail `CognitiveConflictState.contributingFactors` deliberately does not carry (it names contributing MODULES, e.g. `"arbitration"`, never a source pair). `null` iff `conflict` is `null` (same NO_ASSESSMENT rule as every other stage). Shares `conflictAt` — no separate timestamp; `classifyContradictions()` and `resolveCognitiveConflict()` run in the same synchronous block. */
   readonly contradictions: readonly ClassifiedContradiction[] | null;
+
+  /**
+   * Phase 8.3x8.4 wiring addition — verbatim `ExternalIntelligenceSignal`
+   * from `assembleExternalIntelligenceSignal()`
+   * (`lib/ai/wiring/externalIntelligenceGate.ts`), called between
+   * `eventImpact` and `validatePreEntry()` in the orchestrator. A real
+   * `{ shouldResearch: false, ... }` object IS recorded when Research
+   * Trigger found no reason to ask for external corroboration this
+   * cycle — that is a genuine, informative outcome, not an absence.
+   * `null` here means the gate call itself did not run at all: a
+   * NO_ASSESSMENT cycle, or the orchestrator's own defensive
+   * `.catch(() => null)` around the call (mirrors every other stage's
+   * exception-degrades-to-null rule — never a second, competing
+   * "unavailable" representation).
+   */
+  readonly externalIntelligence: ExternalIntelligenceSignal | null;
+  /** ISO 8601 — real instant `assembleExternalIntelligenceSignal()` resolved this cycle. `null` iff `externalIntelligence` is `null`. */
+  readonly externalIntelligenceAt: string | null;
 
   readonly decision: CognitiveTraceDecisionStage | null;
   /** ISO 8601 — real instant this cycle's effective (post-dedup) decision was finalized. `null` iff `decision` is `null`. */
