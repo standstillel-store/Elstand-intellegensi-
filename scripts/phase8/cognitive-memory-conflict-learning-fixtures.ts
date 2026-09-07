@@ -44,6 +44,8 @@ function trace(overrides: Partial<CognitiveTraceRecord> = {}): CognitiveTraceRec
     conflict: { state: "CONSISTENT", reasons: [], contributingFactors: [] },
     conflictAt: now,
     contradictions: [],
+    externalIntelligence: null,
+    externalIntelligenceAt: null,
     decision: { decision: "WAIT", side: "LONG", dedupApplied: false },
     decisionAt: now,
     execution: { outcome: "SKIPPED_WAIT", paperTradeId: null, error: null },

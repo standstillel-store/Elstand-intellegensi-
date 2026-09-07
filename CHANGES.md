@@ -2479,3 +2479,7 @@ Project-wide `tsc --noEmit` shows only the pre-existing, environment-wide `@type
 
 - Phase 8.4 (External Intelligence): **WIRED** into the live autonomous runtime as an evidence/caution layer — genuinely autonomous where previously entirely dormant/standalone.
 - Authority boundary: **VERIFIED** — no Oracle/decision-authority change, fixture-proven.
+
+### Post-merge build fix
+
+Vercel's `npm run build` (real `tsc`, unlike this sandbox's `--experimental-strip-types` fixture runs) caught six pre-existing fixture files with hand-built `CognitiveTraceRecord`/`CognitiveTraceInput`/`PreEntryValidationSignals` object literals that predated this pass's additive fields and were structurally incomplete under the real compiler: `scripts/phase8/{autonomous-decision,cognitive-memory-conflict-learning,cognitive-replay,cognitive-trace,neural-edge-intelligence,pre-entry-validation}-fixtures.ts`. Each literal was given the new fields (`externalIntelligence: null`, `externalIntelligenceAt: null` / `externalIntelligencePresent: false`, `externalEvidenceConflicted: false`, `externalEvidenceInsufficient: false`) with no other change — all affected suites re-run and confirmed passing at the same counts reported above. No production logic changed in this follow-up; this sandbox's own scoped `tsc --noEmit` pass was re-run afterward and shows zero genuine errors in any file this phase touched.

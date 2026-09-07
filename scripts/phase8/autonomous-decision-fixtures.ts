@@ -134,6 +134,9 @@ function preEntry(overrides: Partial<PreEntryValidationResult> = {}): PreEntryVa
       conflictingImpactPresent: false,
       macroDataIncomplete: false,
       newsDataIncomplete: false,
+      externalIntelligencePresent: false,
+      externalEvidenceConflicted: false,
+      externalEvidenceInsufficient: false,
     },
     ...overrides,
   };
