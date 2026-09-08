@@ -123,6 +123,32 @@ function nowIso(): string {
 }
 
 /**
+ * Phase 8.5 P0 fix — every best-effort Learning DB write below already
+ * resolves to a typed, non-throwing `{ persisted: false, reason, error? }`
+ * result on failure (see e.g. lib/ai/cognitiveTrace/repository.ts), but
+ * every call site here was discarding that result via a bare
+ * `.catch(() => {})`, which made a real persistence failure (e.g. the
+ * 2026-09-06 cognitive_trace schema-drift incident — see migration
+ * `add_contradictions_column_cognitive_trace`) invisible in every log.
+ * This reads the result and logs failures non-fatally — same convention
+ * as lib/ai/autonomousRuntime/learningRefresh.ts::triggerLearningRefreshBestEffort()
+ * — without ever throwing or blocking the autonomous cycle itself.
+ */
+function logPersistenceFailure(label: string, result: { persisted: boolean; reason?: string; error?: string }): void {
+  // "not_configured" mirrors learningRefresh.ts's own exclusion — an
+  // unconfigured Learning DB is an expected environment state (e.g. local
+  // dev), not a per-cycle failure worth alerting on.
+  if (!result.persisted && result.reason !== "not_configured") {
+    console.error(`[ElVoid AI] ${label} failed (non-fatal, autonomous cycle continues): ${result.reason}${result.error ? ` — ${result.error}` : ""}`);
+  }
+}
+
+/** Defensive-only: every persist* function above is documented "never throws" — this should be unreachable, logged in case that contract is ever violated. */
+function logPersistenceThrew(label: string, err: unknown): void {
+  console.error(`[ElVoid AI] ${label} threw unexpectedly (non-fatal):`, err instanceof Error ? err.message : String(err));
+}
+
+/**
  * Runs one full autonomous cycle for one symbol. Never throws — every
  * failure mode (insufficient candle history, a sub-phase error, Learning
  * DB unavailability) resolves to a typed `AutonomousCycleResult`. Callers
@@ -166,7 +192,9 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
         decisionAt: null,
         execution: null,
         executionAt: null,
-      }).catch(() => {});
+      })
+        .then((r) => logPersistenceFailure("Cognitive trace persistence", r))
+        .catch((err) => logPersistenceThrew("Cognitive trace persistence", err));
       return { version: 1, symbol, generatedAt: asOf, stage: "NO_ASSESSMENT", decision: null, dedupApplied: false, executionOutcome: null, paperTradeId: null, learningLifecycleStatus: null, error: `Candle history untuk ${symbol} tidak cukup untuk analisis Oracle.` };
     }
   } catch (err) {
@@ -190,7 +218,9 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
       decisionAt: null,
       execution: null,
       executionAt: null,
-    }).catch(() => {});
+    })
+      .then((r) => logPersistenceFailure("Cognitive trace persistence", r))
+      .catch((err) => logPersistenceThrew("Cognitive trace persistence", err));
     return { version: 1, symbol, generatedAt: asOf, stage: "NO_ASSESSMENT", decision: null, dedupApplied: false, executionOutcome: null, paperTradeId: null, learningLifecycleStatus: null, error: err instanceof Error ? err.message : String(err) };
   }
 
@@ -385,7 +415,9 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     dedupApplied,
     executionOutcome: execution.outcome,
     paperTradeId: execution.paperTradeId,
-  }).catch(() => {});
+  })
+    .then((r) => logPersistenceFailure("Autonomous intelligence snapshot persistence", r))
+    .catch((err) => logPersistenceThrew("Autonomous intelligence snapshot persistence", err));
 
   // --- Step 10 (Phase 8.3.2): persist this cycle's append-only Cognitive
   // Trace — INPUT/ANALYSIS/EVIDENCE/CONFLICT/DECISION/EXECUTION, each a
@@ -420,7 +452,9 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     decisionAt,
     execution: { outcome: execution.outcome, paperTradeId: execution.paperTradeId, error: execution.error },
     executionAt,
-  }).catch(() => {});
+  })
+    .then((r) => logPersistenceFailure("Cognitive trace persistence", r))
+    .catch((err) => logPersistenceThrew("Cognitive trace persistence", err));
 
   return {
     version: 1,

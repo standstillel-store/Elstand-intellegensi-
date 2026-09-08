@@ -57,11 +57,20 @@ function persistTraceBestEffort(
     decisionTimestamp: input.decision.generatedAt,
     snapshot: input.learningContext ?? null,
     sourceSignalId: paperTradeId,
-  }).catch(() => {
-    // Intentionally swallowed — same convention as
-    // lib/ai/oracle/execute.ts::captureDecisionExperienceBestEffort().
-    // Trace-write failure must never affect the trading result.
-  });
+  })
+    .then((result) => {
+      // Phase 8.5 P0 fix — previously discarded unread via a bare
+      // `.catch(() => {})`. Trading result is still never affected either way.
+      if (!result.persisted && result.reason !== "not_configured") {
+        console.error(`[ElVoid AI] Decision trace persistence failed (non-fatal, trading result unaffected): ${result.reason}${result.error ? ` — ${result.error}` : ""}`);
+      }
+    })
+    .catch((err) => {
+      // Should be unreachable — persistDecisionTrace() is documented never
+      // to throw — logged defensively in case that's ever violated. Same
+      // convention as lib/ai/oracle/execute.ts::captureDecisionExperienceBestEffort().
+      console.error("[ElVoid AI] Decision trace persistence threw unexpectedly (non-fatal):", err instanceof Error ? err.message : String(err));
+    });
 }
 
 function result(

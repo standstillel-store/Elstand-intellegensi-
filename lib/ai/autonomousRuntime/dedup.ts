@@ -75,10 +75,16 @@ export async function getLastExecutedSetup(source: DecisionSource, symbol: strin
 export async function recordExecutedSetup(source: DecisionSource, symbol: string, setupIdentity: string, paperTradeId: string | null): Promise<void> {
   const db = getLearningSupabase();
   if (!db) return;
-  await db.from("autonomous_execution_dedup").upsert(
+  const { error } = await db.from("autonomous_execution_dedup").upsert(
     { source, symbol, setup_identity: setupIdentity, paper_trade_id: paperTradeId, executed_at: new Date().toISOString() },
     { onConflict: "source,symbol" }
   );
+  // Phase 8.5 P0 fix — previously discarded unchecked; a write failure here
+  // still can't affect the already-executed trade (same rationale as above),
+  // but it must not be invisible either.
+  if (error) {
+    console.error(`[ElVoid AI] Execution dedup persistence failed (non-fatal, autonomous cycle continues): ${error.message}`);
+  }
 }
 
 /**

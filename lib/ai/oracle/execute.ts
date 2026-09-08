@@ -95,19 +95,26 @@ function buildReasonText(assessment: OracleAssessment, setup: string): string {
 /**
  * Phase 8.1.0 — best-effort, fire-and-forget Decision Experience capture
  * into the isolated ELVOID Learning Database. Never awaited by the
- * caller's success path, never allowed to affect the trading result:
- * any failure (Learning DB unconfigured, network error, etc.) is caught
- * and swallowed here. This function does not read back its own result —
- * it exists purely so a capture failure can never surface as an
- * execute-signal failure.
+ * caller's success path, never allowed to affect the trading result: a
+ * failure (Learning DB unconfigured, write error, etc.) never rejects
+ * this function or the caller. Phase 8.5 P0 fix — it now reads back
+ * persistDecisionExperience()'s typed (non-throwing) result and logs a
+ * genuine failure non-fatally instead of discarding it unread, same
+ * convention as lib/ai/autonomousRuntime/orchestrator.ts's
+ * logPersistenceFailure().
  */
 function captureDecisionExperienceBestEffort(row: AiSignal, learningContext: LearningContextSnapshot | null | undefined): void {
-  captureDecisionExperience(row, learningContext ?? null).catch(() => {
-    // Intentionally swallowed — Learning DB capture must never affect the
-    // canonical trading result. See lib/ai/decisionOutcome/repository.ts
-    // for the typed (non-throwing) result this call already produces on
-    // its own; this catch only guards against an unexpected rejection.
-  });
+  captureDecisionExperience(row, learningContext ?? null)
+    .then((result) => {
+      if (!result.persisted && result.reason !== "not_configured") {
+        console.error(`[ElVoid AI] Decision experience capture failed (non-fatal, trading result unaffected): ${result.reason}${result.error ? ` — ${result.error}` : ""}`);
+      }
+    })
+    .catch((err) => {
+      // Should be unreachable — captureDecisionExperience()/persistDecisionExperience()
+      // are documented never to throw — logged defensively in case that's ever violated.
+      console.error("[ElVoid AI] Decision experience capture threw unexpectedly (non-fatal):", err instanceof Error ? err.message : String(err));
+    });
 }
 
 export async function executeOracleSignal(
