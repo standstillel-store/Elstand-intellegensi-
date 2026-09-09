@@ -69,7 +69,7 @@ import type { CognitiveObservation } from "@/lib/ai/cognitive/contracts";
 import type { RiskIntelligence } from "@/lib/ai/oracle/riskIntelligence";
 import type { MarketImpactContext } from "@/lib/ai/eventImpact/contracts";
 import type { FundingInfo } from "@/lib/types";
-import { DERIVATIVES_WATCHLIST, getFundingSnapshot } from "@/lib/binance";
+import { DERIVATIVES_WATCHLIST, getFundingSnapshot, toFuturesPair } from "@/lib/binance";
 import { evaluateResearchTrigger } from "@/lib/ai/externalIntelligence/researchTrigger/evaluate";
 import type { ResearchTriggerInput } from "@/lib/ai/externalIntelligence/researchTrigger/contracts";
 import { normalizeExternalEvidence } from "@/lib/ai/externalIntelligence/evidence/normalize";
@@ -110,11 +110,12 @@ async function gatherRealEvidence(
 ): Promise<NormalizedExternalEvidence[]> {
   const evidence: NormalizedExternalEvidence[] = [];
   const needsDerivatives = requestedCapabilities.some((c) => DERIVATIVES_CAPABILITIES.includes(c));
-  if (!needsDerivatives || !DERIVATIVES_WATCHLIST.includes(symbol)) return evidence;
+  const pair = toFuturesPair(symbol);
+  if (!needsDerivatives || !DERIVATIVES_WATCHLIST.includes(pair)) return evidence;
 
   try {
     const snapshot = await fetchFundingSnapshot();
-    const own = snapshot.find((f) => f.symbol === symbol);
+    const own = snapshot.find((f) => f.symbol === pair);
     if (!own) return evidence; // symbol genuinely absent from this cycle's snapshot — honest, not an error
     const raw: RawExternalObservation = {
       source: "binance_derivatives",

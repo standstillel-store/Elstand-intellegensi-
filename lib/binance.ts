@@ -4,6 +4,34 @@ import type { Candle } from "./elvoid/types";
 
 const BASE = "https://fapi.binance.com";
 
+/**
+ * Phase 8.5 P0-adjacent fix: Binance Futures uses a scaled-ticker naming
+ * convention for extremely low-unit-price tokens (contract price would
+ * otherwise round to ~0 at normal tick sizes) — PEPE trades as
+ * `1000PEPEUSDT`, not `PEPEUSDT`. Every direct `${symbol}USDT` pair
+ * construction in this file was silently building an invalid ticker for
+ * PEPE, so every Futures call for it (klines/aggTrades/premiumIndex match)
+ * has failed (400 Invalid symbol) since PEPE was added to the watchlist —
+ * this is the confirmed root cause of PEPE never progressing past the
+ * Cognitive Trace INPUT stage. Add an entry here if a future watchlist
+ * symbol needs the same 1000x-scaled ticker (e.g. 1000SHIB, 1000LUNC).
+ */
+const FUTURES_SYMBOL_OVERRIDES: Record<string, string> = {
+  PEPE: "1000PEPEUSDT",
+};
+
+export function toFuturesPair(symbol: string): string {
+  // Idempotent: strips a trailing USDT first so this is safe whether the
+  // caller passes the short form ("BTC", "PEPE" — the real production
+  // convention, e.g. lib/ai/autonomousRuntime/orchestrator.ts's `symbol`)
+  // or an already-full pair ("BTCUSDT" — used by
+  // scripts/phase8/external-intelligence-gate-fixtures.ts). Both normalize
+  // to the same base before the override lookup, so "PEPE" and "PEPEUSDT"
+  // both correctly resolve to "1000PEPEUSDT".
+  const base = symbol.toUpperCase().replace(/USDT$/, "");
+  return FUTURES_SYMBOL_OVERRIDES[base] ?? `${base}USDT`;
+}
+
 // There's no free bulk open-interest endpoint, so we track OI for a curated
 // watchlist of the symbols most relevant to a pump/rugpull dashboard. Add or
 // remove symbols here freely.
@@ -18,7 +46,7 @@ const WATCHLIST = [
   "AVAXUSDT",
   "LINKUSDT",
   "SUIUSDT",
-  "PEPEUSDT",
+  "1000PEPEUSDT", // was "PEPEUSDT" — wrong ticker, see toFuturesPair() above
   "WIFUSDT",
   "ARBUSDT",
   "OPUSDT",
@@ -44,9 +72,9 @@ export async function get24hTicker(symbol: string): Promise<Ticker24h & { source
       highPrice: string;
       lowPrice: string;
       quoteVolume: string;
-    }) {
+    }, labelPair: string) {
       return {
-        symbol: pair,
+        symbol: labelPair,
         lastPrice: parseFloat(json.lastPrice),
         priceChangePercent: parseFloat(json.priceChangePercent),
         highPrice: parseFloat(json.highPrice),
@@ -54,15 +82,21 @@ export async function get24hTicker(symbol: string): Promise<Ticker24h & { source
         quoteVolume: parseFloat(json.quoteVolume),
       };
     }
+    // Futures leg uses toFuturesPair() (fixes PEPE -> 1000PEPEUSDT); Spot
+    // fallback keeps the plain ticker — Binance Spot doesn't necessarily
+    // use the same 1000x-scaled convention, and that hasn't been verified
+    // here, so it's left unchanged rather than guessed at.
+    const futuresPair = toFuturesPair(symbol);
+    const spotPair = pair;
     try {
-      const res = await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=${pair}`, { next: { revalidate: 15 } });
-      if (!res.ok) throw new Error(`Binance Futures 24hr ticker failed for ${pair}: ${res.status}`);
-      return { ...(await parse(await res.json())), source: "futures" as const };
+      const res = await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=${futuresPair}`, { next: { revalidate: 15 } });
+      if (!res.ok) throw new Error(`Binance Futures 24hr ticker failed for ${futuresPair}: ${res.status}`);
+      return { ...(await parse(await res.json(), futuresPair)), source: "futures" as const };
     } catch (futuresErr) {
       try {
-        const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`, { next: { revalidate: 15 } });
-        if (!res.ok) throw new Error(`Binance Spot 24hr ticker failed for ${pair}: ${res.status}`);
-        return { ...(await parse(await res.json())), source: "spot" as const };
+        const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${spotPair}`, { next: { revalidate: 15 } });
+        if (!res.ok) throw new Error(`Binance Spot 24hr ticker failed for ${spotPair}: ${res.status}`);
+        return { ...(await parse(await res.json(), spotPair)), source: "spot" as const };
       } catch (spotErr) {
         throw futuresErr instanceof Error && spotErr instanceof Error
           ? new Error(`${futuresErr.message}; ${spotErr.message}`)
@@ -149,7 +183,7 @@ export interface RecentTrade {
  * not inferred or simulated.
  */
 export async function getRecentTrades(symbol: string, limit = 1000): Promise<RecentTrade[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   return cached(`bn:trades:${pair}:${limit}`, 5_000, async () => {
     const res = await fetch(`${BASE}/fapi/v1/aggTrades?symbol=${pair}&limit=${Math.min(1000, limit)}`, {
       next: { revalidate: 5 },
@@ -172,7 +206,7 @@ export async function getRecentTrades(symbol: string, limit = 1000): Promise<Rec
  * trades come back or the last trade's time reaches endTime.
  */
 export async function getAggTradesRange(symbol: string, startTime: number, endTime: number): Promise<RecentTrade[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   const out: RecentTrade[] = [];
   let cursorStart = startTime;
   let fromId: number | null = null;
@@ -217,7 +251,7 @@ export interface AggTradeWithId {
 }
 
 export async function getAggTradesFromId(symbol: string, fromId: number, limit = 1000): Promise<AggTradeWithId[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   const res = await fetch(`${BASE}/fapi/v1/aggTrades?symbol=${pair}&fromId=${fromId}&limit=${Math.min(1000, limit)}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Binance aggTrades (fromId) failed for ${pair}: ${res.status}`);
   const raw = (await res.json()) as Array<{ a: number; p: string; q: string; m: boolean; T: number }>;
@@ -251,23 +285,28 @@ export async function getAggTradesRangeChunked(symbol: string, startTime: number
 export async function getOrderBookDepth(symbol: string, limit = 20): Promise<OrderBookSnapshot & { source: "futures" | "spot" }> {
   const pair = `${symbol.toUpperCase()}USDT`;
   return cached(`bn:depth:${pair}:${limit}`, 10_000, async () => {
+    // Futures leg uses toFuturesPair() (fixes PEPE -> 1000PEPEUSDT); Spot
+    // fallback keeps the plain ticker — not verified to use the same
+    // 1000x-scaled convention, so left unchanged rather than guessed at.
+    const futuresPair = toFuturesPair(symbol);
+    const spotPair = pair;
     try {
-      const res = await fetch(`${BASE}/fapi/v1/depth?symbol=${pair}&limit=${limit}`, { next: { revalidate: 10 } });
-      if (!res.ok) throw new Error(`Binance Futures depth failed for ${pair}: ${res.status}`);
+      const res = await fetch(`${BASE}/fapi/v1/depth?symbol=${futuresPair}&limit=${limit}`, { next: { revalidate: 10 } });
+      if (!res.ok) throw new Error(`Binance Futures depth failed for ${futuresPair}: ${res.status}`);
       const json = (await res.json()) as { bids: [string, string][]; asks: [string, string][] };
       return {
-        symbol: pair,
+        symbol: futuresPair,
         source: "futures" as const,
         bids: json.bids.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
         asks: json.asks.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
       };
     } catch (futuresErr) {
       try {
-        const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${pair}&limit=${Math.min(limit, 100)}`, { next: { revalidate: 10 } });
-        if (!res.ok) throw new Error(`Binance Spot depth failed for ${pair}: ${res.status}`);
+        const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${spotPair}&limit=${Math.min(limit, 100)}`, { next: { revalidate: 10 } });
+        if (!res.ok) throw new Error(`Binance Spot depth failed for ${spotPair}: ${res.status}`);
         const json = (await res.json()) as { bids: [string, string][]; asks: [string, string][] };
         return {
-          symbol: pair,
+          symbol: spotPair,
           source: "spot" as const,
           bids: json.bids.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
           asks: json.asks.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
@@ -298,7 +337,7 @@ export async function getOpenInterestHistory(
   period: "5m" | "15m" | "1h" | "4h" = "1h",
   limit = 2
 ): Promise<OpenInterestPoint[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   return cached(`bn:oi-hist:${pair}:${period}:${limit}`, 60_000, async () => {
     const res = await fetch(`${BASE}/futures/data/openInterestHist?symbol=${pair}&period=${period}&limit=${limit}`, {
       next: { revalidate: 60 },
@@ -334,7 +373,7 @@ export interface FundingRatePoint {
  * (Binance Futures) by design — see lib/intelligence/premiumMicrostructure.ts.
  */
 export async function getFundingRateHistory(symbol: string, limit = 90): Promise<FundingRatePoint[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   const capped = Math.min(1000, Math.max(1, limit));
   return cached(`bn:funding-hist:${pair}:${capped}`, 5 * 60_000, async () => {
     const res = await fetch(`${BASE}/fapi/v1/fundingRate?symbol=${pair}&limit=${capped}`, {
@@ -353,7 +392,7 @@ export async function getFundingRateHistory(symbol: string, limit = 90): Promise
  * data, no key required.
  */
 export async function getLongShortRatio(symbol: string, period: "5m" | "15m" | "1h" | "4h" = "1h"): Promise<number | undefined> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   return cached(`bn:ls-ratio:${pair}:${period}`, 60_000, async () => {
     try {
       const res = await fetch(`${BASE}/futures/data/globalLongShortAccountRatio?symbol=${pair}&period=${period}&limit=1`, {
@@ -393,7 +432,7 @@ export async function getCvdSeries(
   interval: string,
   limit = 100
 ): Promise<{ time: number; delta: number; cvd: number; buyVolumeUsd: number; sellVolumeUsd: number }[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   return cached(`bn:cvd:${pair}:${interval}:${limit}`, 60_000, async () => {
     const res = await fetch(`${BASE}/fapi/v1/klines?symbol=${pair}&interval=${interval}&limit=${limit}`, {
       next: { revalidate: 60 },
@@ -418,7 +457,7 @@ export async function getCvdSeries(
 }
 
 export async function getKlines(symbol: string, interval: string, limit = 200): Promise<Candle[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   return cached(`bn:klines:${pair}:${interval}:${limit}`, 60_000, async () => {
     const res = await fetch(`${BASE}/fapi/v1/klines?symbol=${pair}&interval=${interval}&limit=${limit}`, {
       next: { revalidate: 60 },
@@ -464,7 +503,7 @@ const INTERVAL_MS: Record<string, number> = {
  * returns whatever real candles were retrieved.
  */
 export async function getKlinesRange(symbol: string, interval: string, days: number): Promise<Candle[]> {
-  const pair = `${symbol.toUpperCase()}USDT`;
+  const pair = toFuturesPair(symbol);
   const intervalMs = INTERVAL_MS[interval] ?? 300_000;
   // Hard ceiling so a bad/huge `days` value can't trigger an unbounded fetch loop.
   const wantedCount = Math.min(50_000, Math.ceil((days * 86_400_000) / intervalMs));

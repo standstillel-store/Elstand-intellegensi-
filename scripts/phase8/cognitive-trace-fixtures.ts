@@ -189,10 +189,18 @@ const orchestratorSrc = readFileSync(new URL("../../lib/ai/autonomousRuntime/orc
 }
 
 // 14. Every persistCognitiveTrace call in orchestrator.ts is awaited-with-catch (best-effort — a Learning DB outage can never fail the cycle).
+// Updated 2026-09-08 (Phase 8.5 P0 fix, see migration add_contradictions_column_cognitive_trace
+// and CHANGES.md): the bare `.catch(() => {})` that silently discarded every
+// persistence failure — including the 2026-09-06 schema-drift incident,
+// invisible in every log for 42+ hours — was replaced with
+// `.then(r => logPersistenceFailure(...)).catch(err => logPersistenceThrew(...))`.
+// This still satisfies "best-effort" (never throws into the caller, never
+// awaited-then-rethrown) — it now also reads and logs the result instead of
+// discarding it unread.
 {
   const calls = orchestratorSrc.split("persistCognitiveTrace({").length - 1;
-  const bestEffortCalls = (orchestratorSrc.match(/await persistCognitiveTrace\(\{[\s\S]*?\}\)\.catch\(\(\) => \{\}\);/g) ?? []).length;
-  check("14. every persistCognitiveTrace call is awaited with .catch(() => {}) (best-effort)", calls === bestEffortCalls && calls === 3, `${bestEffortCalls}/${calls} calls are best-effort`);
+  const bestEffortCalls = (orchestratorSrc.match(/await persistCognitiveTrace\(\{[\s\S]*?\}\)\s*\.then\(\(r\) => logPersistenceFailure\([\s\S]*?\)\)\s*\.catch\(\(err\) => logPersistenceThrew\([\s\S]*?\)\);/g) ?? []).length;
+  check("14. every persistCognitiveTrace call is awaited, reads its result, and logs failures non-fatally (best-effort)", calls === bestEffortCalls && calls === 3, `${bestEffortCalls}/${calls} calls match the corrected pattern`);
 }
 
 // 15. orchestrator.ts's Step 10 persist call passes cognitiveConflictInternal verbatim as `conflict` — never a narrowed/rebuilt object.
