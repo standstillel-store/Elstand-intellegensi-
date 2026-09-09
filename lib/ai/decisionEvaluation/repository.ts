@@ -13,12 +13,18 @@
 //   - stamps `evaluatedAt` (the one field evaluate.ts intentionally never
 //     generates) immediately before persistence.
 //
-// NOTE (explicit, per this task's scope): no automatic trigger is wired
-// here. `evaluateAndPersistDecision()` exists and is independently
-// testable/callable, but nothing in the trading lifecycle calls it yet —
-// wiring a trigger is left to a future, separately-approved change,
-// exactly mirroring how Phase 8.1.0's own outcome-capture trigger was
-// deliberately staged as a separate task from its underlying pipeline.
+// NOTE: Phase 8.5 wires `evaluateAndPersistDecision()` to an automatic
+// (but bounded, locked, scheduled) backlog-retry trigger — see
+// lib/ai/autonomousRuntime/evaluationBacklog.ts. This was the
+// "separately-approved change" this note used to defer; approved
+// 2026-09 (see CHANGES.md) after measuring the actual gap: 106/146
+// (72.6%) closed decision_experiences had never received an evaluation,
+// not because of the automatic post-close INSUFFICIENT_EVIDENCE guard
+// below (decisionLearning/lifecycle.ts) working as intended, but because
+// nothing ever retried them afterward. `evaluateAndPersistDecision()`
+// itself is completely unchanged — this file still introduces zero new
+// evaluation semantics; the new module only decides WHICH already-closed,
+// already-unevaluated experiences to call it for, on a schedule.
 // ---------------------------------------------------------------------------
 
 import { getLearningSupabase } from "@/lib/ai/learning/db";
@@ -28,6 +34,33 @@ import type { DecisionEvaluation, DecisionExperienceRecord } from "./contracts";
 // ---------------------------------------------------------------------------
 // Read: decision_experiences (Learning DB only)
 // ---------------------------------------------------------------------------
+
+/**
+ * Closed (outcome_result IS NOT NULL) decision_experiences with no
+ * matching decision_evaluations row yet, oldest-first, capped at `limit`.
+ * Read-only, two bounded queries (no unbounded full-table scan): fetch up
+ * to `limit * 4` closed candidate ids, then filter out the ones that
+ * already have an evaluation. Returns `[]` if the Learning DB isn't
+ * configured — never throws.
+ */
+export async function getUnevaluatedClosedExperienceIds(limit: number): Promise<string[]> {
+  const learningDb = getLearningSupabase();
+  if (!learningDb) return [];
+
+  const { data: experiences } = await learningDb
+    .from("decision_experiences")
+    .select("source_signal_id")
+    .not("outcome_result", "is", null)
+    .order("decision_timestamp", { ascending: true })
+    .limit(limit * 4);
+  if (!experiences || experiences.length === 0) return [];
+
+  const ids = experiences.map((e: { source_signal_id: string }) => e.source_signal_id);
+  const { data: evaluated } = await learningDb.from("decision_evaluations").select("source_signal_id").in("source_signal_id", ids);
+  const evaluatedSet = new Set((evaluated ?? []).map((e: { source_signal_id: string }) => e.source_signal_id));
+
+  return ids.filter((id: string) => !evaluatedSet.has(id)).slice(0, limit);
+}
 
 /**
  * Reads a single `decision_experiences` row from the Learning DB and maps
@@ -157,9 +190,13 @@ export type EvaluateAndPersistResult = PersistDecisionEvaluationResult | { persi
  * (Learning DB unconfigured, experience not found, a write error) resolves
  * to a typed, non-throwing result — this function never throws.
  *
- * Not called from anywhere yet in this phase (see the file header) —
- * callable directly today for manual/batch use, and ready for a future,
- * separately-approved automatic trigger.
+ * Always persists unconditionally, including an honest INSUFFICIENT_EVIDENCE
+ * result — unlike decisionLearning/lifecycle.ts's automatic post-close path,
+ * which skips persistence on INSUFFICIENT_EVIDENCE specifically to guard
+ * against a race with in-flight outcome capture. That race cannot occur
+ * here: every caller of this function (manual/historical use, and Phase
+ * 8.5's lib/ai/autonomousRuntime/evaluationBacklog.ts) only ever selects
+ * already-closed (outcome_result IS NOT NULL) experiences.
  */
 export async function evaluateAndPersistDecision(sourceSignalId: string): Promise<EvaluateAndPersistResult> {
   const experience = await getDecisionExperienceForEvaluation(sourceSignalId);

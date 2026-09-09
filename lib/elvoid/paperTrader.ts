@@ -5,6 +5,7 @@ import { GRADE_ORDER } from "./types";
 import { computeCloseResult, computeUnrealized } from "./math";
 import { completeDecisionLearningLifecycle } from "../ai/decisionLearning/lifecycle";
 import { triggerLearningRefreshBestEffort } from "../ai/autonomousRuntime/learningRefresh";
+import { triggerEvaluationBacklogBestEffort } from "../ai/autonomousRuntime/evaluationBacklog";
 
 export { computeUnrealized };
 
@@ -226,6 +227,10 @@ async function writeClose(
       // a per-trade-close trigger is safe here (guarded by a shared lock,
       // never a synchronous full-table recompute on this request).
       triggerLearningRefreshBestEffort();
+      // Phase 8.5 — same fire-and-forget shape, own dedicated lock, clears
+      // a small batch of closed-but-unscored decisions each time. See
+      // lib/ai/autonomousRuntime/evaluationBacklog.ts's header.
+      triggerEvaluationBacklogBestEffort();
     })
     .catch((err) => {
       // Intentionally isolated from the trading lifecycle — but NOT
