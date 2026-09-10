@@ -5,6 +5,8 @@ import { StatCard } from "@/components/StatCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { EquityCurveChart } from "@/components/paper-trader/EquityCurveChart";
 import { CognitiveMapSection } from "@/components/ai-performance/cognitive/CognitiveMapSection";
+import { CurrentActivityPanel } from "@/components/ai-performance/CurrentActivityPanel";
+import { ExternalIntelligencePanel } from "@/components/ai-performance/ExternalIntelligencePanel";
 import { Disclaimer } from "@/components/Disclaimer";
 import { formatUsd } from "@/lib/format";
 import type { AiStatistics, PaperWallet } from "@/lib/elvoid/types";
@@ -80,6 +82,18 @@ export function AiPerformanceView({
     <div className="space-y-5 pb-16 lg:pb-0">
       <Disclaimer />
 
+      {/* ===== COMMAND CENTER HEADER ===== */}
+      <div className="flex items-center justify-between gap-3 rounded border border-line bg-[#070a10] px-3 py-2.5">
+        <div>
+          <p className="text-sm font-bold tracking-wide text-ink">ELVOID AI PERFORMANCE</p>
+          <p className="text-[10px] uppercase tracking-widest text-ink-faint">AI Intelligence Terminal</p>
+        </div>
+        <span className="flex items-center gap-1.5 rounded-full border border-up/30 bg-up/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-up">
+          <span className="h-1.5 w-1.5 rounded-full bg-up animate-pulse" />
+          Live
+        </span>
+      </div>
+
       {/* ===== TOP KPI STRIP — real data only, N/A when no closed trades ===== */}
       <section id="overview" className="scroll-mt-20">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -112,8 +126,8 @@ export function AiPerformanceView({
         </div>
       </section>
 
-      {/* ===== EQUITY CURVE + PERFORMANCE BREAKDOWN ===== */}
-      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+      {/* ===== EQUITY CURVE + PERFORMANCE BREAKDOWN + CURRENT ACTIVITY ===== */}
+      <div className="grid gap-4 lg:grid-cols-[2fr_1fr_1fr]">
         <EquityCurveChart points={report.equityCurve} />
 
         <div className="glow-card p-4">
@@ -161,10 +175,17 @@ export function AiPerformanceView({
             </dl>
           )}
         </div>
+
+        {/* Real per-symbol status, derived from the same runtime_events the
+            terminal below reads — see CurrentActivityPanel.tsx. */}
+        <CurrentActivityPanel />
       </div>
 
       {/* ===== ELVOID COGNITIVE VISUALIZATION (Phase 8.3.1) — additive, real-data-only ===== */}
-      <CognitiveMapSection />
+      <div className="grid gap-4 lg:grid-cols-[3fr_1fr]">
+        <CognitiveMapSection />
+        <ExternalIntelligencePanel />
+      </div>
 
       {/* ===== RECENT AI TRADES (from ai_journal x ai_signals — real data) ===== */}
       <div id="ai-journal" className="glow-card scroll-mt-20 p-4">
