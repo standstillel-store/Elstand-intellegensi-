@@ -11,8 +11,8 @@
 // Learning DB hiccup slow down or fail the trading cycle.
 //
 // Same fail-safe contract as every other Phase 8.5 persistence helper:
-// never throws, and a write failure is logged (not silently discarded —
-// see logRuntimeEventFailure below) rather than invisible.
+// never throws, and a write failure is logged inline below (not silently
+// discarded) rather than invisible.
 //
 // This module does NOT decide what counts as a "real" event — the caller
 // (lib/ai/autonomousRuntime/orchestrator.ts) only ever calls it with
@@ -64,29 +64,34 @@ export function emitRuntimeEvent(input: RuntimeEventInput): void {
   const learningDb = getLearningSupabase();
   if (!learningDb) return; // not configured — same "expected in some environments" rule as every other Learning DB write
 
-  learningDb
-    .from("runtime_events")
-    .insert({
-      source: "ELVOID_PRO_ORACLE",
-      cycle_id: input.cycleId,
-      symbol: input.symbol,
-      component: input.component,
-      operation: input.operation,
-      status: input.status,
-      started_at: input.startedAt,
-      completed_at: input.completedAt,
-      duration_ms: input.durationMs,
-      message: input.message ?? null,
-      metadata: input.metadata ?? null,
-    })
-    .then(({ error }: { error: { message: string } | null }) => {
+  // Phase 8.5 fix: the Supabase query builder returned by .insert(...) is
+  // PromiseLike, not a full Promise — it has no .catch()/.finally(). An
+  // async IIFE that `await`s it (same proven pattern as
+  // persistCognitiveTrace/persistDecisionTrace elsewhere in this
+  // codebase) always returns a genuine Promise, so try/catch below is
+  // reliable regardless of the builder's own type.
+  void (async () => {
+    try {
+      const { error } = await learningDb.from("runtime_events").insert({
+        source: "ELVOID_PRO_ORACLE",
+        cycle_id: input.cycleId,
+        symbol: input.symbol,
+        component: input.component,
+        operation: input.operation,
+        status: input.status,
+        started_at: input.startedAt,
+        completed_at: input.completedAt,
+        duration_ms: input.durationMs,
+        message: input.message ?? null,
+        metadata: input.metadata ?? null,
+      });
       if (error) {
         console.error(`[ElVoid AI] Runtime event emit failed (non-fatal, cycle continues): ${input.component}/${input.operation} — ${error.message}`);
       }
-    })
-    .catch((err: unknown) => {
+    } catch (err) {
       console.error("[ElVoid AI] Runtime event emit threw unexpectedly (non-fatal):", err instanceof Error ? err.message : String(err));
-    });
+    }
+  })();
 }
 
 /**
