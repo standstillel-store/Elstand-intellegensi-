@@ -85,6 +85,8 @@ import { classifyAutonomousLearningLifecycle } from "@/lib/ai/autonomousLearning
 import { buildAutonomousSetupIdentity, getLastExecutedSetup, isDuplicateSetup, recordExecutedSetup } from "./dedup";
 import { upsertAutonomousIntelligenceSnapshot } from "@/lib/ai/autonomousSnapshot/repository";
 import { persistCognitiveTrace } from "@/lib/ai/cognitiveTrace/repository";
+import { emitRuntimeEvent, elapsedSince, type RuntimeEventStatus } from "@/lib/ai/runtimeEvents/emit";
+import { randomUUID } from "crypto";
 import type { EconomicEvent } from "@/lib/ai/macroIntelligence/contracts";
 import type { NewsItem } from "@/lib/ai/eventImpact/contracts";
 import type { AutonomousDecisionEngineResult } from "@/lib/ai/autonomousDecision/contracts";
@@ -166,12 +168,31 @@ function logPersistenceThrew(label: string, err: unknown): void {
  */
 export async function runAutonomousCycle(symbol: string, interval: string, calendar: readonly EconomicEvent[], news: readonly NewsItem[]): Promise<AutonomousCycleResult> {
   const asOf = nowIso();
+  // Phase 8.5 — one real id per runAutonomousCycle() invocation (one
+  // symbol, one tick), used only to group this cycle's runtime_events rows
+  // for the observability terminal. Never read by any decision logic.
+  const cycleId = randomUUID();
+  emitRuntimeEvent({ cycleId, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "RUNNING", startedAt: asOf, completedAt: null, durationMs: null });
 
   // --- Step 1: canonical Oracle assessment (Phase 7, unchanged). ---
   let context: Awaited<ReturnType<typeof assembleOracleContext>>;
   try {
     context = await assembleOracleContext(symbol, interval);
+    const { completedAt: marketDataAt, durationMs: marketDataMs } = elapsedSince(asOf);
     if (context.candles.length < 30) {
+      emitRuntimeEvent({
+        cycleId,
+        symbol,
+        component: "MARKET_DATA",
+        operation: "assembleOracleContext",
+        status: "WARNING",
+        startedAt: asOf,
+        completedAt: marketDataAt,
+        durationMs: marketDataMs,
+        message: `Candle history untuk ${symbol} tidak cukup untuk analisis Oracle.`,
+        metadata: { candleCount: context.candles.length, requiredCandleCount: 30 },
+      });
+      emitRuntimeEvent({ cycleId, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "SKIPPED", startedAt: asOf, completedAt: marketDataAt, durationMs: marketDataMs, message: "NO_ASSESSMENT — insufficient candle history" });
       // Phase 8.3.2 — a NO_ASSESSMENT cycle is still a real cycle attempt;
       // record it (INPUT stage only) rather than leaving no trace at all.
       await persistCognitiveTrace({
@@ -197,7 +218,23 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
         .catch((err) => logPersistenceThrew("Cognitive trace persistence", err));
       return { version: 1, symbol, generatedAt: asOf, stage: "NO_ASSESSMENT", decision: null, dedupApplied: false, executionOutcome: null, paperTradeId: null, learningLifecycleStatus: null, error: `Candle history untuk ${symbol} tidak cukup untuk analisis Oracle.` };
     }
+    emitRuntimeEvent({
+      cycleId,
+      symbol,
+      component: "MARKET_DATA",
+      operation: "assembleOracleContext",
+      status: "SUCCESS",
+      startedAt: asOf,
+      completedAt: marketDataAt,
+      durationMs: marketDataMs,
+      message: `${context.candles.length} candles, current price ${context.currentPrice ?? "unavailable"}`,
+      metadata: { candleCount: context.candles.length, currentPrice: context.currentPrice ?? null, interval },
+    });
   } catch (err) {
+    const { completedAt: errAt, durationMs: errMs } = elapsedSince(asOf);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    emitRuntimeEvent({ cycleId, symbol, component: "MARKET_DATA", operation: "assembleOracleContext", status: "ERROR", startedAt: asOf, completedAt: errAt, durationMs: errMs, message: errorMessage });
+    emitRuntimeEvent({ cycleId, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "ERROR", startedAt: asOf, completedAt: errAt, durationMs: errMs, message: "NO_ASSESSMENT — market data fetch threw" });
     // Phase 8.3.2 — same rationale as the insufficient-history branch above:
     // this cycle attempt genuinely happened and is worth an honest record.
     await persistCognitiveTrace({
@@ -224,11 +261,24 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     return { version: 1, symbol, generatedAt: asOf, stage: "NO_ASSESSMENT", decision: null, dedupApplied: false, executionOutcome: null, paperTradeId: null, learningLifecycleStatus: null, error: err instanceof Error ? err.message : String(err) };
   }
 
+  const marketDataAt = nowIso(); // Phase 8.5 — real checkpoint for terminal event durations below.
   const confluence = computeConfluence(context);
   const dominantSide = confluence.dominantSide === "NEUTRAL" ? null : confluence.dominantSide;
   const risk = buildOracleRiskPlan(context, dominantSide);
   const assessment = gradeConfluence(confluence, risk ?? undefined);
   const analysisAt = nowIso(); // Phase 8.3.2 — real instant the canonical assessment resolved this cycle.
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "ORACLE",
+    operation: "computeConfluence+buildOracleRiskPlan+gradeConfluence",
+    status: "SUCCESS",
+    startedAt: marketDataAt,
+    completedAt: analysisAt,
+    durationMs: elapsedSince(marketDataAt).durationMs,
+    message: `grade=${assessment.grade} confidence=${Math.round(assessment.confidence * 100)}% risk=${assessment.riskStatus}`,
+    metadata: { grade: assessment.grade, confidence: assessment.confidence, riskStatus: assessment.riskStatus, side: assessment.side, factorCount: confluence.factors.length, riskPlanPresent: risk !== null },
+  });
 
   // --- Step 2: Phase 7.2-7.9 / 8.0.x context layer — defensive, exactly mirroring the oracle route. ---
   const mtf = await buildMtfContext(symbol, interval, context.candles, context.currentPrice).catch(() => null);
@@ -254,6 +304,18 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     scenarios = null;
   }
   const evidenceAt = nowIso(); // Phase 8.3.2 — real instant the mtf/regime/liquidity/scenario block finished this cycle.
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "INTELLIGENCE",
+    operation: "buildMtfContext+classifyMarketRegime+buildLiquidityOrderFlowContext+buildScenarios",
+    status: mtf !== null || regime !== null || liquidityOrderFlow !== null || scenarios !== null ? "SUCCESS" : "WARNING",
+    startedAt: analysisAt,
+    completedAt: evidenceAt,
+    durationMs: elapsedSince(analysisAt).durationMs,
+    message: `mtf=${mtf !== null} regime=${regime !== null} liquidityOrderFlow=${liquidityOrderFlow !== null} scenarios=${scenarios !== null}`,
+    metadata: { mtfAvailable: mtf !== null, regimeAvailable: regime !== null, liquidityOrderFlowAvailable: liquidityOrderFlow !== null, scenariosAvailable: scenarios !== null, factorCount: confluence.factors.length },
+  });
 
   let contradictions: ReturnType<typeof classifyContradictions> | null = null;
   try {
@@ -304,6 +366,18 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     cognitiveConflictInternal = null;
   }
   const conflictAt = nowIso(); // Phase 8.3.2 — real instant resolveCognitiveConflict() returned this cycle.
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "CONFLICT",
+    operation: "classifyContradictions+resolveCognitiveConflict",
+    status: contradictions?.hasUnresolvedGenuineContradiction ? "WARNING" : "SUCCESS",
+    startedAt: evidenceAt,
+    completedAt: conflictAt,
+    durationMs: elapsedSince(evidenceAt).durationMs,
+    message: `${contradictions?.contradictions.length ?? 0} contradiction(s), coherence=${cognitiveConflictInternal?.state ?? "UNAVAILABLE"}`,
+    metadata: { contradictionCount: contradictions?.contradictions.length ?? 0, hasUnresolvedGenuine: contradictions?.hasUnresolvedGenuineContradiction ?? null, coherenceState: cognitiveConflictInternal?.state ?? null },
+  });
 
   let decisionContext: ReturnType<typeof buildDecisionContext> | null = null;
   try {
@@ -327,12 +401,30 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   const autonomousContext = buildAutonomousDecisionContext(AUTONOMOUS_SOURCE, symbol, asOf, assessment, decisionContext, memory, rawConstraints);
 
   // --- Step 5: Qualification (8.2.2) -> Macro (8.2.3) -> Event Impact (8.2.4) -> Pre-Entry (8.2.5) -> Decision (8.2.6). ---
+  const qualifyStartAt = nowIso();
   const qualification = qualifyAutonomousDecision(autonomousContext);
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "QUALIFICATION",
+    operation: "qualifyAutonomousDecision",
+    status: qualification.status === "QUALIFIED" ? "SUCCESS" : qualification.status === "CAUTION" ? "WARNING" : "REJECT",
+    startedAt: qualifyStartAt,
+    completedAt: nowIso(),
+    durationMs: elapsedSince(qualifyStartAt).durationMs,
+    message: `status=${qualification.status}`,
+    metadata: { status: qualification.status },
+  });
   const macro = analyzeMacroIntelligence({ asOf, calendar });
   const eventImpact = analyzeEventImpact({ asOf, macro, news });
 
   // --- Phase 8.3x8.4 wiring: Research Trigger -> capability availability -> (real, keyless funding-rate observation only, if requested and watchlisted) -> Evidence Normalization -> Community Intelligence (always empty, honestly) -> conflict check. Never throws; a total failure degrades to null, the same as every other Step-2 sub-analysis above. ---
   const externalIntelligenceAt = nowIso();
+  // Phase 8.5 — a real RUNNING marker for the terminal, emitted right
+  // before the actual fetch starts (not a decorative "searching..."
+  // animation — this row exists only because the real call below is
+  // genuinely in flight at this instant).
+  emitRuntimeEvent({ cycleId, symbol, component: "EXTERNAL_INTELLIGENCE", operation: "assembleExternalIntelligenceSignal", status: "RUNNING", startedAt: externalIntelligenceAt, completedAt: null, durationMs: null });
   const externalIntelligence = await assembleExternalIntelligenceSignal({
     symbol,
     asOf: externalIntelligenceAt,
@@ -343,8 +435,56 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     riskIntelligence,
     marketImpact: eventImpact,
   }).catch(() => null);
+  {
+    const { completedAt: extIntelDoneAt, durationMs: extIntelMs } = elapsedSince(externalIntelligenceAt);
+    const status: RuntimeEventStatus = externalIntelligence === null ? "ERROR" : !externalIntelligence.shouldResearch ? "SKIPPED" : externalIntelligence.evidenceSatisfied ? "SUCCESS" : externalIntelligence.hasConflict ? "WARNING" : "UNAVAILABLE";
+    emitRuntimeEvent({
+      cycleId,
+      symbol,
+      component: "EXTERNAL_INTELLIGENCE",
+      operation: "assembleExternalIntelligenceSignal",
+      status,
+      startedAt: externalIntelligenceAt,
+      completedAt: extIntelDoneAt,
+      durationMs: extIntelMs,
+      message:
+        externalIntelligence === null
+          ? "gate call did not resolve"
+          : !externalIntelligence.shouldResearch
+            ? "research trigger did not fire this cycle"
+            : `capabilities=${externalIntelligence.requestedCapabilities.join(",")} evidenceSatisfied=${externalIntelligence.evidenceSatisfied}`,
+      metadata:
+        externalIntelligence === null
+          ? null
+          : {
+              shouldResearch: externalIntelligence.shouldResearch,
+              evidenceSatisfied: externalIntelligence.evidenceSatisfied,
+              hasConflict: externalIntelligence.hasConflict,
+              requestedCapabilities: externalIntelligence.requestedCapabilities,
+              // Real, already-known source — funding_rate is the one live,
+              // keyless capability this gate can actually satisfy (see
+              // lib/ai/wiring/externalIntelligenceGate.ts). No URL is
+              // fabricated: Binance's public REST endpoint has no
+              // per-request URL worth surfacing beyond the provider name.
+              provider: externalIntelligence.evidenceSatisfied ? "Binance" : null,
+            },
+    });
+  }
 
+  const preEntryStartAt = nowIso();
   const preEntry = validatePreEntry({ decisionContext: autonomousContext, qualification, macro, eventImpact, externalIntelligence });
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "PRE_ENTRY",
+    operation: "validatePreEntry",
+    status: preEntry.status === "VALID" ? "SUCCESS" : preEntry.status === "CAUTION" ? "WARNING" : "REJECT",
+    startedAt: preEntryStartAt,
+    completedAt: nowIso(),
+    durationMs: elapsedSince(preEntryStartAt).durationMs,
+    message: `status=${preEntry.status}`,
+    metadata: { status: preEntry.status },
+  });
   const decision: AutonomousDecisionEngineResult = decideAutonomous({ decisionContext: autonomousContext, qualification, macro, eventImpact, preEntry });
 
   // --- Step 6 (Phase 8.2.9 §6): duplicate-execution protection — orchestration only, never a second decision engine. ---
@@ -366,8 +506,21 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     }
   }
   const decisionAt = nowIso(); // Phase 8.3.2 — real instant this cycle's effective (post-dedup) decision was finalized.
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "DECISION",
+    operation: "decideAutonomous",
+    status: effectiveDecision.decision === "EXECUTE" ? "SUCCESS" : effectiveDecision.decision === "REJECT" ? "REJECT" : "WAIT",
+    startedAt: preEntryStartAt,
+    completedAt: decisionAt,
+    durationMs: elapsedSince(preEntryStartAt).durationMs,
+    message: `decision=${effectiveDecision.decision}${dedupApplied ? " (dedup-downgraded from EXECUTE)" : ""} — qualification=${qualification.status} preEntry=${preEntry.status}`,
+    metadata: { decision: effectiveDecision.decision, rawDecision: decision.decision, side: assessment.side, dedupApplied, qualificationStatus: qualification.status, preEntryStatus: preEntry.status },
+  });
 
   // --- Step 7 (Phase 8.2.7): execute or safely no-op; persists the decision trace internally for every outcome. ---
+  const executionStartAt = nowIso();
   const execution = await executeAutonomousPaperTrade({
     decision: effectiveDecision,
     assessment,
@@ -376,6 +529,18 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     learningContext,
   });
   const executionAt = nowIso(); // Phase 8.3.2 — real instant executeAutonomousPaperTrade() resolved this cycle.
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "EXECUTION",
+    operation: "executeAutonomousPaperTrade",
+    status: execution.error ? "ERROR" : execution.outcome === "EXECUTED" ? "SUCCESS" : "SKIPPED",
+    startedAt: executionStartAt,
+    completedAt: executionAt,
+    durationMs: elapsedSince(executionStartAt).durationMs,
+    message: execution.error ? execution.error : `outcome=${execution.outcome}${execution.paperTradeId ? ` paperTradeId=${execution.paperTradeId}` : ""}`,
+    metadata: { outcome: execution.outcome, paperTradeId: execution.paperTradeId, error: execution.error ?? null },
+  });
 
   if (execution.outcome === "EXECUTED" && candidateSetupIdentity) {
     await recordExecutedSetup(AUTONOMOUS_SOURCE, symbol, candidateSetupIdentity, execution.paperTradeId).catch(() => {});
@@ -383,6 +548,18 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
 
   // --- Step 8 (Phase 8.2.8): classify whether this result will enter the existing learning lifecycle on close. ---
   const learningLifecycle = classifyAutonomousLearningLifecycle(execution);
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "LEARNING",
+    operation: "classifyAutonomousLearningLifecycle",
+    status: learningLifecycle.willEnterLearningLifecycleOnClose ? "SUCCESS" : "SKIPPED",
+    startedAt: executionAt,
+    completedAt: nowIso(),
+    durationMs: elapsedSince(executionAt).durationMs,
+    message: `status=${learningLifecycle.status}`,
+    metadata: { status: learningLifecycle.status },
+  });
 
   // --- Step 9 (Phase 8.3.0.1 §10): persist the latest observation-only
   // intelligence snapshot for this symbol. Best-effort — a Learning DB
@@ -455,6 +632,19 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   })
     .then((r) => logPersistenceFailure("Cognitive trace persistence", r))
     .catch((err) => logPersistenceThrew("Cognitive trace persistence", err));
+
+  emitRuntimeEvent({
+    cycleId,
+    symbol,
+    component: "CYCLE",
+    operation: "runAutonomousCycle",
+    status: execution.error ? "ERROR" : "SUCCESS",
+    startedAt: asOf,
+    completedAt: nowIso(),
+    durationMs: elapsedSince(asOf).durationMs,
+    message: `complete — decision=${effectiveDecision.decision} execution=${execution.outcome}`,
+    metadata: { decision: effectiveDecision.decision, executionOutcome: execution.outcome, dedupApplied },
+  });
 
   return {
     version: 1,

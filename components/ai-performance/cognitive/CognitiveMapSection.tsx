@@ -153,7 +153,7 @@ export function CognitiveMapSection() {
         </div>
 
         <div className="min-h-[260px] border-t border-line lg:h-full lg:w-80 lg:min-h-0 lg:border-l lg:border-t-0">
-          <RuntimeTerminal events={snapshot?.events ?? []} onSelectNode={handleSelectNode} />
+          <RuntimeTerminal onSelectNode={handleSelectNode} />
         </div>
       </div>
     </div>

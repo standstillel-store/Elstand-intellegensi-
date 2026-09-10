@@ -786,3 +786,43 @@ end $$;
 alter table cognitive_trace enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.5 addition: runtime_events — append-only, per-operation
+-- observability events for the Runtime Terminal UI. Added here (and via
+-- tracked migration create_runtime_events_table) in the SAME delta that
+-- introduces it in code, specifically to avoid repeating the exact
+-- schema-drift bug this Phase's audit found and fixed for cognitive_trace
+-- (a column the code needed shipped without ever being migrated into the
+-- live table). One row per real backend operation the autonomous cycle
+-- actually performed, grouped by cycle_id. Never read by decision logic.
+-- ---------------------------------------------------------------------------
+create table if not exists runtime_events (
+  id uuid primary key default gen_random_uuid(),
+  source text not null default 'ELVOID_PRO_ORACLE' check (source in ('ELVOID_PRO_ORACLE')),
+  cycle_id uuid not null,
+  symbol text not null,
+  component text not null check (component in (
+    'CYCLE','MARKET_DATA','INTELLIGENCE','ORACLE','RISK',
+    'EXTERNAL_INTELLIGENCE','CONFLICT','QUALIFICATION','PRE_ENTRY',
+    'DECISION','EXECUTION','LEARNING'
+  )),
+  operation text not null,
+  status text not null check (status in (
+    'RUNNING','SUCCESS','WARNING','ERROR','SKIPPED','WAIT','REJECT','UNAVAILABLE'
+  )),
+  started_at timestamptz not null,
+  completed_at timestamptz,
+  duration_ms integer,
+  message text,
+  metadata jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists runtime_events_cycle_id_idx on runtime_events (cycle_id);
+create index if not exists runtime_events_symbol_created_at_idx on runtime_events (symbol, created_at desc);
+create index if not exists runtime_events_created_at_idx on runtime_events (created_at desc);
+
+alter table runtime_events enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
