@@ -172,7 +172,13 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   // symbol, one tick), used only to group this cycle's runtime_events rows
   // for the observability terminal. Never read by any decision logic.
   const cycleId = randomUUID();
-  emitRuntimeEvent({ cycleId, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "RUNNING", startedAt: asOf, completedAt: null, durationMs: null });
+  // Phase 8.5 bug fix — emitRuntimeEvent() is deliberately fire-and-forget
+  // (never awaited), so independent inserts can reach Postgres out of
+  // true causal order. This counter is incremented synchronously, in the
+  // exact order events are conceptually raised in this function, and is
+  // the reliable within-cycle ordering key (see runtime_events.sequence).
+  let eventSequence = 0;
+  emitRuntimeEvent({ cycleId, sequence: eventSequence++, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "RUNNING", startedAt: asOf, completedAt: null, durationMs: null });
 
   // --- Step 1: canonical Oracle assessment (Phase 7, unchanged). ---
   let context: Awaited<ReturnType<typeof assembleOracleContext>>;
@@ -181,7 +187,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     const { completedAt: marketDataAt, durationMs: marketDataMs } = elapsedSince(asOf);
     if (context.candles.length < 30) {
       emitRuntimeEvent({
-        cycleId,
+        cycleId, sequence: eventSequence++,
         symbol,
         component: "MARKET_DATA",
         operation: "assembleOracleContext",
@@ -192,7 +198,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
         message: `Candle history untuk ${symbol} tidak cukup untuk analisis Oracle.`,
         metadata: { candleCount: context.candles.length, requiredCandleCount: 30 },
       });
-      emitRuntimeEvent({ cycleId, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "SKIPPED", startedAt: asOf, completedAt: marketDataAt, durationMs: marketDataMs, message: "NO_ASSESSMENT — insufficient candle history" });
+      emitRuntimeEvent({ cycleId, sequence: eventSequence++, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "SKIPPED", startedAt: asOf, completedAt: marketDataAt, durationMs: marketDataMs, message: "NO_ASSESSMENT — insufficient candle history" });
       // Phase 8.3.2 — a NO_ASSESSMENT cycle is still a real cycle attempt;
       // record it (INPUT stage only) rather than leaving no trace at all.
       await persistCognitiveTrace({
@@ -219,7 +225,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
       return { version: 1, symbol, generatedAt: asOf, stage: "NO_ASSESSMENT", decision: null, dedupApplied: false, executionOutcome: null, paperTradeId: null, learningLifecycleStatus: null, error: `Candle history untuk ${symbol} tidak cukup untuk analisis Oracle.` };
     }
     emitRuntimeEvent({
-      cycleId,
+      cycleId, sequence: eventSequence++,
       symbol,
       component: "MARKET_DATA",
       operation: "assembleOracleContext",
@@ -233,8 +239,8 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   } catch (err) {
     const { completedAt: errAt, durationMs: errMs } = elapsedSince(asOf);
     const errorMessage = err instanceof Error ? err.message : String(err);
-    emitRuntimeEvent({ cycleId, symbol, component: "MARKET_DATA", operation: "assembleOracleContext", status: "ERROR", startedAt: asOf, completedAt: errAt, durationMs: errMs, message: errorMessage });
-    emitRuntimeEvent({ cycleId, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "ERROR", startedAt: asOf, completedAt: errAt, durationMs: errMs, message: "NO_ASSESSMENT — market data fetch threw" });
+    emitRuntimeEvent({ cycleId, sequence: eventSequence++, symbol, component: "MARKET_DATA", operation: "assembleOracleContext", status: "ERROR", startedAt: asOf, completedAt: errAt, durationMs: errMs, message: errorMessage });
+    emitRuntimeEvent({ cycleId, sequence: eventSequence++, symbol, component: "CYCLE", operation: "runAutonomousCycle", status: "ERROR", startedAt: asOf, completedAt: errAt, durationMs: errMs, message: "NO_ASSESSMENT — market data fetch threw" });
     // Phase 8.3.2 — same rationale as the insufficient-history branch above:
     // this cycle attempt genuinely happened and is worth an honest record.
     await persistCognitiveTrace({
@@ -268,7 +274,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   const assessment = gradeConfluence(confluence, risk ?? undefined);
   const analysisAt = nowIso(); // Phase 8.3.2 — real instant the canonical assessment resolved this cycle.
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "ORACLE",
     operation: "computeConfluence+buildOracleRiskPlan+gradeConfluence",
@@ -305,7 +311,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   }
   const evidenceAt = nowIso(); // Phase 8.3.2 — real instant the mtf/regime/liquidity/scenario block finished this cycle.
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "INTELLIGENCE",
     operation: "buildMtfContext+classifyMarketRegime+buildLiquidityOrderFlowContext+buildScenarios",
@@ -367,7 +373,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   }
   const conflictAt = nowIso(); // Phase 8.3.2 — real instant resolveCognitiveConflict() returned this cycle.
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "CONFLICT",
     operation: "classifyContradictions+resolveCognitiveConflict",
@@ -404,7 +410,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   const qualifyStartAt = nowIso();
   const qualification = qualifyAutonomousDecision(autonomousContext);
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "QUALIFICATION",
     operation: "qualifyAutonomousDecision",
@@ -424,7 +430,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   // before the actual fetch starts (not a decorative "searching..."
   // animation — this row exists only because the real call below is
   // genuinely in flight at this instant).
-  emitRuntimeEvent({ cycleId, symbol, component: "EXTERNAL_INTELLIGENCE", operation: "assembleExternalIntelligenceSignal", status: "RUNNING", startedAt: externalIntelligenceAt, completedAt: null, durationMs: null });
+  emitRuntimeEvent({ cycleId, sequence: eventSequence++, symbol, component: "EXTERNAL_INTELLIGENCE", operation: "assembleExternalIntelligenceSignal", status: "RUNNING", startedAt: externalIntelligenceAt, completedAt: null, durationMs: null });
   const externalIntelligence = await assembleExternalIntelligenceSignal({
     symbol,
     asOf: externalIntelligenceAt,
@@ -439,7 +445,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     const { completedAt: extIntelDoneAt, durationMs: extIntelMs } = elapsedSince(externalIntelligenceAt);
     const status: RuntimeEventStatus = externalIntelligence === null ? "ERROR" : !externalIntelligence.shouldResearch ? "SKIPPED" : externalIntelligence.evidenceSatisfied ? "SUCCESS" : externalIntelligence.hasConflict ? "WARNING" : "UNAVAILABLE";
     emitRuntimeEvent({
-      cycleId,
+      cycleId, sequence: eventSequence++,
       symbol,
       component: "EXTERNAL_INTELLIGENCE",
       operation: "assembleExternalIntelligenceSignal",
@@ -474,7 +480,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   const preEntryStartAt = nowIso();
   const preEntry = validatePreEntry({ decisionContext: autonomousContext, qualification, macro, eventImpact, externalIntelligence });
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "PRE_ENTRY",
     operation: "validatePreEntry",
@@ -507,7 +513,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   }
   const decisionAt = nowIso(); // Phase 8.3.2 — real instant this cycle's effective (post-dedup) decision was finalized.
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "DECISION",
     operation: "decideAutonomous",
@@ -530,7 +536,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   });
   const executionAt = nowIso(); // Phase 8.3.2 — real instant executeAutonomousPaperTrade() resolved this cycle.
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "EXECUTION",
     operation: "executeAutonomousPaperTrade",
@@ -549,7 +555,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   // --- Step 8 (Phase 8.2.8): classify whether this result will enter the existing learning lifecycle on close. ---
   const learningLifecycle = classifyAutonomousLearningLifecycle(execution);
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "LEARNING",
     operation: "classifyAutonomousLearningLifecycle",
@@ -634,7 +640,7 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     .catch((err) => logPersistenceThrew("Cognitive trace persistence", err));
 
   emitRuntimeEvent({
-    cycleId,
+    cycleId, sequence: eventSequence++,
     symbol,
     component: "CYCLE",
     operation: "runAutonomousCycle",

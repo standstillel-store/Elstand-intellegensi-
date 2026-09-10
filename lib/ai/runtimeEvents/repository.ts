@@ -23,6 +23,7 @@ export interface RuntimeEventRecord {
   readonly startedAt: string;
   readonly completedAt: string | null;
   readonly durationMs: number | null;
+  readonly sequence: number | null;
   readonly message: string | null;
   readonly metadata: Record<string, unknown> | null;
   readonly createdAt: string;
@@ -38,6 +39,7 @@ interface RuntimeEventRow {
   started_at: string;
   completed_at: string | null;
   duration_ms: number | null;
+  sequence: number | null;
   message: string | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
@@ -54,6 +56,7 @@ function toRecord(row: RuntimeEventRow): RuntimeEventRecord {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     durationMs: row.duration_ms,
+    sequence: row.sequence,
     message: row.message,
     metadata: row.metadata,
     createdAt: row.created_at,

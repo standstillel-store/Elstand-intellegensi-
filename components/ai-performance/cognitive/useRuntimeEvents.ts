@@ -15,6 +15,7 @@ export interface RuntimeEvent {
   readonly startedAt: string;
   readonly completedAt: string | null;
   readonly durationMs: number | null;
+  readonly sequence: number | null;
   readonly message: string | null;
   readonly metadata: Record<string, unknown> | null;
   readonly createdAt: string;

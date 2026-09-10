@@ -78,7 +78,13 @@ function groupIntoCycles(events: readonly RuntimeEvent[]): Cycle[] {
   }
   const cycles: Cycle[] = [];
   for (const [cycleId, list] of byId) {
-    const sorted = [...list].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    // Bug fix: `sequence` is assigned synchronously by the backend, in
+    // true causal order, before any fire-and-forget insert starts — it's
+    // the reliable sort key. `createdAt` (DB-assigned) can't be trusted
+    // for same-cycle ordering because independent inserts can reach
+    // Postgres out of order. Fall back to createdAt only for events
+    // emitted before `sequence` existed (both null -> stable no-op).
+    const sorted = [...list].sort((a, b) => (a.sequence !== null && b.sequence !== null ? a.sequence - b.sequence : Date.parse(a.createdAt) - Date.parse(b.createdAt)));
     const cycleMarker = sorted.find((e) => e.component === "CYCLE" && e.status !== "RUNNING");
     cycles.push({ cycleId, symbol: sorted[0].symbol, events: sorted, startedAt: sorted[0].startedAt, stillRunning: cycleMarker === undefined });
   }

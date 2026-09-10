@@ -49,6 +49,15 @@ export interface RuntimeEventInput {
   readonly startedAt: string; // ISO — real wall-clock instant the operation began
   readonly completedAt: string | null; // ISO, null only for a RUNNING marker
   readonly durationMs: number | null; // null only for a RUNNING marker
+  /**
+   * Assigned synchronously by the caller (runAutonomousCycle's own
+   * per-cycle counter, incremented once per emit call, before this
+   * function's async insert ever starts). This — not `created_at` — is
+   * the correct within-cycle ordering key: emitRuntimeEvent() is
+   * deliberately fire-and-forget, so independent inserts can otherwise
+   * reach Postgres out of true causal order.
+   */
+  readonly sequence: number;
   readonly message?: string | null;
   /** Structured, real values only (grade, confidence, provider name, an actual returned URL, an actual error message/code). Never fabricated to fill the shape. */
   readonly metadata?: Record<string, unknown> | null;
@@ -82,6 +91,7 @@ export function emitRuntimeEvent(input: RuntimeEventInput): void {
         started_at: input.startedAt,
         completed_at: input.completedAt,
         duration_ms: input.durationMs,
+        sequence: input.sequence,
         message: input.message ?? null,
         metadata: input.metadata ?? null,
       });
