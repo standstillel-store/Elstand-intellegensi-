@@ -6,7 +6,7 @@ import { Reveal } from "./Reveal";
 export function IntelligenceMapSection() {
   return (
     <SectionShell id="map" layer="01" env="dark">
-      <Eyebrow>LAYER 01 — PROPAGATION</Eyebrow>
+      <Eyebrow accent="violet">LAYER 01 — PROPAGATION</Eyebrow>
       <Split>
         <div>
           <Reveal>
@@ -25,7 +25,10 @@ export function IntelligenceMapSection() {
           </Reveal>
         </div>
         <Reveal delay={0.1}>
-          <FlowDiagram nodes={["HIGH IMPACT NEWS", "MACRO SENTIMENT", "GLOBAL MARKETS", "CRYPTO · FOREX · EQUITIES"]} />
+          <FlowDiagram
+            nodes={["HIGH IMPACT NEWS", "MACRO SENTIMENT", "GLOBAL MARKETS", "CRYPTO · FOREX · EQUITIES"]}
+            accent="violet"
+          />
         </Reveal>
       </Split>
     </SectionShell>

@@ -1,5 +1,6 @@
 import { SectionShell, Eyebrow, Lede, Split, TileGrid, Note, IllustrativePanel } from "./shared";
 import { Reveal } from "./Reveal";
+import { StructureWaveVisual } from "./visuals/StructureWaveVisual";
 
 // Layer 02 — Market Structure. Maps to the ElVoid AI Signal Engine's
 // indicator layer (lib/elvoid/indicators.ts — RSI/EMA/MACD/structure) and
@@ -29,7 +30,7 @@ export function QuantSection() {
         </div>
         <div>
           <Reveal delay={0.1}>
-            <IllustrativePanel label="STRUCTURE WAVE" />
+            <IllustrativePanel label="STRUCTURE WAVE" visual={<StructureWaveVisual />} />
             <TileGrid
               tiles={[
                 { label: "RSI", value: "·" },

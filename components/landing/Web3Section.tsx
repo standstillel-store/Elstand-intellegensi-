@@ -1,5 +1,6 @@
 import { SectionShell, Eyebrow, Lede, Split, TileGrid, Note, IllustrativePanel } from "./shared";
 import { Reveal } from "./Reveal";
+import { SettlementFlowVisual } from "./visuals/SettlementFlowVisual";
 
 // Layer 04 — On-Chain Utility. Per the Phase A audit (CONTRACTS.md), every
 // contract here is deployed on BSC Testnet (chainId 97) — ELS Token,
@@ -30,7 +31,7 @@ export function Web3Section() {
         </div>
         <div>
           <Reveal delay={0.1}>
-            <IllustrativePanel label="ON-CHAIN SETTLEMENT — BSC TESTNET" />
+            <IllustrativePanel label="ON-CHAIN SETTLEMENT — BSC TESTNET" visual={<SettlementFlowVisual />} />
             <TileGrid
               tiles={[
                 { label: "WALLET", value: "Connect" },

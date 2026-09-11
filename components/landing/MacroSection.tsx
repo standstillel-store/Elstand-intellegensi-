@@ -1,5 +1,6 @@
 import { SectionShell, Eyebrow, Lede, Split, TileGrid, Note, IllustrativePanel } from "./shared";
 import { Reveal } from "./Reveal";
+import { MacroNetworkVisual } from "./visuals/MacroNetworkVisual";
 
 // Layer 01 — Macro Context. Maps to lib/intelligence/macroEvents.ts,
 // macroKnowledge.ts, globalSentiment.ts, and app/economic-calendar/ per the
@@ -37,7 +38,7 @@ export function MacroSection() {
         </div>
         <div>
           <Reveal delay={0.1}>
-            <IllustrativePanel label="MACRO CONTEXT NETWORK" />
+            <IllustrativePanel label="MACRO CONTEXT NETWORK" visual={<MacroNetworkVisual />} />
             <Note>Illustrative network view. Live rendering depends on connected data sources.</Note>
           </Reveal>
         </div>

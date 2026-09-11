@@ -16,7 +16,7 @@ import { Reveal } from "./Reveal";
 export function OracleSection() {
   return (
     <SectionShell id="oracle" layer="03" env="light">
-      <Eyebrow>LAYER 03 — DECISION SUPPORT</Eyebrow>
+      <Eyebrow accent="violet">LAYER 03 — DECISION SUPPORT</Eyebrow>
       <Split>
         <div>
           <Reveal>
@@ -43,6 +43,7 @@ export function OracleSection() {
         <Reveal delay={0.1}>
           <FlowDiagram
             nodes={["MARKET DATA + MACRO + MICRO + CONFLUENCE", "DIRECTION", "CONFIDENCE", "REASON", "EVIDENCE"]}
+            accent="violet"
           />
         </Reveal>
       </Split>

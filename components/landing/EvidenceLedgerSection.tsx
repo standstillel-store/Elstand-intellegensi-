@@ -12,7 +12,7 @@ import { Reveal } from "./Reveal";
 export function EvidenceLedgerSection() {
   return (
     <SectionShell id="performance" layer="03" env="dark">
-      <Eyebrow>LAYER 03 — EVALUATION</Eyebrow>
+      <Eyebrow accent="violet">LAYER 03 — EVALUATION</Eyebrow>
       <Reveal>
         <h2 className="elv-h2">
           The Evidence
@@ -30,6 +30,7 @@ export function EvidenceLedgerSection() {
         <FlowDiagram
           nodes={["AI DECISION", "PAPER TRADE", "OUTCOME", "PERFORMANCE", "REVIEW"]}
           direction="row"
+          accent="violet"
         />
       </Reveal>
       <Reveal delay={0.15}>

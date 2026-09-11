@@ -581,6 +581,14 @@ body {
   --elv-amber-bright-rgb: 224 180 108;
   --elv-teal-rgb: 60 125 118;
   --elv-teal-bright-rgb: 87 168 158;
+  /* Phase 9 — intelligence-layer accent. Added, not swapped in for amber:
+     used only by the opt-in Eyebrow/FlowDiagram accent="violet" variant on
+     IntelligenceMapSection/OracleSection/EvidenceLedgerSection. The bright
+     value intentionally matches the dashboard's own --signal-glow-rgb
+     (167 139 250) so the two products' "AI/intelligence" color is the same
+     number, not just a similar hue. */
+  --elv-violet-rgb: 124 106 246;
+  --elv-violet-bright-rgb: 167 139 250;
   --elv-rule-dark-rgb: 233 230 220;
   --elv-rule-light-rgb: 18 21 27;
 
@@ -633,6 +641,24 @@ body {
   pointer-events: none;
   z-index: 0;
 }
+/* Phase 9 — section transitions. The dark/light alternation is preserved
+   exactly as designed; this just adds a thin gold seam at the boundary
+   between every pair of sections so scrolling reads as one continuous
+   "thread" instead of a hard cut, echoing this project's own established
+   "one thin gold thread" accent language (see .landing-aurora above). One
+   1px gradient line, no new element beyond a pseudo-element — not a large
+   decorative addition. */
+.landing-root .elv-section::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(var(--elv-amber-rgb) / 0.35) 50%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
 .landing-root .elv-env-dark {
   background: rgb(var(--elv-ink-rgb) / 0.94);
   color: rgb(var(--elv-fg-dark-rgb));
@@ -674,6 +700,14 @@ body {
   align-items: center;
   gap: 10px;
   margin-bottom: 22px;
+}
+/* Phase 9 — opt-in modifier for Eyebrow's accent="violet" prop, used only
+   by IntelligenceMapSection/OracleSection/EvidenceLedgerSection. Every
+   other section keeps the default amber rule above unchanged. The dot
+   marker needs no separate rule here — `.eyebrow-dot`'s
+   `background: currentColor` already follows this. */
+.landing-root .elv-eyebrow-violet {
+  color: rgb(var(--elv-violet-bright-rgb));
 }
 /* Phase C fix: the dot marker is now rendered by the Eyebrow component
    itself (`.eyebrow-dot`, defined near the pre-existing bare `.eyebrow`
@@ -821,6 +855,12 @@ body {
 }
 .landing-root .elv-tile {
   padding: 18px 16px;
+  /* Phase 9 fix — orphan-cell bug. Default span is 1 (every tile behaves
+     exactly as before); TileGrid only raises this custom property on the
+     trailing tile(s) of an incomplete last row, so that row always sums to
+     the full column count instead of leaving an empty gap. See
+     trailingRowSpans() in shared.tsx. */
+  grid-column: span var(--elv-tile-desktop-span, 1);
 }
 .landing-root .elv-tile-label {
   font-family: var(--font-mono);
@@ -836,6 +876,9 @@ body {
 @media (max-width: 640px) {
   .landing-root .elv-tile-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .landing-root .elv-tile {
+    grid-column: span var(--elv-tile-mobile-span, 1);
   }
 }
 
@@ -894,6 +937,27 @@ body {
     box-shadow: 0 0 0 0 rgb(var(--elv-amber-rgb) / 0);
   }
 }
+/* Phase 9 — opt-in modifier for FlowDiagram's accent="violet" prop, used
+   only by IntelligenceMapSection/OracleSection/EvidenceLedgerSection.
+   Additive only: doesn't touch the amber/teal rules above, just overrides
+   both with equal-or-higher specificity, applied after them, so the
+   default amber/teal alternation is unaffected everywhere else. */
+.landing-root .elv-flow-violet .elv-flow-node .elv-flow-pulse {
+  background: rgb(var(--elv-violet-bright-rgb));
+  box-shadow: 0 0 0 rgb(var(--elv-violet-bright-rgb) / 0.5);
+  animation-name: elv-flowpulse-violet;
+}
+@keyframes elv-flowpulse-violet {
+  0% {
+    box-shadow: 0 0 0 0 rgb(var(--elv-violet-bright-rgb) / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgb(var(--elv-violet-bright-rgb) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--elv-violet-bright-rgb) / 0);
+  }
+}
 .landing-root .elv-flow-arrow-inline {
   font-family: var(--font-mono);
   color: rgb(var(--elv-fg-dark-dim-rgb));
@@ -906,7 +970,14 @@ body {
 .landing-root .elv-mock-panel {
   position: relative;
   width: 100%;
-  height: 220px;
+  /* Phase 9 fix — this was a flat 220px regardless of viewport width, which
+     read as an oversized empty box on narrow phones (confirmed directly
+     against the Phase 9 audit's screenshots). clamp() keeps the existing
+     220px at >=~688px width (i.e. desktop composition is pixel-identical
+     to before) and scales down to a 150px floor below ~469px — a real
+     reduction, not an arbitrary extreme value, and never so short that the
+     visual/label inside gets clipped. */
+  height: clamp(150px, 32vw, 220px);
   border: 1px solid rgb(var(--elv-rule-dark-rgb) / 0.12);
   overflow: hidden;
   display: flex;
@@ -932,16 +1003,175 @@ body {
   color: rgb(var(--elv-fg-light-dim-rgb));
 }
 
+/* ---------- mock panel visuals (Phase 9 — Macro / Quant / Web3) ----------
+   Each panel's SVG sits absolutely inside .elv-mock-panel (position set
+   above), layered over .elv-mock-panel-grid and under .elv-mock-panel-label
+   in DOM order — see IllustrativePanel in shared.tsx. All keyframes here
+   are covered by this file's existing blanket prefers-reduced-motion rule,
+   same as every other animation on the page. */
+.landing-root .elv-net-visual,
+.landing-root .elv-wave-visual,
+.landing-root .elv-settle-visual {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Macro — amber, hub-and-satellite network (MacroNetworkVisual.tsx) */
+.landing-root .elv-net-line {
+  stroke: rgb(var(--elv-amber-rgb) / 0.25);
+  stroke-width: 1;
+}
+.landing-root .elv-net-line-active {
+  stroke: rgb(var(--elv-amber-rgb) / 0.55);
+  stroke-dasharray: 5 5;
+  animation: elv-net-line-flow 3.6s linear infinite;
+}
+@keyframes elv-net-line-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+.landing-root .elv-net-node {
+  fill: rgb(var(--elv-amber-rgb) / 0.7);
+}
+.landing-root .elv-net-node-hub {
+  fill: rgb(var(--elv-amber-bright-rgb));
+}
+.landing-root .elv-net-ping {
+  fill: none;
+  stroke: rgb(var(--elv-amber-rgb) / 0.45);
+  stroke-width: 1;
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: elv-net-ping 3.2s ease-out infinite;
+}
+@keyframes elv-net-ping {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+.landing-root .elv-env-light .elv-net-line {
+  stroke: rgb(var(--elv-fg-light-dim-rgb) / 0.2);
+}
+
+/* Quant — teal, abstract structure wave (StructureWaveVisual.tsx). No
+   price values, no numbers — geometry only, matching this section's own
+   "·" tile placeholders. */
+.landing-root .elv-wave-path {
+  fill: none;
+  stroke: rgb(var(--elv-teal-bright-rgb) / 0.6);
+  stroke-width: 1.5;
+  animation: elv-wave-drift 6s ease-in-out infinite;
+}
+.landing-root .elv-wave-level {
+  stroke: rgb(var(--elv-teal-rgb) / 0.35);
+  stroke-width: 1;
+  stroke-dasharray: 4 6;
+  animation: elv-wave-level-drift 9s linear infinite;
+}
+@keyframes elv-wave-drift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+@keyframes elv-wave-level-drift {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+
+/* Web3 — gold, wallet -> tx -> service -> settlement (SettlementFlowVisual.tsx) */
+.landing-root .elv-settle-line {
+  fill: none;
+  stroke: rgb(var(--elv-amber-rgb) / 0.35);
+  stroke-width: 1;
+}
+.landing-root .elv-settle-node {
+  fill: rgb(var(--elv-amber-rgb) / 0.8);
+}
+.landing-root .elv-settle-label {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  fill: rgb(var(--elv-fg-dark-dim-rgb));
+}
+.landing-root .elv-env-light .elv-settle-label {
+  fill: rgb(var(--elv-fg-light-dim-rgb));
+}
+.landing-root .elv-settle-packet {
+  fill: rgb(var(--elv-amber-bright-rgb));
+  /* Coordinates match the <path> drawn in SettlementFlowVisual.tsx exactly
+     — see that file's comment for why this is duplicated here instead of
+     computed. Browsers without offset-path support just show the dot at
+     its default (0,0) position painted over by the path start — no error,
+     no layout break, only the travel animation is lost. */
+  offset-path: path("M30,60 L120,60 L210,60 L300,60");
+  animation: elv-settle-travel 4s linear infinite;
+}
+@keyframes elv-settle-travel {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
 /* ---------- footprint grid (order flow) ---------- */
+.landing-root .elv-fp-wrap {
+  margin-top: 26px;
+}
+.landing-root .elv-fp-caption {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--elv-fg-dark-dim-rgb));
+}
 .landing-root .elv-fp-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   gap: 2px;
-  margin-top: 26px;
 }
 .landing-root .elv-fp-cell {
   aspect-ratio: 1;
   background: rgb(var(--elv-teal-bright-rgb));
+}
+/* Phase 9 — a small, fixed subset of cells (see ANIMATED_CELL_INDICES in
+   OrderFlowSection.tsx) gets a slow brightness pulse so the grid doesn't
+   read as completely inert. Animates `filter`, not `opacity`, so it layers
+   on top of each cell's own static opacity (inline style) instead of
+   overriding it — the deterministic pattern itself is unchanged. */
+.landing-root .elv-fp-cell-pulse {
+  animation: elv-fp-pulse 5s ease-in-out infinite;
+}
+@keyframes elv-fp-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.8);
+  }
 }
 
 /* ---------- hero ---------- */
@@ -1098,8 +1328,18 @@ body {
 }
 .landing-root .elv-header-scrolled {
   background: rgb(var(--elv-ink-rgb) / 0.85);
-  backdrop-filter: blur(12px);
   border-bottom-color: rgb(var(--elv-rule-dark-rgb) / 0.12);
+}
+/* Phase 9 perf fix — backdrop-filter used to apply unconditionally at every
+   breakpoint. The solid 0.85-alpha background above already gives strong
+   contrast on its own (verified: brand mark + CTA stay legible over every
+   section's busiest content without it), so the blur — the expensive part
+   — is now gated to desktop only. Mobile keeps the same solid background,
+   just without the blur cost. */
+@media (min-width: 901px) {
+  .landing-root .elv-header-scrolled {
+    backdrop-filter: blur(12px);
+  }
 }
 .landing-root .elv-header-brand {
   display: flex;
@@ -1231,6 +1471,21 @@ body {
   filter: blur(90px);
   opacity: 0.16;
   animation: elv-ambient-drift 28s ease-in-out infinite;
+}
+/* Phase 9 perf fix — this used to run at full cost (90px blur, 60vmax
+   area) unconditionally on mobile too. blur() is one of the most GPU-
+   expensive CSS filters, and its cost scales with the blurred area, so
+   this reduces both: a smaller blob (less area to blur) and a lower blur
+   radius on narrow/mobile viewports. Desktop is completely untouched —
+   this only fires <=640px. The drift animation itself is kept (motion is
+   part of the intended atmosphere), just cheaper to render. */
+@media (max-width: 640px) {
+  .landing-root .elv-ambient-blob {
+    width: 42vmax;
+    height: 42vmax;
+    filter: blur(46px);
+    opacity: 0.13;
+  }
 }
 .landing-root .elv-ambient-blob-amber {
   background: rgb(var(--elv-amber-rgb));

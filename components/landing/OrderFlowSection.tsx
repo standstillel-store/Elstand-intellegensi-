@@ -11,8 +11,18 @@ import { Reveal } from "./Reveal";
 //
 // The footprint grid below is a deterministic pseudo-pattern (index-based,
 // not Math.random()) so server and client render identically — it's
-// decorative, not a claim of live footprint data.
+// decorative, not a claim of live footprint data. Phase 9: this framing
+// used to live only in the (invisible-to-sighted-users) aria-label — now
+// also stated as a small visible caption over the grid itself.
 const FP_CELLS = Array.from({ length: 48 }, (_, i) => 0.08 + ((i * 37) % 100) / 130);
+
+// Phase 9 — a deliberately small, fixed subset (8 of 48 cells, every 6th
+// index) gets a slow brightness pulse so the grid doesn't read as
+// completely inert. Deterministic, not random, and not all 48 cells —
+// "limited subset," not a full-grid shimmer. Animates via `filter`, not
+// `opacity`, so it layers on top of each cell's existing static opacity
+// (set below) instead of overriding it.
+const ANIMATED_CELL_INDICES = new Set([0, 6, 12, 18, 24, 30, 36, 42]);
 
 export function OrderFlowSection() {
   return (
@@ -44,10 +54,24 @@ export function OrderFlowSection() {
           </Reveal>
         </div>
         <Reveal delay={0.1}>
-          <div className="elv-fp-grid" role="img" aria-label="Illustrative footprint volume grid">
-            {FP_CELLS.map((opacity, i) => (
-              <div key={i} className="elv-fp-cell" style={{ opacity }} />
-            ))}
+          <div className="elv-fp-wrap">
+            <span className="elv-fp-caption mono">ILLUSTRATIVE FOOTPRINT</span>
+            <div
+              className="elv-fp-grid"
+              role="img"
+              aria-label="Illustrative footprint volume grid — not live order-flow data"
+            >
+              {FP_CELLS.map((opacity, i) => {
+                const isAnimated = ANIMATED_CELL_INDICES.has(i);
+                return (
+                  <div
+                    key={i}
+                    className={isAnimated ? "elv-fp-cell elv-fp-cell-pulse" : "elv-fp-cell"}
+                    style={isAnimated ? { opacity, animationDelay: `${(i / 6) * 0.7}s` } : { opacity }}
+                  />
+                );
+              })}
+            </div>
           </div>
         </Reveal>
       </Split>
