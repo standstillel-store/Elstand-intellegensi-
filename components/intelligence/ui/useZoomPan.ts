@@ -154,6 +154,27 @@ export function useZoomPan(viewportRef: RefObject<HTMLDivElement>, contentRef: R
 
   const reset = useCallback(() => setCamera({ scale: 1, x: 0, y: 0 }, true), [setCamera]);
 
+  // fitToViewport — additive helper (Phase 8.5 mobile polish). Scales a
+  // known-width square/rect content block (e.g. a fixed-size SVG canvas)
+  // down so it fits inside the current viewport width on first render,
+  // instead of always starting at scale=1 and clipping most of the
+  // canvas on narrow phones. Never scales content UP past 1 (desktop is
+  // untouched — fitScale is clamped to <= 1), and re-centers via the
+  // existing clamp()/clampAxis() centering branch. Opt-in: existing
+  // consumers of this hook that never call it behave exactly as before.
+  const fitToViewport = useCallback(
+    (contentWidth: number, padding = 12) => {
+      const vp = viewportRef.current;
+      if (!vp || contentWidth <= 0) return;
+      const vw = vp.clientWidth;
+      if (vw <= 0) return;
+      const fitScale = Math.min(1, (vw - padding * 2) / contentWidth);
+      if (!Number.isFinite(fitScale) || fitScale <= 0) return;
+      setCamera({ scale: Math.min(maxScale, Math.max(minScale, fitScale)), x: 0, y: 0 });
+    },
+    [viewportRef, minScale, maxScale, setCamera]
+  );
+
   const localFromScreen = useCallback((p: Point, cam: Camera): Point => ({ x: (p.x - cam.x) / cam.scale, y: (p.y - cam.y) / cam.scale }), []);
 
   const pointFromEvent = useCallback(
@@ -296,6 +317,7 @@ export function useZoomPan(viewportRef: RefObject<HTMLDivElement>, contentRef: R
     zoomIn,
     zoomOut,
     reset,
+    fitToViewport,
     canZoomIn: camera.scale < maxScale - 0.001,
     canZoomOut: camera.scale > minScale + 0.001,
     isAtDefault: Math.abs(camera.scale - 1) < 0.001 && Math.abs(camera.x) < 0.5 && Math.abs(camera.y) < 0.5,

@@ -31,6 +31,7 @@ export function CognitiveMapSection() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomPan = useZoomPan(viewportRef, containerRef, { reducedMotion, minScale: 0.5, maxScale: 1.8 });
+  const hasFitRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,35 +56,58 @@ export function CognitiveMapSection() {
     };
   }, []);
 
+  // On first successful load only, fit the fixed 640px graph canvas to
+  // whatever width the viewport actually has (mobile in particular) so
+  // the whole node map is visible instead of opening zoomed into the
+  // center. Desktop viewports (>=640px) already fit at scale 1, so
+  // fitScale there is clamped to 1 and this is a no-op. Runs once, not
+  // on every 20s poll, so it never fights a user's own zoom/pan.
+  useEffect(() => {
+    if (!snapshot || hasFitRef.current) return;
+    hasFitRef.current = true;
+    zoomPan.fitToViewport(COGNITIVE_GRAPH_SIZE);
+  }, [snapshot, zoomPan]);
+
   const handleSelectNode = useCallback((id: string) => setSelectedNodeId((cur) => (cur === id ? null : id)), []);
 
   const selectedNode = snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null;
   const anyActive = snapshot?.nodes.some((n) => n.status === "ACTIVE" || n.status === "PROCESSING") ?? false;
+  // Two separate, truthful signals instead of one overloaded "LIVE/IDLE"
+  // dot (Phase 8.5): telemetryConnected reflects whether the poll itself
+  // is succeeding (system graph available/observing); anyActive reflects
+  // whether any module is showing fresh runtime activity this cycle.
+  // Both are derived only from the real snapshot — nothing invented.
+  const telemetryConnected = !!snapshot && !error;
 
   return (
     <div id="cognitive-graph" className="glow-card ambient-glow ambient-glow-ai scroll-mt-20 overflow-hidden p-0">
-      <div className="border-b border-line p-4">
+      <div className="border-b border-line p-3 sm:p-4">
         <SectionHeader
           code="ENS"
           title="Live Intelligence Graph"
           hint={snapshot ? new Date(snapshot.generatedAt).toLocaleTimeString(undefined, { hour12: false }) : undefined}
         />
-        <div className="-mt-1 flex flex-wrap items-center justify-between gap-2">
-          <p className="max-w-xl text-xs text-ink-muted">Observe how ELVOID connects market data, decisions, outcomes, errors, and learned patterns.</p>
-          <LiveDot tone={anyActive ? "up" : "signal"} label={anyActive ? "LIVE" : "IDLE"} />
+        <div className="-mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          <p className="min-w-0 max-w-xl break-words text-xs text-ink-muted">Observe how ELVOID connects market data, decisions, outcomes, errors, and learned patterns.</p>
+          <LiveDot tone={telemetryConnected ? "up" : "signal"} label={telemetryConnected ? "GRAPH LIVE" : "CONNECTING"} />
         </div>
+        {snapshot && (
+          <p className="mt-1 text-[10.5px] text-ink-faint">{anyActive ? "Fresh runtime activity this cycle." : "System graph observing — no fresh activity this cycle."}</p>
+        )}
         {snapshot && snapshot.limitations.length > 0 && (
-          <ul className="mt-2 space-y-0.5 text-[10.5px] text-amber">
+          <ul className="mt-2 space-y-0.5 text-[10px] leading-snug text-amber sm:text-[10.5px]">
             {snapshot.limitations.map((l) => (
-              <li key={l}>· {l}</li>
+              <li key={l} className="break-words">
+                · {l}
+              </li>
             ))}
           </ul>
         )}
         {error && <p className="mt-2 text-[10.5px] text-down">{error}</p>}
       </div>
 
-      <div className="flex min-h-[520px] flex-col lg:h-[680px] lg:min-h-0 lg:flex-row">
-        <div className="relative min-h-[360px] flex-1 lg:min-w-0">
+      <div className="flex min-h-[460px] flex-col lg:h-[680px] lg:min-h-0 lg:flex-row">
+        <div className="relative min-h-[300px] min-w-0 flex-1 lg:min-h-[360px]">
           {!snapshot ? (
             <div className="flex h-full items-center justify-center text-xs text-ink-muted">Connecting to ELVOID runtime…</div>
           ) : (
@@ -103,7 +127,7 @@ export function CognitiveMapSection() {
               <div
                 ref={viewportRef}
                 {...zoomPan.viewportHandlers}
-                style={{ ...zoomPan.viewportStyle, minHeight: 360 }}
+                style={{ ...zoomPan.viewportStyle, minHeight: 300 }}
                 className="bg-grid-animated relative flex h-full w-full items-center justify-center overflow-hidden bg-bg"
                 onDoubleClick={zoomPan.reset}
               >
@@ -126,8 +150,10 @@ export function CognitiveMapSection() {
                       <dd style={{ color: NODE_STATUS_META[selectedNode.status].color }}>{NODE_STATUS_META[selectedNode.status].label}</dd>
                     </div>
                     <div className="flex justify-between gap-3">
-                      <dt className="text-ink-muted">Module</dt>
-                      <dd className="text-right text-ink-faint">{selectedNode.modulePath}</dd>
+                      <dt className="shrink-0 text-ink-muted">Module</dt>
+                      <dd className="max-w-[60%] truncate text-right text-ink-faint" title={selectedNode.modulePath}>
+                        {selectedNode.modulePath}
+                      </dd>
                     </div>
                     {selectedNode.lastUpdated && (
                       <div className="flex justify-between gap-3">
@@ -152,7 +178,7 @@ export function CognitiveMapSection() {
           )}
         </div>
 
-        <div className="min-h-[260px] border-t border-line lg:h-full lg:w-80 lg:min-h-0 lg:border-l lg:border-t-0">
+        <div className="min-h-[220px] min-w-0 border-t border-line lg:h-full lg:w-80 lg:min-h-0 lg:border-l lg:border-t-0">
           <RuntimeTerminal onSelectNode={handleSelectNode} />
         </div>
       </div>

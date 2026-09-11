@@ -32,10 +32,10 @@ export function AppShell({
       <TopNav />
       <Sidebar />
 
-      <div className="flex-1 lg:pl-60">
+      <div className="flex-1 overflow-x-hidden lg:pl-60 lg:overflow-x-visible">
         {/* Mobile header — ☰ / ELSTAND INTEL (→ Dashboard) / Notification / Profile */}
         <div className="sticky top-0 z-20 border-b border-line bg-bg/95 backdrop-blur lg:hidden">
-          <div className="flex items-center gap-2.5 px-4 py-3">
+          <div className="flex items-center gap-2.5 px-4 py-2.5">
             <NavDrawer />
             <Link href="/dashboard" className="flex min-w-0 items-center gap-2">
               <span className="h-2 w-2 shrink-0 rounded-full bg-signal animate-pulseGlow" />
@@ -46,7 +46,7 @@ export function AppShell({
               <ProfileMenu />
             </div>
           </div>
-          <div className="flex items-center justify-between gap-2 px-4 pb-2.5">
+          <div className="flex items-center justify-between gap-2 px-4 pb-2">
             <span className="truncate text-[11px] font-medium uppercase tracking-wide text-ink-faint">{title}</span>
           </div>
         </div>

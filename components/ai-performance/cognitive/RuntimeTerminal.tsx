@@ -117,10 +117,10 @@ function EventRow({ event, onSelectNode }: { event: RuntimeEvent; onSelectNode: 
           if (hasDetail) setExpanded((v) => !v);
           if (meta.nodeId) onSelectNode(meta.nodeId);
         }}
-        className="flex w-full items-start gap-2 px-2 py-1 text-left"
+        className="flex w-full min-w-0 items-start gap-1.5 px-2 py-1 text-left sm:gap-2"
       >
         <span className="mt-0.5 shrink-0 text-ink-faint">{formatTime(event.startedAt)}</span>
-        <span className="mt-0.5 w-[168px] shrink-0 truncate text-ink-muted">{meta.label}</span>
+        <span className="mt-0.5 w-[92px] shrink-0 truncate text-ink-muted sm:w-[168px]">{meta.label}</span>
         <span className="min-w-0 flex-1 truncate text-ink">{event.message ?? event.operation}</span>
         {duration && <span className="mt-0.5 shrink-0 tabular-nums text-ink-faint">{duration}</span>}
         <StatusPill status={event.status} />
@@ -143,7 +143,7 @@ function EventRow({ event, onSelectNode }: { event: RuntimeEvent; onSelectNode: 
               </div>
             </div>
           )}
-          <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <dl className="mt-1.5 grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
             {Object.entries(event.metadata ?? {}).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-2 truncate">
                 <dt className="shrink-0 text-ink-faint">{k}</dt>

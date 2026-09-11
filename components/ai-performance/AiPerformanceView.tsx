@@ -79,7 +79,7 @@ export function AiPerformanceView({
   const lossCount = recentJournal.length - winCount;
 
   return (
-    <div className="space-y-5 pb-16 lg:pb-0">
+    <div className="space-y-5 pb-28 lg:pb-0">
       <Disclaimer />
 
       {/* ===== COMMAND CENTER HEADER ===== */}
@@ -335,15 +335,22 @@ export function AiPerformanceView({
         </p>
       </div>
 
-      {/* ===== Mobile in-page tab bar — anchor jumps within this page ===== */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)] lg:hidden">
+      {/* ===== Mobile in-page tab bar — anchor jumps within this page =====
+          Stacked directly above the global BottomNav (AppShell), not on
+          top of it — both used to sit at inset-x-0 bottom-0 z-30, so the
+          global bar (rendered later in the DOM) was painting over this
+          one and it was never actually visible/usable on mobile. */}
+      <nav
+        className="fixed inset-x-0 z-30 flex border-t border-line bg-bg-surface/95 backdrop-blur lg:hidden"
+        style={{ bottom: "calc(3.5rem + env(safe-area-inset-bottom))" }}
+      >
         {MOBILE_TABS.map((tab) => (
           <a
             key={tab.href}
             href={tab.href}
-            className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] text-ink-faint hover:text-ink-muted"
+            className="flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[10px] text-ink-faint hover:text-ink-muted"
           >
-            <tab.icon size={16} />
+            <tab.icon size={15} />
             {tab.label}
           </a>
         ))}

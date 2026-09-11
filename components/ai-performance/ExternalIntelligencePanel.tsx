@@ -45,9 +45,22 @@ export function ExternalIntelligencePanel() {
         <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">External Intelligence</p>
         <span className={`text-[10px] font-semibold uppercase ${statusColor}`}>{latest.status}</span>
       </div>
-      <dl className="space-y-1 text-[11px]">
+      <dl className="space-y-1.5 text-[11px]">
         <div className="flex justify-between"><dt className="text-ink-faint">Symbol</dt><dd className="text-ink">{latest.symbol}</dd></div>
-        <div className="flex justify-between"><dt className="text-ink-faint">Capability</dt><dd className="truncate text-ink">{capabilities.length > 0 ? capabilities.join(", ") : "—"}</dd></div>
+        <div>
+          <dt className="text-ink-faint">Capability</dt>
+          {capabilities.length > 0 ? (
+            <dd className="mt-1 flex flex-wrap gap-1">
+              {capabilities.map((c) => (
+                <span key={c} className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] leading-tight text-ink">
+                  {c.replace(/_/g, " ")}
+                </span>
+              ))}
+            </dd>
+          ) : (
+            <dd className="text-ink">—</dd>
+          )}
+        </div>
         <div className="flex justify-between"><dt className="text-ink-faint">Duration</dt><dd className="mono-num text-ink">{duration}</dd></div>
         <div className="flex justify-between"><dt className="text-ink-faint">Source</dt><dd className="text-ink">{provider ?? "UNAVAILABLE"}</dd></div>
       </dl>

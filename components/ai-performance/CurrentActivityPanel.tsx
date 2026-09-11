@@ -55,19 +55,31 @@ export function CurrentActivityPanel() {
     return [...map.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }, [events]);
 
+  // "N tracked · M active" summary (Phase 8.5) — both numbers are counted
+  // straight from latestPerSymbol above, never invented. "active" here
+  // means the symbol's latest real event is still RUNNING.
+  const activeCount = useMemo(() => latestPerSymbol.filter((e) => e.status === "RUNNING").length, [latestPerSymbol]);
+
   return (
     <div className="glow-card p-3">
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Current Activity</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Current Activity</p>
+        {latestPerSymbol.length > 0 && (
+          <span className="shrink-0 text-[10px] text-ink-faint">
+            {latestPerSymbol.length} tracked · {activeCount} active
+          </span>
+        )}
+      </div>
       {latestPerSymbol.length === 0 ? (
         <p className="py-4 text-center text-[11px] text-ink-muted">No runtime activity yet — waiting for the next market cycle.</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-1">
           {latestPerSymbol.map((e) => (
-            <li key={e.symbol} className="flex items-center justify-between text-[11px]">
-              <span className="font-medium text-ink">{e.symbol}</span>
-              <span className="flex items-center gap-1.5 text-ink-muted">
-                <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[e.status]}`} />
-                {labelFor(e)}
+            <li key={e.symbol} className="flex min-w-0 items-center justify-between gap-1.5 text-[11px]">
+              <span className="shrink-0 font-medium text-ink">{e.symbol}</span>
+              <span className="flex min-w-0 items-center gap-1.5 text-ink-muted">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[e.status]}`} />
+                <span className="truncate">{labelFor(e)}</span>
               </span>
             </li>
           ))}
