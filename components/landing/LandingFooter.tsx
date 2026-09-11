@@ -35,6 +35,7 @@ export function LandingFooter() {
           <a href="#oracle">ELVOID PRO Oracle</a>
           <a href="#performance">Evidence Ledger</a>
           <Link href="/methodology">Methodology</Link>
+          <Link href="/documentation">Documentation</Link>
         </div>
 
         <div className="elv-footer-col">
