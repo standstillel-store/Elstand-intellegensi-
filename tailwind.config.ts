@@ -5,12 +5,25 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Phase 9 — converted from static hex to CSS-variable-backed,
+        // mirroring the exact pattern `signal` below already proved out for
+        // the accent picker. Every existing utility class (bg-bg, text-ink,
+        // border-line, bg-bg-raised, text-ink-muted, etc.) across the whole
+        // app keeps working unchanged — only the token's *definition*
+        // changed, not its name, so no component file needed editing.
+        // Defaults in globals.css's :root match the old hex exactly (see
+        // --bg-rgb etc.), so dark mode (still the default) is pixel-
+        // identical to before this phase. A [data-theme="light"] block in
+        // the same file overrides these three token groups only —
+        // signal/gold/cyan/up/down/amber/rugpull/smartmoney are untouched,
+        // so semantic/status/brand colors can't be "destroyed" by a theme
+        // switch any more than they already can't be by the accent picker.
         bg: {
-          DEFAULT: "#08090D",
-          surface: "#12141B",
-          raised: "#181B24",
+          DEFAULT: "rgb(var(--bg-rgb) / <alpha-value>)",
+          surface: "rgb(var(--bg-surface-rgb) / <alpha-value>)",
+          raised: "rgb(var(--bg-raised-rgb) / <alpha-value>)",
         },
-        line: "#23262F",
+        line: "rgb(var(--line-rgb) / <alpha-value>)",
         // Phase 2 palette — #6D5DF6 / #A78BFA / #00E676 / #FF5252 / #F5B942
         // map 1:1 onto the existing signal / up / down / amber tokens, so
         // every existing class name (text-signal-glow, bg-up/15, etc.)
@@ -62,9 +75,9 @@ const config: Config = {
           glow: "#60A5FA",
         },
         ink: {
-          DEFAULT: "#E6E8EE",
-          muted: "#8A8F98",
-          faint: "#565A64",
+          DEFAULT: "rgb(var(--ink-rgb) / <alpha-value>)",
+          muted: "rgb(var(--ink-muted-rgb) / <alpha-value>)",
+          faint: "rgb(var(--ink-faint-rgb) / <alpha-value>)",
         },
         // Phase 5 — landing page only. Deliberately isolated from bg/surface/
         // raised above (nearly identical hex values, not reused) so landing

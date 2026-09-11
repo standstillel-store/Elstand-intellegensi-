@@ -47,6 +47,26 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable} ${display.variable}`}>
+      <head>
+        {/*
+          Phase 9 — runs before paint/hydration so a Light or System user
+          doesn't see a flash of the dark default every reload/navigation.
+          `ThemePreferenceProvider` (mounted below, in <body>) still owns the
+          real, reactive logic (accent/density/motion, plus live OS
+          scheme-change updates) — this script only sets the one attribute
+          CSS actually reads before that provider's effect has had a chance
+          to run. Necessarily a small standalone duplicate of
+          resolveThemeMode()'s logic and the STORAGE_KEY string from
+          lib/preferences.ts, since nothing importable is available yet at
+          this point — if STORAGE_KEY there ever changes, update the literal
+          below too.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var s=localStorage.getItem("elstand:preferences:v2");var t="dark";if(s){var p=JSON.parse(s);t=(p&&p.appearance&&p.appearance.theme)||"dark";}if(t==="system"){t=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";}document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className="bg-bg text-ink font-sans antialiased">
         <ThemePreferenceProvider />
         <PaperTraderAutoSync />

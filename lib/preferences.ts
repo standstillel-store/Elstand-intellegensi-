@@ -1,38 +1,43 @@
 "use client";
 // ---------------------------------------------------------------------------
-// Local, browser-only preference store for the Phase 2 Settings redesign.
+// Local, browser-only preference store.
+//
+// Phase 9 — narrowed to Appearance only. The old General (language/timezone/
+// currency) and AI Engine (confidence/speed/personality) preference slices
+// were removed along with their Settings sections — nothing outside those
+// now-deleted sections ever read `prefs.general` or `prefs.aiEngine`
+// (verified by search before deleting), so there was no live behavior left
+// depending on them.
 //
 // Scope on purpose: everything here is a *visual/local* preference, not a
 // server-backed setting. Paper Trader risk %, auto-execute, and the wallet
-// itself stay exactly where they were (Supabase-backed, via
-// /api/paper-trader/wallet) — this file never touches that.
+// itself were already (Supabase-backed, via /api/paper-trader/wallet) —
+// this file never touched that, and Settings no longer renders that section
+// at all as of Phase 9.
 //
-// Nothing here calls an API. It's read/written to localStorage only, so it's
-// per-browser, not per-account — flagged in the Settings copy so it never
-// reads as more persistent than it is.
+// Nothing here calls an API. It's read/written to localStorage only, so
+// it's per-browser, not per-account — flagged in the Settings copy so it
+// never reads as more persistent than it is.
+//
+// Storage key bumped v1 -> v2 for this phase: the old `theme` values
+// ("terminal"/"bloomberg"/"minimal"/"light" — style presets with, per a
+// full-repo search, zero consuming CSS anywhere; only accent/density/motion
+// ever had a real effect) don't map onto the new dark/light/system model,
+// and `general`/`aiEngine` no longer exist as fields at all. Letting v1
+// entries go stale rather than writing one-time migration logic for
+// low-stakes, per-browser-only, easily-reselected preferences.
 // ---------------------------------------------------------------------------
 
 export type AccentPreset = "violet" | "blue" | "green" | "amber" | "rose";
-export type ThemeMode = "terminal" | "bloomberg" | "minimal" | "light";
-export type AiSpeed = "eco" | "balanced" | "turbo";
-export type AiPersonality = "conservative" | "balanced" | "aggressive";
+export type ThemeMode = "dark" | "light" | "system";
+export type ResolvedTheme = "dark" | "light";
 
 export interface AppPreferences {
-  general: {
-    language: "id" | "en";
-    timezone: string;
-    currency: "USD" | "IDR" | "EUR";
-  };
   appearance: {
     theme: ThemeMode;
     accent: AccentPreset;
     compactMode: boolean;
     animations: boolean;
-  };
-  aiEngine: {
-    confidenceThreshold: number; // 0-100, preview-only filter for this phase
-    speed: AiSpeed;
-    personality: AiPersonality;
   };
 }
 
@@ -45,25 +50,15 @@ export const ACCENT_PRESETS: Record<AccentPreset, { label: string; rgb: string; 
 };
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
-  general: {
-    language: "id",
-    timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "Asia/Jakarta",
-    currency: "USD",
-  },
   appearance: {
-    theme: "terminal",
+    theme: "dark",
     accent: "violet",
     compactMode: false,
     animations: true,
   },
-  aiEngine: {
-    confidenceThreshold: 60,
-    speed: "balanced",
-    personality: "balanced",
-  },
 };
 
-const STORAGE_KEY = "elstand:preferences:v1";
+const STORAGE_KEY = "elstand:preferences:v2";
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -77,9 +72,7 @@ export function loadPreferences(): AppPreferences {
     if (!raw) return DEFAULT_PREFERENCES;
     const parsed = JSON.parse(raw);
     return {
-      general: { ...DEFAULT_PREFERENCES.general, ...parsed.general },
       appearance: { ...DEFAULT_PREFERENCES.appearance, ...parsed.appearance },
-      aiEngine: { ...DEFAULT_PREFERENCES.aiEngine, ...parsed.aiEngine },
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -96,7 +89,21 @@ export function savePreferences(prefs: AppPreferences) {
   }
 }
 
-/** Applies the appearance slice to <html> as CSS variables + data-attributes. Called by ThemePreferenceProvider on mount and on every change. */
+/**
+ * Resolves "system" to an actual dark/light value via the OS color-scheme
+ * media query. "dark"/"light" pass through unchanged. Falls back to "dark"
+ * on the server or in environments without matchMedia — the same default
+ * the dashboard already had before this phase.
+ */
+export function resolveThemeMode(theme: ThemeMode): ResolvedTheme {
+  if (theme !== "system") return theme;
+  if (isBrowser() && typeof window.matchMedia === "function") {
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  return "dark";
+}
+
+/** Applies the appearance slice to <html> as CSS variables + data-attributes. Called by ThemePreferenceProvider on mount, on every change, and on OS color-scheme changes while theme is "system". */
 export function applyAppearance(appearance: AppPreferences["appearance"]) {
   if (!isBrowser()) return;
   const root = document.documentElement;
@@ -106,5 +113,10 @@ export function applyAppearance(appearance: AppPreferences["appearance"]) {
   root.style.setProperty("--signal-dim-rgb", preset.dimRgb);
   root.setAttribute("data-density", appearance.compactMode ? "compact" : "comfortable");
   root.setAttribute("data-motion", appearance.animations ? "full" : "reduced");
-  root.setAttribute("data-theme-mode", appearance.theme);
+  // Phase 9 — this used to be the raw, unresolved `appearance.theme` value
+  // written to an attribute (`data-theme-mode`) with zero consuming CSS
+  // anywhere in the codebase (verified by search) — selecting a theme was a
+  // no-op. `data-theme` now carries the *resolved* dark/light value and is
+  // read by real CSS in globals.css (see the [data-theme="light"] block).
+  root.setAttribute("data-theme", resolveThemeMode(appearance.theme));
 }

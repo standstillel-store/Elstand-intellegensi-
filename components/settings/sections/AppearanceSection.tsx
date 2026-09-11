@@ -1,15 +1,20 @@
 "use client";
-import { Palette, Check } from "lucide-react";
+import { Moon, Sun, Laptop, Palette, Check } from "lucide-react";
 import clsx from "clsx";
 import { usePreferences } from "@/lib/hooks/usePreferences";
 import { ACCENT_PRESETS, type AccentPreset, type ThemeMode } from "@/lib/preferences";
-import { SettingsCard, SettingsRow, ToggleSwitch, SegmentedControl } from "../SettingsCard";
+import { SettingsCard, SettingsRow, ToggleSwitch } from "../SettingsCard";
 
-const THEME_OPTIONS: { value: ThemeMode; label: string; hint: string }[] = [
-  { value: "terminal", label: "Terminal", hint: "Default — gelap pekat, mono-first" },
-  { value: "bloomberg", label: "Bloomberg", hint: "Grid lebih rapat, warna lebih tegas" },
-  { value: "minimal", label: "Minimal", hint: "Lebih lega, dekorasi diminimalkan" },
-  { value: "light", label: "Light", hint: "Preview — belum dioptimalkan penuh" },
+// Phase 9 — Settings/Appearance-only polish. This is now the ONLY section
+// rendered by SettingsView: General, AI Engine, Paper Trading, API
+// Integration, Security, Advanced, Account, Wallet, and Danger Zone were
+// all removed per the brief ("Settings is ONLY for controlling the visual
+// appearance/design of the ELSTAND dashboard"). See the Phase 9 Settings
+// implementation report for the full before/after.
+const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Moon }[] = [
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "system", label: "System", icon: Laptop },
 ];
 
 export function AppearanceSection() {
@@ -21,29 +26,33 @@ export function AppearanceSection() {
       id="appearance"
       icon={Palette}
       title="Appearance"
-      description="Tema, warna aksen, kepadatan layout, dan animasi — berlaku langsung ke seluruh dashboard."
+      description="Tema dan warna aksen untuk dashboard ELSTAND — berlaku langsung, tersimpan di browser ini."
     >
-      <SettingsRow label="Theme">
-        <div className="grid grid-cols-2 gap-2 sm:flex">
-          {THEME_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => update((p) => ({ ...p, appearance: { ...p.appearance, theme: opt.value } }))}
-              title={opt.hint}
-              className={clsx(
-                "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                appearance.theme === opt.value
-                  ? "border-signal/50 bg-signal/15 text-signal-glow"
-                  : "border-line text-ink-muted hover:text-ink"
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
+      <SettingsRow label="Theme" hint="Dark adalah tampilan utama dashboard. System mengikuti pengaturan OS perangkat kamu.">
+        <div className="grid grid-cols-3 gap-2 sm:flex">
+          {THEME_OPTIONS.map((opt) => {
+            const isActive = appearance.theme === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => update((p) => ({ ...p, appearance: { ...p.appearance, theme: opt.value } }))}
+                aria-pressed={isActive}
+                className={clsx(
+                  "flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                  isActive
+                    ? "border-signal/50 bg-signal/15 text-signal-glow"
+                    : "border-line text-ink-muted hover:text-ink"
+                )}
+              >
+                <opt.icon size={13} />
+                {opt.label}
+              </button>
+            );
+          })}
         </div>
       </SettingsRow>
 
-      <SettingsRow label="Accent Color" hint="Mengubah warna highlight, glow, dan progress bar di seluruh dashboard.">
+      <SettingsRow label="Accent Color" hint="Mengubah warna highlight, glow, dan progress bar terkait AI/intelligence di seluruh dashboard. Brand gold dan warna status (hijau/merah/amber) tidak ikut berubah.">
         <div className="flex items-center gap-2">
           {(Object.keys(ACCENT_PRESETS) as AccentPreset[]).map((key) => {
             const preset = ACCENT_PRESETS[key];
@@ -54,6 +63,7 @@ export function AppearanceSection() {
                 onClick={() => update((p) => ({ ...p, appearance: { ...p.appearance, accent: key } }))}
                 title={preset.label}
                 aria-label={preset.label}
+                aria-pressed={isActive}
                 className={clsx(
                   "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-transform",
                   isActive ? "scale-110 border-ink" : "border-transparent hover:scale-105"

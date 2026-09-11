@@ -2,12 +2,17 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft, CircleUser } from "lucide-react";
 import { AlertsBell } from "@/components/alerts/AlertsBell";
-import { SettingsNav } from "./SettingsNav";
-import { SettingsMobileTabs } from "./SettingsMobileTabs";
 
+// Phase 9 — Settings is appearance-only now (a single section), so the
+// scroll-spy left nav (SettingsNav) and its mobile pill-tab twin
+// (SettingsMobileTabs) — both built for jumping between what used to be 8
+// sections — no longer have a reason to exist and were removed. The
+// header/back-to-Dashboard chrome below is unchanged: it's the actual
+// "existing dashboard navigation entry" the brief said to keep, not the
+// removed section nav.
 export function SettingsShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen lg:flex lg:pt-14">
+    <div className="min-h-screen lg:pt-14">
       {/* Settings-only top bar — replaces TopNav's search/ticker with a breadcrumb back to Dashboard */}
       <header className="fixed inset-x-0 top-0 z-40 hidden h-14 border-b border-line bg-bg/95 backdrop-blur lg:flex">
         <div className="flex w-full items-center gap-3 px-5">
@@ -19,7 +24,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
           <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
             Settings
           </span>
-          <span className="hidden text-xs text-ink-faint sm:inline">Dashboard Control Center</span>
+          <span className="hidden text-xs text-ink-faint sm:inline">Appearance</span>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <AlertsBell />
             <Link href="/dashboard" className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-muted hover:border-signal/40 hover:text-ink">
@@ -32,24 +37,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* Settings-only left nav — NOT the global Sidebar */}
-      <aside className="fixed bottom-0 left-0 top-0 z-30 hidden w-60 flex-col border-r border-line bg-bg-surface/60 lg:top-14 lg:flex">
-        <div className="border-b border-line px-5 py-4">
-          <p className="eyebrow text-[9px] tracking-[0.18em] text-ink-faint">Control Center</p>
-          <span className="text-base font-bold tracking-tight">Settings</span>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3">
-          <SettingsNav />
-        </div>
-        <div className="border-t border-line p-3">
-          <Link href="/dashboard" className="flex items-center gap-2.5 rounded-md px-3 py-2 text-xs text-ink-faint hover:text-ink-muted">
-            <ArrowLeft size={14} />
-            Kembali ke Dashboard
-          </Link>
-        </div>
-      </aside>
-
-      <div className="flex-1 lg:pl-60">
+      <div>
         {/* Mobile Settings header — ☰ acts as "back to Dashboard" (no global drawer here), title reads "Settings" */}
         <div className="sticky top-0 z-20 border-b border-line bg-bg/95 backdrop-blur lg:hidden">
           <div className="flex items-center gap-2.5 px-4 py-3">
@@ -69,7 +57,6 @@ export function SettingsShell({ children }: { children: ReactNode }) {
               <CircleUser size={18} className="text-ink-faint" />
             </div>
           </div>
-          <SettingsMobileTabs />
         </div>
 
         <main className="mx-auto max-w-3xl px-4 py-5 lg:px-8 lg:py-8">
