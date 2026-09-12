@@ -136,7 +136,12 @@ export function FuturesMicrostructurePanel() {
             intelligenceLoading={intelligenceLoading}
           />
           <div className="lg:col-span-2">
-            <OrderBookImbalanceCard pair={snapshot.pair} book={snapshot.orderBook} />
+            <OrderBookImbalanceCard
+              pair={snapshot.pair}
+              book={snapshot.orderBook}
+              intelligence={intelligence}
+              intelligenceLoading={intelligenceLoading}
+            />
           </div>
         </div>
       )}
