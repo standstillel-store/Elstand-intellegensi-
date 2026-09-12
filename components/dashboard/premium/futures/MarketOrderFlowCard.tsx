@@ -1,6 +1,7 @@
 import { formatUsd } from "@/lib/format";
-import { AiSummary } from "./AiSummary";
+import { IndicatorAiSummary } from "./IndicatorAiSummary";
 import { StrengthMeter } from "./gauges";
+import { interpretOrderFlow } from "@/lib/intelligence/premiumIndicatorInterpretation";
 import type { OrderFlowSeries, SupportedPair } from "@/lib/intelligence/premiumMicrostructure";
 import type { FuturesIntelligenceSummary } from "@/lib/intelligence/premiumFuturesIntelligence";
 
@@ -99,6 +100,12 @@ export function MarketOrderFlowCard({
   const strengthTone: "up" | "down" | "neutral" = !buyPct ? "neutral" : buyPct > 52 ? "up" : buyPct < 48 ? "down" : "neutral";
   const strengthLabel = strengthTone === "up" ? "Buy Dominant" : strengthTone === "down" ? "Sell Dominant" : "Balanced";
 
+  const oracleContext =
+    intelligence && (intelligence.status === "CONNECTED" || intelligence.status === "NO_TRADE")
+      ? { side: intelligence.side, grade: intelligence.grade }
+      : undefined;
+  const interpretation = interpretOrderFlow({ buyPct, sellPct, oracle: oracleContext });
+
   return (
     <section className="panel flex flex-col gap-3 p-4">
       <div>
@@ -163,7 +170,7 @@ export function MarketOrderFlowCard({
         </div>
       )}
 
-      <AiSummary data={intelligence} loading={intelligenceLoading} />
+      <IndicatorAiSummary interpretation={interpretation} oracle={intelligence} oracleLoading={intelligenceLoading} />
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import { formatPct } from "@/lib/format";
-import { AiSummary } from "./AiSummary";
+import { IndicatorAiSummary } from "./IndicatorAiSummary";
 import { BiasBar } from "./gauges";
+import { classifyFundingBias, interpretFunding } from "@/lib/intelligence/premiumIndicatorInterpretation";
 import type { AssetFundingSeries, ExchangeFundingReading, SupportedPair } from "@/lib/intelligence/premiumMicrostructure";
 import type { FuturesIntelligenceSummary } from "@/lib/intelligence/premiumFuturesIntelligence";
 
@@ -11,16 +12,20 @@ const ASSET_COLOR: Record<SupportedPair, string> = {
   SOL: "#9945FF",
 };
 
+const BIAS_LABEL: Record<ReturnType<typeof classifyFundingBias>, string> = {
+  LONG_CROWDED: "Long Crowded",
+  LONG_SLIGHT: "Long Slightly Crowded",
+  NEUTRAL: "Neutral",
+  SHORT_SLIGHT: "Short Slightly Crowded",
+  SHORT_CROWDED: "Short Crowded",
+};
+
 function biasFromRate(rate: number | undefined): { label: string; bias: number } {
   if (rate === undefined) return { label: "—", bias: 0 };
   // ±0.001 (0.1%) treated as the practical extreme for the bar — funding
   // rates rarely move much further than that outside brief squeezes.
   const bias = Math.max(-1, Math.min(1, rate / 0.001));
-  if (rate > 0.0005) return { label: "Long Crowded", bias };
-  if (rate > 0.0001) return { label: "Long Slightly Crowded", bias };
-  if (rate < -0.0005) return { label: "Short Crowded", bias };
-  if (rate < -0.0001) return { label: "Short Slightly Crowded", bias };
-  return { label: "Neutral", bias };
+  return { label: BIAS_LABEL[classifyFundingBias(rate)], bias };
 }
 
 /** Multi-asset overlay — one line per SUPPORTED_PAIRS asset, plotted by index (Binance settles all these symbols on the same 00:00/08:00/16:00 UTC schedule, so index-aligned is a fair proxy for time-aligned without needing to interpolate across series). */
@@ -132,6 +137,16 @@ export function FundingRateCard({
 }) {
   const { label, bias } = biasFromRate(currentFundingRate);
 
+  // Oracle side/grade only feed the comparison when the Oracle connector
+  // actually produced one — NO_TRADE/unavailable/error states all leave
+  // `oracleContext` empty, which interpretFunding() honestly reports as
+  // oracleAlignment: "UNAVAILABLE" rather than forcing a comparison.
+  const oracleContext =
+    intelligence && (intelligence.status === "CONNECTED" || intelligence.status === "NO_TRADE")
+      ? { side: intelligence.side, grade: intelligence.grade }
+      : undefined;
+  const interpretation = interpretFunding({ currentFundingRate, crossExchangeFunding, oracle: oracleContext });
+
   return (
     <section className="panel flex flex-col gap-3 p-4">
       <div>
@@ -153,7 +168,7 @@ export function FundingRateCard({
 
       <BiasBar bias={bias} label={label} />
 
-      <AiSummary data={intelligence} loading={intelligenceLoading} />
+      <IndicatorAiSummary interpretation={interpretation} oracle={intelligence} oracleLoading={intelligenceLoading} />
     </section>
   );
 }

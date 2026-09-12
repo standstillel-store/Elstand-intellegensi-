@@ -1,7 +1,10 @@
 import { AlertTriangle } from "lucide-react";
 import { formatUsd } from "@/lib/format";
 import { DominanceArc } from "./gauges";
+import { IndicatorAiSummary } from "./IndicatorAiSummary";
+import { interpretOrderBook } from "@/lib/intelligence/premiumIndicatorInterpretation";
 import type { OrderBookDepthData, SupportedPair } from "@/lib/intelligence/premiumMicrostructure";
+import type { FuturesIntelligenceSummary } from "@/lib/intelligence/premiumFuturesIntelligence";
 
 function DepthChart({ book }: { book: OrderBookDepthData }) {
   if (!book.connected || !book.bids.length || !book.asks.length) {
@@ -54,7 +57,27 @@ function DepthChart({ book }: { book: OrderBookDepthData }) {
   );
 }
 
-export function OrderBookImbalanceCard({ pair, book }: { pair: SupportedPair; book: OrderBookDepthData }) {
+export function OrderBookImbalanceCard({
+  pair,
+  book,
+  intelligence,
+  intelligenceLoading,
+}: {
+  pair: SupportedPair;
+  book: OrderBookDepthData;
+  intelligence: FuturesIntelligenceSummary | null;
+  intelligenceLoading: boolean;
+}) {
+  const oracleContext =
+    intelligence && (intelligence.status === "CONNECTED" || intelligence.status === "NO_TRADE")
+      ? { side: intelligence.side, grade: intelligence.grade }
+      : undefined;
+  const interpretation = interpretOrderBook({
+    bidPct: book.bidDominancePercent,
+    askPct: book.askDominancePercent,
+    oracle: oracleContext,
+  });
+
   return (
     <section className="panel flex flex-col gap-3 p-4 lg:flex-row lg:items-stretch">
       <div className="flex flex-1 flex-col gap-3">
@@ -69,6 +92,8 @@ export function OrderBookImbalanceCard({ pair, book }: { pair: SupportedPair; bo
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
           <span>Snapshot — liquidity may change rapidly and does not guarantee directional price movement.</span>
         </div>
+
+        <IndicatorAiSummary interpretation={interpretation} oracle={intelligence} oracleLoading={intelligenceLoading} />
       </div>
 
       <div className="flex flex-col justify-center gap-3 border-t border-line/60 pt-3 lg:w-[220px] lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
