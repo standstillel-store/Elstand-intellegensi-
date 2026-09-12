@@ -1,7 +1,8 @@
 import { formatUsd } from "@/lib/format";
-import { AiSummaryIsolated } from "./AiSummaryIsolated";
+import { AiSummary } from "./AiSummary";
 import { StrengthMeter } from "./gauges";
 import type { OrderFlowSeries, SupportedPair } from "@/lib/intelligence/premiumMicrostructure";
+import type { FuturesIntelligenceSummary } from "@/lib/intelligence/premiumFuturesIntelligence";
 
 function BuySellDonut({ buyPct }: { buyPct: number }) {
   const r = 34;
@@ -75,7 +76,17 @@ function OrderFlowChart({ series }: { series: OrderFlowSeries }) {
   );
 }
 
-export function MarketOrderFlowCard({ pair, series }: { pair: SupportedPair; series: OrderFlowSeries }) {
+export function MarketOrderFlowCard({
+  pair,
+  series,
+  intelligence,
+  intelligenceLoading,
+}: {
+  pair: SupportedPair;
+  series: OrderFlowSeries;
+  intelligence: FuturesIntelligenceSummary | null;
+  intelligenceLoading: boolean;
+}) {
   const totalBuyUsd = series.points.reduce((s, p) => s + p.buyVolumeUsd, 0);
   const totalSellUsd = series.points.reduce((s, p) => s + p.sellVolumeUsd, 0);
   const totalUsd = totalBuyUsd + totalSellUsd;
@@ -152,7 +163,7 @@ export function MarketOrderFlowCard({ pair, series }: { pair: SupportedPair; ser
         </div>
       )}
 
-      <AiSummaryIsolated />
+      <AiSummary data={intelligence} loading={intelligenceLoading} />
     </section>
   );
 }

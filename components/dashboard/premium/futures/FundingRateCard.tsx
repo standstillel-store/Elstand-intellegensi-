@@ -1,7 +1,8 @@
 import { formatPct } from "@/lib/format";
-import { AiSummaryIsolated } from "./AiSummaryIsolated";
+import { AiSummary } from "./AiSummary";
 import { BiasBar } from "./gauges";
 import type { AssetFundingSeries, ExchangeFundingReading, SupportedPair } from "@/lib/intelligence/premiumMicrostructure";
+import type { FuturesIntelligenceSummary } from "@/lib/intelligence/premiumFuturesIntelligence";
 
 const ASSET_COLOR: Record<SupportedPair, string> = {
   BTC: "#F7931A",
@@ -119,11 +120,15 @@ export function FundingRateCard({
   multiAssetFunding,
   crossExchangeFunding,
   currentFundingRate,
+  intelligence,
+  intelligenceLoading,
 }: {
   pair: SupportedPair;
   multiAssetFunding: AssetFundingSeries[];
   crossExchangeFunding: ExchangeFundingReading[];
   currentFundingRate?: number;
+  intelligence: FuturesIntelligenceSummary | null;
+  intelligenceLoading: boolean;
 }) {
   const { label, bias } = biasFromRate(currentFundingRate);
 
@@ -148,7 +153,7 @@ export function FundingRateCard({
 
       <BiasBar bias={bias} label={label} />
 
-      <AiSummaryIsolated />
+      <AiSummary data={intelligence} loading={intelligenceLoading} />
     </section>
   );
 }

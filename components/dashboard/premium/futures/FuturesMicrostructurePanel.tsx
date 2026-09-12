@@ -12,6 +12,7 @@ import {
   type MicrostructurePeriod,
   type PremiumMicrostructureSnapshot,
 } from "@/lib/intelligence/premiumMicrostructure";
+import type { FuturesIntelligenceSummary } from "@/lib/intelligence/premiumFuturesIntelligence";
 
 const PERIODS: MicrostructurePeriod[] = ["1D", "7D", "1M"];
 
@@ -20,6 +21,8 @@ export function FuturesMicrostructurePanel() {
   const [period, setPeriod] = useState<MicrostructurePeriod>("7D");
   const [snapshot, setSnapshot] = useState<PremiumMicrostructureSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [intelligence, setIntelligence] = useState<FuturesIntelligenceSummary | null>(null);
+  const [intelligenceLoading, setIntelligenceLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +42,29 @@ export function FuturesMicrostructurePanel() {
       cancelled = true;
     };
   }, [pair, period]);
+
+  // Fetched once per `pair` here (not inside FundingRateCard/MarketOrderFlowCard
+  // individually) so the two cards that both show an AI Summary share a single
+  // ELVOID Oracle call instead of doubling up on the same expensive pipeline —
+  // period changes don't affect the Oracle read, only the history charts do.
+  useEffect(() => {
+    let cancelled = false;
+    setIntelligenceLoading(true);
+    fetch(`/api/premium/futures-intelligence?pair=${pair}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: FuturesIntelligenceSummary | null) => {
+        if (!cancelled) setIntelligence(data);
+      })
+      .catch(() => {
+        if (!cancelled) setIntelligence(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIntelligenceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pair]);
 
   return (
     <section className="flex flex-col gap-3">
@@ -100,8 +126,15 @@ export function FuturesMicrostructurePanel() {
             multiAssetFunding={snapshot.multiAssetFunding}
             crossExchangeFunding={snapshot.crossExchangeFunding}
             currentFundingRate={snapshot.currentFundingRate}
+            intelligence={intelligence}
+            intelligenceLoading={intelligenceLoading}
           />
-          <MarketOrderFlowCard pair={snapshot.pair} series={snapshot.orderFlow} />
+          <MarketOrderFlowCard
+            pair={snapshot.pair}
+            series={snapshot.orderFlow}
+            intelligence={intelligence}
+            intelligenceLoading={intelligenceLoading}
+          />
           <div className="lg:col-span-2">
             <OrderBookImbalanceCard pair={snapshot.pair} book={snapshot.orderBook} />
           </div>
