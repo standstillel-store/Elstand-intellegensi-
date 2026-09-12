@@ -42,6 +42,9 @@ export function LandingFooter() {
           <h4>Ecosystem</h4>
           <a href="#web3">Web3 Utility</a>
           <a href="#membership">ELVOID Pro</a>
+          <a href="https://github.com/standstillel-store/Elstand-intellegensi-" target="_blank" rel="noopener noreferrer">
+            GitHub
+          </a>
           <Link href="/contact">Contact</Link>
         </div>
       </div>
