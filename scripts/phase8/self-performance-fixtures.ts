@@ -57,7 +57,7 @@ function row(overrides: {
       learningContext: null,
       createdAt: "2026-09-01T00:00:00.000Z",
       outcome: closed
-        ? { outcomeResult: "WIN", outcomeRr: 1.5, outcomeProfitPercent: 2.1, outcomeDurationMinutes: 60, outcomeClosedAt: "2026-09-01T01:00:00.000Z" }
+        ? { outcomeResult: "win", outcomeRr: 1.5, outcomeProfitPercent: 2.1, outcomeDurationMinutes: 60, outcomeClosedAt: "2026-09-01T01:00:00.000Z" }
         : null,
     },
     evaluation:
