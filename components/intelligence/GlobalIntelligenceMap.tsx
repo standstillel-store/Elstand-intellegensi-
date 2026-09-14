@@ -671,9 +671,12 @@ export function GlobalIntelligenceMap({ live, finalConclusion }: { live: MarketM
           />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch">
-          <NodeIntelPanel node={selectedNode} allNodes={nodes} edges={MARKET_MAP_EDGES} mode="sidebar" onSelectNode={handleSelect} />
-
+        {/* Desktop detail sidebar (Global Market / Transition / Signals /
+            Assets panel) removed per request — it's the panel that was
+            eating space next to the map. Node detail is still reachable via
+            the mode="sheet" bottom sheet below (click a node) on every
+            breakpoint; the map canvas itself now takes the full card. */}
+        <div className="flex min-h-0 flex-1 flex-col">
           <div className="relative flex min-w-0 min-h-0 flex-1 flex-col">
             <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-line bg-bg-surface/90 p-1 backdrop-blur">
               <button

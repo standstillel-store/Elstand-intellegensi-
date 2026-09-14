@@ -135,8 +135,8 @@ export function CryptoHeatmap({
 
       <div className="scrollbar-none min-h-[300px] flex-1 overflow-y-auto pr-0.5">
       <div
-        className="grid gap-1.5"
-        style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridAutoRows: "48px", gridAutoFlow: "dense" }}
+        className="grid h-full gap-1.5"
+        style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridAutoRows: "minmax(48px, 1fr)", gridAutoFlow: "dense" }}
       >
         {cells.map((c, i) => {
           const span = tierSpan(c.rank);

@@ -328,14 +328,14 @@ export function NodeIntelPanel({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
           />
           <motion.div
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 300 }}
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[82vh] overflow-hidden rounded-t-2xl border-t border-line bg-bg-surface shadow-2xl lg:hidden"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[82vh] overflow-hidden rounded-t-2xl border-t border-line bg-bg-surface shadow-2xl"
           >
             <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
               <div className="flex min-w-0 items-center gap-2">

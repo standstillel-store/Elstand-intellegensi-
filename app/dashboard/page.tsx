@@ -9,7 +9,7 @@ import { Footer } from "@/components/Footer";
 import { NavDrawer } from "@/components/mobile/NavDrawer";
 import { AIChatDock } from "@/components/AIChatDock";
 import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
-import { GlobalIntelligenceTimeline } from "@/components/intelligence/GlobalIntelligenceMap";
+import { GlobalIntelligenceTimeline, GlobalIntelligenceMap } from "@/components/intelligence/GlobalIntelligenceMap";
 import { AiEnergyWidget } from "@/components/dashboard/AiEnergyWidget";
 import { SystemStatusStrip } from "@/components/dashboard/SystemStatusStrip";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
@@ -306,14 +306,20 @@ export default async function Home() {
               };
               return (
                 <>
-                  {/* Global Market Intelligence Map card removed from this page (was
-                      here, col-span-6 next to the heatmap) — component file kept
-                      as-is since GlobalIntelligenceTimeline below still lives in
-                      the same module. Heatmap now takes the full row so it uses
-                      the horizontal space this row has on desktop instead of
-                      leaving the other half empty. */}
-                  <div className="col-span-12">
-                    <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
+                  {/* Global Market Intelligence Map restored side-by-side with the
+                      Heatmap, 1:1 — equal columns (col-span-6 each on lg+, stacked
+                      full-width on mobile) with items-stretch so both cards share
+                      the same row height. The old always-visible detail sidebar
+                      inside the Map (Global Market / Transition / Signals / Assets)
+                      was removed at the component level, not the Map itself — see
+                      components/intelligence/GlobalIntelligenceMap.tsx. */}
+                  <div className="col-span-12 grid grid-cols-1 items-stretch gap-4 lg:col-span-12 lg:grid-cols-2 lg:gap-5">
+                    <div className="min-h-[520px]">
+                      <GlobalIntelligenceMap live={mapLiveInputs} finalConclusion={finalConclusion} />
+                    </div>
+                    <div className="min-h-[520px]">
+                      <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
+                    </div>
                   </div>
 
                   <div className="col-span-12">

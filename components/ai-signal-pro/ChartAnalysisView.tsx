@@ -242,11 +242,15 @@ export function ChartAnalysisView() {
           so the ratio actually holds: a bare `2fr 1fr` lets a track grow
           past its share to fit its content's min-content width, which is
           exactly what was inflating the order book column before. min-w-0
-          on both children for the same reason. Each card still sizes to its
-          own natural content height (no forced/capped height) so nothing —
-          especially the order book's buy side — gets cut off. */}
-      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
-        <div className="glow-card min-w-0 overflow-hidden p-2">
+          on both children for the same reason.
+          Height: both cards now share one fixed height (CHART_CARD_HEIGHT)
+          from xl up via items-stretch, instead of each sizing to its own
+          natural content — that's what let Order Book grow far taller than
+          the chart. Order Book's own ladder list scrolls internally
+          (see OrderBookPanel) so its rows still aren't cut off, they just
+          scroll within the shared height instead of pushing the card taller. */}
+      <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+        <div className="glow-card flex min-w-0 flex-col overflow-hidden p-2 xl:h-[var(--chart-card-h)]" style={{ ["--chart-card-h" as string]: "500px" }}>
           {candlesLoading ? (
             <div className="flex h-[440px] items-center justify-center gap-2 text-sm text-ink-muted">
               <Loader2 size={16} className="animate-spin" /> Memuat candle {symbol}…
@@ -258,7 +262,7 @@ export function ChartAnalysisView() {
               Data candle tidak tersedia untuk {symbol}USDT di Binance Futures.
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-3 border-t border-line px-2 pt-2 text-[10px] text-ink-faint">
+          <div className="flex flex-1 flex-wrap items-center gap-3 overflow-y-auto border-t border-line px-2 pt-2 text-[10px] text-ink-faint">
             <span className="flex items-center gap-1">
               <span className="h-2 w-2 rounded-full" style={{ background: "#8B7BFF" }} /> EMA 20
             </span>
@@ -277,7 +281,7 @@ export function ChartAnalysisView() {
           </div>
         </div>
 
-        <div className="min-w-0">
+        <div className="min-w-0 xl:h-[var(--chart-card-h)]" style={{ ["--chart-card-h" as string]: "500px" }}>
           <OrderBookPanel symbol={symbol} referencePrice={signal?.entry ?? null} />
         </div>
       </div>

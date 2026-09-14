@@ -159,7 +159,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
 
   if (!derived) {
     return (
-      <div className="glow-card relative flex flex-col overflow-hidden p-4">
+      <div className="glow-card relative flex h-full flex-col overflow-hidden p-4">
         <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-signal/10 blur-3xl" />
         <SectionHeader code="OB" title="Order Book (Live)" hint={`${symbol}USDT`} icon={<Layers size={13} />} />
         <div className="flex h-52 flex-1 items-center justify-center rounded-md border border-dashed border-line text-center text-[11px] text-ink-faint">
@@ -172,12 +172,15 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
   const { bids, asks, maxCum, mid, spread, spreadPct, imbalancePct, pressure } = derived;
   const asksTopDown = [...asks].reverse();
   // Combined ladder: asks (red, descending toward spread) on top, spread row, bids (green, descending from spread) below — one continuous price column like a real exchange ladder.
-  // Full 12 rows per side, card grows to fit — no fixed/capped height, so the buy (bid) side never gets cut off.
+  // Full 12 rows per side kept (no data dropped) — the ladder list scrolls
+  // internally (min-h-0 + overflow-y-auto below) instead of growing the
+  // card past the chart's height, so the panel matches the Trading Chart's
+  // height 1:1 without cutting any bid/ask row off.
   const ladderAsks = asksTopDown.slice(-12);
   const ladderBids = bids.slice(0, 12);
 
   return (
-    <div className="glow-card relative flex flex-col overflow-hidden p-4">
+    <div className="glow-card relative flex h-full flex-col overflow-hidden p-4">
       <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-signal/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -left-16 h-56 w-56 rounded-full bg-up/5 blur-3xl" />
 
@@ -213,7 +216,7 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
       </div>
 
       {/* Depth chart (staircase) + price ladder, side by side — mirrors the reference Order Book design */}
-      <div className="relative grid flex-1 grid-cols-[1fr_1.3fr] gap-3">
+      <div className="relative grid min-h-0 flex-1 grid-cols-[1fr_1.3fr] gap-3">
         <div className={`relative overflow-hidden rounded-lg border border-line bg-bg transition-shadow duration-300 ${flash ? "shadow-[0_0_20px_rgb(var(--signal-glow-rgb)/0.25)]" : ""}`}>
           <div className="grid h-full grid-cols-2">
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full scale-x-[-1]">
@@ -245,13 +248,13 @@ export function OrderBookPanel({ symbol }: { symbol: string; referencePrice?: nu
           </div>
         </div>
 
-        <div className="flex flex-col overflow-hidden rounded-lg border border-line bg-bg">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-bg">
           <div className="grid grid-cols-3 border-b border-line px-2 py-1 text-[9px] uppercase tracking-wide text-ink-faint">
             <span>Price</span>
             <span className="text-right">Size</span>
             <span className="text-right">Total</span>
           </div>
-          <div className="flex-1 overflow-hidden">
+          <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto">
             {ladderAsks.map((a) => (
               <div key={`ask-${a.price}`} className="relative grid grid-cols-3 items-center overflow-hidden px-2 py-[3px] text-[10.5px]">
                 <div className="absolute inset-y-0 right-0 bg-down/12" style={{ width: `${Math.min(100, (a.cum / maxCum) * 100)}%` }} />
