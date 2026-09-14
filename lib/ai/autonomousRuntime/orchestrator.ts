@@ -99,12 +99,26 @@ function evidenceForSource(factors: { source: ConfluenceSource; evidence: string
   return matches.length > 0 ? matches.join("; ") : null;
 }
 
-/** Deterministic, count-based description of Decision Memory for this cycle — never a fabricated narrative. Null when no memory context exists. */
+/**
+ * Deterministic, count-based description of Decision Memory for this
+ * cycle — never a fabricated narrative. Null ONLY when no memory context
+ * exists (`memory === null` — retrieval was not performed/did not
+ * complete this cycle). A non-null `memory` with zero matches is a
+ * DIFFERENT, distinct state — "retrieval ran, found nothing similar" —
+ * and gets its own explicit string rather than collapsing into the same
+ * `null` as "no context". Phase 8.6.1 fix: prior to this, both states
+ * returned `null`, making a genuinely novel situation indistinguishable
+ * from a cycle where memory context simply wasn't available (see
+ * lib/ai/noveltyDetection/contracts.ts's own header for the full
+ * reasoning this fix is based on). Does not change what is queried, only
+ * how the result is described — this remains observation-only and is
+ * never read by qualifyAutonomousDecision().
+ */
 function describeLearningInfluence(memory: { matchedExperiences: readonly unknown[]; matchedPatterns: readonly unknown[] } | null): string | null {
-  if (!memory) return null;
+  if (!memory) return null; // no memory context available this cycle
   const experienceCount = memory.matchedExperiences.length;
   const patternCount = memory.matchedPatterns.length;
-  if (experienceCount === 0 && patternCount === 0) return null;
+  if (experienceCount === 0 && patternCount === 0) return "tidak ada histori serupa"; // retrieval ran; genuinely zero matches — distinct from "no context" (null) above
   const parts: string[] = [];
   if (experienceCount > 0) parts.push(`${experienceCount} pengalaman serupa`);
   if (patternCount > 0) parts.push(`${patternCount} pola kegagalan`);

@@ -9,6 +9,10 @@ import { getStatistics } from "@/lib/elvoid/paperTrader";
 import { buildCognitiveMap } from "@/lib/ai/cognitiveMap/build";
 import { deriveAxisConflictReport } from "@/lib/ai/cognitiveConflict/axisAnalysis";
 import { buildLearningLoopChains } from "@/lib/ai/learningLoop/traceChain";
+import { classifyNovelty } from "@/lib/ai/noveltyDetection/classify";
+import { getSelfPerformanceReport } from "@/lib/ai/selfPerformance/repository";
+import type { SelfPerformanceReport } from "@/lib/ai/selfPerformance/contracts";
+import { isLearningSupabaseConfigured } from "@/lib/ai/learning/db";
 
 // ---------------------------------------------------------------------------
 // GET /api/ai-performance/cognitive
@@ -36,6 +40,20 @@ import { buildLearningLoopChains } from "@/lib/ai/learningLoop/traceChain";
 // (lib/ai/cognitiveConflict/axisAnalysis.ts), and `learningLoop`
 // (lib/ai/learningLoop/traceChain.ts). None of the three compute a new
 // score, trigger a cycle, or write anything.
+//
+// Phase 8.6.1 addition: also composes `novelty` (Part 4 — a pure
+// classifyNovelty() derivation over the SAME `memoryBySymbol` already
+// fetched above, zero new memory read) and `selfPerformance` (Part 1+2 —
+// one new getSelfPerformanceReport() read-only call per symbol, itself
+// reusing decisionMemory's existing getDecisionMemoryJoinedExperiences()
+// join; see lib/ai/selfPerformance/repository.ts's own header). Neither
+// is read by qualification/arbitration/execution/risk anywhere — both
+// are observational additions to this same telemetry route only.
+// `learningDbConfigured` is surfaced alongside `novelty` so a NOVEL
+// classification can be told apart from "Learning DB isn't configured at
+// all" — see lib/ai/noveltyDetection/contracts.ts's own documented
+// limitation for why that distinction cannot be made inside
+// classifyNovelty() itself today.
 //
 // ELVOID PRO Oracle telemetry (snapshots + validations + memory + trace)
 // is membership-gated, same as the existing autonomous routes — but paper
@@ -86,5 +104,23 @@ export async function GET() {
   // evidence comes from its own symbol's query result (never cross-symbol).
   const learningLoop = validations.flatMap((v) => buildLearningLoopChains([v], memoryBySymbol.get(v.symbol) ?? null));
 
-  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop });
+  // Phase 8.6.1 Part 4 — pure classifyNovelty() over memoryBySymbol
+  // already fetched above (zero new memory read). One assessment per
+  // tracked symbol, ELVOID_PRO_ORACLE only, same gate as everything else
+  // on this route (memoryBySymbol is already empty when !hasOracleMembership).
+  const novelty = symbols.map((symbol) => classifyNovelty("ELVOID_PRO_ORACLE", symbol, memoryBySymbol.get(symbol) ?? null));
+
+  // Phase 8.6.1 Part 1+2 — one getSelfPerformanceReport() read per symbol
+  // (reuses decisionMemory's existing joined-experiences read internally;
+  // see lib/ai/selfPerformance/repository.ts). Same membership gate and
+  // same Promise.all-per-symbol idiom as memoryEntries/validationLists
+  // above. `report` is `null` only when the Learning DB itself is not
+  // configured — never fabricated, never defaulted to a fake zeroed report.
+  const selfPerformanceEntries: [string, SelfPerformanceReport | null][] =
+    hasOracleMembership && symbols.length > 0
+      ? await Promise.all(symbols.map(async (symbol): Promise<[string, SelfPerformanceReport | null]> => [symbol, await getSelfPerformanceReport("ELVOID_PRO_ORACLE", symbol)]))
+      : [];
+  const selfPerformance = selfPerformanceEntries.map(([symbol, report]) => ({ symbol, report }));
+
+  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured() });
 }

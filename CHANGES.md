@@ -321,13 +321,52 @@ model that decides its own scope.
 
 ## Phase 8.x — Controlled Self-Evolution
 
-**ROADMAP / FUTURE DIRECTION — not implemented.** No code in this
-repository currently allows ELVOID or ELSTAND to modify its own logic. If
-and when this is pursued, the intended shape (per the project's own
-forward-looking design notes) is:
+**8.6.1 (`2026-09-14`) — Novelty Detection + Self Performance Monitor.**
+The first real implementation against this roadmap: the observation/
+foundation layer only (`Monitor`/`Detect` below), never the
+propose/apply steps. Two new, read-only, observation-only modules:
+
+- **Self Performance Monitor** (`lib/ai/selfPerformance/`) — a
+  read-only aggregate over the existing `decision_evaluations` +
+  `decision_experiences` population (reusing Decision Memory's own
+  join, `getDecisionMemoryJoinedExperiences()`, rather than a new query
+  shape). Reports evaluation coverage (`COMPLETE`/`PARTIAL`/
+  `INSUFFICIENT_DATA`, gated on the same `MIN_OCCURRENCE_COUNT` bar as
+  8.1.2) and the distribution of the 4 existing evaluation axes
+  (`evaluationClass`/`decisionQuality`/`marketOutcome`/
+  `confidenceAlignment`) per (source, symbol). Deliberately reports no
+  single "accuracy"/"score" — the two outcome axes stay independent, per
+  8.1.1's own original reasoning.
+- **Novelty Detection** (`lib/ai/noveltyDetection/`) — a pure,
+  deterministic classifier (`FAMILIAR`/`PARTIALLY_FAMILIAR`/`NOVEL`/
+  `INSUFFICIENT_MEMORY`/`UNAVAILABLE`) over Decision Memory's own
+  already-computed `matchedExperiences`/`matchedPatterns` counts. No
+  embeddings, no similarity score, no ML/LLM judgment — every threshold
+  reused directly from 8.1.2's `MIN_OCCURRENCE_COUNT`, never a newly
+  invented number. Fixed a real, pre-existing gap while building this:
+  `describeLearningInfluence()` (`lib/ai/autonomousRuntime/orchestrator.ts`)
+  previously returned the identical `null` for "no memory context" and
+  for "memory context existed but genuinely matched nothing" — the two
+  are now distinguished.
+
+Both modules are read by exactly one place — the `AI Performance` API
+route (`app/api/ai-performance/cognitive/route.ts`) and its new
+"Self Performance & Novelty" panel — and by nothing else. Neither is
+read by qualification, arbitration, execution, or risk. `Decision Memory`
+remains query-time-only (8.1.3's own limitation, unchanged): a novelty
+result describes the current retrieval, never a historical record of
+what a past decision looked like at the time it was made.
+
+**Still entirely unimplemented** after 8.6.1: everything past
+`Monitor`/`Detect` below — deciding a gap is worth acting on, proposing
+a change, testing it against Cognitive Replay, protecting via regression,
+and the mandatory human-approval gate. No code anywhere lets ELVOID or
+ELSTAND propose or apply a change to its own logic; 8.6.1 only gives a
+future such step something real to observe.
 
 ```
 Monitor → Detect → Decide → Propose → Test → Protect → Human Approval
+           \_____8.6.1_____/
 ```
 
 Any future self-evolution work is expected to require:
@@ -385,6 +424,8 @@ intelligence features.
   8.1.2, 8.1.4, 8.1.5 + 8.2.9 §7)
 - Autonomous background runtime, paper-trade only (8.2.1–8.2.9)
 - Cognitive Replay and Causal Graph, evidence-proof-only (8.3.7, 8.3.8)
+- Self Performance Monitor + Novelty Detection (8.6.1) — read-only
+  observation layer only; not read by any decision-making path
 - Paper trading, live trading (Binance Testnet/Live), journal
 - On-chain membership gating, ELS token, faucet, swap/sell, reward
   distributor, Bug Hunter escrow (all BSC Testnet)
@@ -400,7 +441,10 @@ intelligence features.
 
 ### Roadmap
 - Controlled Self-Evolution (Monitor→Detect→Decide→Propose→Test→Protect→Human
-  Approval) — design direction only, no implementation
+  Approval) — as of 8.6.1, `Monitor`/`Detect` has a real, observation-only
+  implementation (Self Performance Monitor + Novelty Detection); everything
+  from `Decide` onward (acting on a detected gap, proposing/testing/applying
+  a change) remains design direction only, no implementation
 - Mainnet deployment (all contracts are BSC Testnet only today)
 - Cross-chain support beyond BNB Smart Chain
 - Full multi-target (TP1/TP2/TP3) risk-plan redesign — explicitly deferred

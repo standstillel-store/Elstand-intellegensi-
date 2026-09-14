@@ -5,6 +5,7 @@ import { StatCard } from "@/components/StatCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { EquityCurveChart } from "@/components/paper-trader/EquityCurveChart";
 import { CognitiveMapSection } from "@/components/ai-performance/cognitive/CognitiveMapSection";
+import { SelfPerformancePanel } from "@/components/ai-performance/SelfPerformancePanel";
 import { CurrentActivityPanel } from "@/components/ai-performance/CurrentActivityPanel";
 import { ExternalIntelligencePanel } from "@/components/ai-performance/ExternalIntelligencePanel";
 import { Disclaimer } from "@/components/Disclaimer";
@@ -186,6 +187,9 @@ export function AiPerformanceView({
         <CognitiveMapSection />
         <ExternalIntelligencePanel />
       </div>
+
+      {/* ===== SELF PERFORMANCE & NOVELTY (Phase 8.6.1) — additive, observation-only ===== */}
+      <SelfPerformancePanel />
 
       {/* ===== RECENT AI TRADES (from ai_journal x ai_signals — real data) ===== */}
       <div id="ai-journal" className="glow-card scroll-mt-20 p-4">

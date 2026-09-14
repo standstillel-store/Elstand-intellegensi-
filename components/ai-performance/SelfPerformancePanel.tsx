@@ -1,0 +1,147 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { SectionHeader } from "@/components/SectionHeader";
+import type { EvaluationCoverageStatus, SelfPerformanceReport } from "@/lib/ai/selfPerformance/contracts";
+import type { NoveltyClassification, NoveltyAssessment } from "@/lib/ai/noveltyDetection/contracts";
+
+// ---------------------------------------------------------------------------
+// Phase 8.6.1 Part 7+8 — Self Performance + Novelty observation panel.
+//
+// Additive section on the AI PERFORMANCE page (per Phase 8.6.1's own
+// instruction: "do not redesign the page, add only the minimum UI
+// required"). Reads the SAME /api/ai-performance/cognitive endpoint
+// CognitiveMapSection.tsx already polls — Phase 8.6.1 only extended that
+// route's JSON response with `selfPerformance` / `novelty` /
+// `learningDbConfigured`, nothing here re-reads the Learning DB
+// directly. Fetched once on mount rather than polled: coverage and
+// evaluation distributions change slowly relative to the Live
+// Intelligence Graph's 20s cycle-by-cycle poll, so a one-shot fetch is
+// the minimum needed to make this observable. A page refresh re-fetches.
+//
+// This panel shows CURRENT_RETRIEVAL state only — novelty here reflects
+// this moment's Decision Memory query, never a historical record of how
+// novel a past decision looked at the time it was made (that form does
+// not exist yet; see lib/ai/noveltyDetection/contracts.ts's own header).
+// This panel never claims "AI is improving" or "self-evolving" — Phase
+// 8.6.1 observes and measures only.
+// ---------------------------------------------------------------------------
+
+// Matches app/api/ai-performance/cognitive/route.ts's Phase 8.6.1 addition
+// exactly: `selfPerformance` is `{symbol, report}[]` (report is `null`
+// only when the Learning DB isn't configured — see
+// lib/ai/selfPerformance/repository.ts), `novelty` is a plain
+// `NoveltyAssessment[]` (classifyNovelty()'s own output already carries
+// `symbol`). Both real exported types are imported directly rather than
+// re-declared here, so this panel can never silently drift from what the
+// route actually returns.
+interface SelfPerformanceEntry {
+  readonly symbol: string;
+  readonly report: SelfPerformanceReport | null;
+}
+
+interface CognitiveRoutePayload {
+  readonly selfPerformance?: readonly SelfPerformanceEntry[];
+  readonly novelty?: readonly NoveltyAssessment[];
+  readonly learningDbConfigured?: boolean;
+}
+
+const COVERAGE_LABEL: Record<EvaluationCoverageStatus, string> = {
+  COMPLETE: "Complete",
+  PARTIAL: "Partial",
+  INSUFFICIENT_DATA: "Insufficient data",
+};
+
+const COVERAGE_COLOR: Record<EvaluationCoverageStatus, string> = {
+  COMPLETE: "text-up",
+  PARTIAL: "text-amber",
+  INSUFFICIENT_DATA: "text-ink-faint",
+};
+
+const NOVELTY_LABEL: Record<NoveltyClassification, string> = {
+  FAMILIAR: "Familiar",
+  PARTIALLY_FAMILIAR: "Partially familiar",
+  NOVEL: "Novel",
+  INSUFFICIENT_MEMORY: "Insufficient memory",
+  UNAVAILABLE: "Unavailable",
+};
+
+const NOVELTY_COLOR: Record<NoveltyClassification, string> = {
+  FAMILIAR: "text-up",
+  PARTIALLY_FAMILIAR: "text-amber",
+  NOVEL: "text-cyan",
+  INSUFFICIENT_MEMORY: "text-ink-faint",
+  UNAVAILABLE: "text-ink-faint",
+};
+
+export function SelfPerformancePanel() {
+  const [data, setData] = useState<CognitiveRoutePayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ai-performance/cognitive", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as CognitiveRoutePayload;
+        if (!cancelled) setData(json);
+      } catch {
+        if (!cancelled) setError("Could not reach ELVOID self-performance telemetry.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selfPerformance = data?.selfPerformance ?? [];
+  const novelty = data?.novelty ?? [];
+
+  return (
+    <div className="glow-card p-3 sm:p-4">
+      <SectionHeader code="SPM" title="Self Performance & Novelty" />
+      <p className="-mt-1 max-w-xl text-xs text-ink-muted">Phase 8.6.1 — observation layer only. Coverage and evaluation distributions are counted directly from decision_evaluations; novelty reflects the current Decision Memory query, not a historical record.</p>
+      {data?.learningDbConfigured === false && <p className="mt-2 text-[10.5px] text-amber">Learning DB is not configured — every value below is structurally empty, not evidence of &quot;no history&quot;.</p>}
+      {error && <p className="mt-2 text-[10.5px] text-down">{error}</p>}
+      {!data && !error && <p className="py-4 text-center text-xs text-ink-muted">Loading…</p>}
+      {data && selfPerformance.length === 0 && novelty.length === 0 && <p className="py-4 text-center text-xs text-ink-muted">No tracked symbols yet.</p>}
+
+      {selfPerformance.length > 0 && (
+        <div className="mt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Evaluation Coverage</p>
+          <ul className="mt-1.5 space-y-1.5">
+            {selfPerformance.map(({ symbol, report }) => (
+              <li key={symbol} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px]">
+                <span className="font-medium text-ink">{symbol}</span>
+                {report ? (
+                  <span className="text-ink-muted">
+                    {report.coverage.evaluatedExperienceCount}/{report.coverage.closedExperienceCount} evaluated (<span className={COVERAGE_COLOR[report.coverage.status]}>{COVERAGE_LABEL[report.coverage.status]}</span>) · {report.performance.totalEvaluated} scored
+                  </span>
+                ) : (
+                  <span className="text-ink-faint">Learning DB unavailable</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {novelty.length > 0 && (
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Novelty</p>
+          <ul className="mt-1.5 space-y-1.5">
+            {novelty.map((n) => (
+              <li key={n.symbol} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px]">
+                <span className="font-medium text-ink">{n.symbol}</span>
+                <span className="text-ink-muted">
+                  <span className={NOVELTY_COLOR[n.classification]}>{NOVELTY_LABEL[n.classification]}</span> · {n.matchedExperienceCount} exp · {n.matchedPatternCount} pattern(s)
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
