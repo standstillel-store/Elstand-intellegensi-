@@ -9,7 +9,7 @@ import { Footer } from "@/components/Footer";
 import { NavDrawer } from "@/components/mobile/NavDrawer";
 import { AIChatDock } from "@/components/AIChatDock";
 import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
-import { GlobalIntelligenceMap, GlobalIntelligenceTimeline } from "@/components/intelligence/GlobalIntelligenceMap";
+import { GlobalIntelligenceTimeline } from "@/components/intelligence/GlobalIntelligenceMap";
 import { AiEnergyWidget } from "@/components/dashboard/AiEnergyWidget";
 import { SystemStatusStrip } from "@/components/dashboard/SystemStatusStrip";
 import { AISummaryCard } from "@/components/right-rail/AISummaryCard";
@@ -306,19 +306,13 @@ export default async function Home() {
               };
               return (
                 <>
-                  {/* Map + Heatmap sit in the same row on wider screens and
-                      stretch to equal height (items-stretch on the grid +
-                      h-full/flex-1 inside each card). On narrow phones they
-                      stack to full width — both are dense enough (node
-                      graph / ticker grid) that squeezing them into a fixed
-                      50% column on a ~360px screen just truncates every
-                      label. Relationship Timeline stays its own full-width
-                      row below. */}
-                  <div className="col-span-12 sm:col-span-6">
-                    <GlobalIntelligenceMap finalConclusion={finalConclusion} live={mapLiveInputs} />
-                  </div>
-
-                  <div className="col-span-12 sm:col-span-6">
+                  {/* Global Market Intelligence Map card removed from this page (was
+                      here, col-span-6 next to the heatmap) — component file kept
+                      as-is since GlobalIntelligenceTimeline below still lives in
+                      the same module. Heatmap now takes the full row so it uses
+                      the horizontal space this row has on desktop instead of
+                      leaving the other half empty. */}
+                  <div className="col-span-12">
                     <CryptoHeatmap markets={markets} rugpullRisks={rugpullRisks} smartMoneyAccumulation={snap.smartMoneyAccumulation} />
                   </div>
 

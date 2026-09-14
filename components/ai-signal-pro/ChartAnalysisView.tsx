@@ -237,9 +237,16 @@ export function ChartAnalysisView() {
         </div>
       </div>
 
-      {/* Chart | Order Book — 2:1 width ratio. Each card sizes to its own natural content height (no forced/capped height) so nothing — especially the order book's buy side — gets cut off. */}
-      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[2fr_1fr]">
-        <div className="glow-card overflow-hidden p-2">
+      {/* Chart | Order Book. Chart is the dominant/primary area, order book a
+          compact side panel — minmax(0, Nfr) on both tracks (not bare Nfr)
+          so the ratio actually holds: a bare `2fr 1fr` lets a track grow
+          past its share to fit its content's min-content width, which is
+          exactly what was inflating the order book column before. min-w-0
+          on both children for the same reason. Each card still sizes to its
+          own natural content height (no forced/capped height) so nothing —
+          especially the order book's buy side — gets cut off. */}
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+        <div className="glow-card min-w-0 overflow-hidden p-2">
           {candlesLoading ? (
             <div className="flex h-[440px] items-center justify-center gap-2 text-sm text-ink-muted">
               <Loader2 size={16} className="animate-spin" /> Memuat candle {symbol}…
@@ -270,7 +277,9 @@ export function ChartAnalysisView() {
           </div>
         </div>
 
-        <OrderBookPanel symbol={symbol} referencePrice={signal?.entry ?? null} />
+        <div className="min-w-0">
+          <OrderBookPanel symbol={symbol} referencePrice={signal?.entry ?? null} />
+        </div>
       </div>
 
       {/* Indicators Suite — directly below the Chart + Order Book workspace */}
