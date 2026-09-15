@@ -364,12 +364,79 @@ and the mandatory human-approval gate. No code anywhere lets ELVOID or
 ELSTAND propose or apply a change to its own logic; 8.6.1 only gives a
 future such step something real to observe.
 
+**8.6.2-8.6.4 (`2026-09-14`) — Familiarity/Pattern Retrieval, Cognitive
+Gap Detector, Reasoning Gap Detection, Evolution Need Evaluator,
+Self-Evaluation Engine, Evolution Proposal Engine.** Extends the
+observation layer up through `Decide`/`Propose` below — still never
+`Test`/`Protect`/`Human Approval`/apply. Five new, read-only or
+propose-only modules, all evidence-gated, none wired into decision
+qualification/arbitration/execution/risk:
+
+- **Familiarity + Cognitive Gap Detector** (`lib/ai/cognitiveGap/`) —
+  familiarity reuses 8.6.1's `classifyNovelty()` verbatim (no second
+  memory system), plus one derived field (`relevantEvidenceTags`, the
+  distinct `EvaluationEvidenceTag`s across matched evaluations). Gap
+  detection counts already-persisted `decision_evaluations.evidence`
+  tag frequency (e.g. `CONFLICTED_STATE_PRESENT`,
+  `REJECTED_HYPOTHESIS_PRESENT`) across a population — it derives
+  nothing decisionEvaluation/evaluate.ts didn't already compute once,
+  deterministically, per decision. 6 categories, gated at
+  `MIN_OCCURRENCE_COUNT` (reused, never redefined):
+  `CONTRADICTION_GAP`/`CONTEXT_GAP`/`REASONING_CONSISTENCY_GAP`/
+  `CONFIDENCE_ALIGNMENT_GAP`/`EVIDENCE_GAP`/`PATTERN_GAP`. Deliberately
+  6, not 7 — a `MEMORY_GAP` category was considered and dropped: the
+  only familiarity signal available is a single current-cycle read (no
+  persisted historical novelty trail exists), which can never honestly
+  satisfy the "repeated evidence" bar every other category must clear.
+- **Reasoning Gap Observation** (`lib/ai/reasoningGap/`) — a pure
+  narrative filter/relabel over the 4 reasoning-related gap categories
+  (not a second detector), using the required hedged vocabulary
+  ("Observed reasoning gap", "Candidate reasoning weakness") and never a
+  causal claim.
+- **Evolution Need Evaluator** (`lib/ai/evolutionNeed/`) — a
+  deterministic gate (`NO_EVOLUTION_NEEDED`/`INSUFFICIENT_EVIDENCE`/
+  `MONITOR`/`EVOLUTION_WARRANTED`). Coverage-first (conservative when
+  `EvaluationCoverageStatus === INSUFFICIENT_DATA`); a single
+  low/medium-severity gap alone is never enough for
+  `EVOLUTION_WARRANTED` — that requires either one HIGH-severity gap or
+  2+ independently-active categories, and checks whether an existing
+  `VALID` `constraint_validations` row already covers the (source,
+  symbol) pair first.
+- **Self-Evaluation Summary** (`lib/ai/selfEvaluation/`) — a pure
+  composition tagging every field `OBSERVED`/`INFERRED`/`UNKNOWN`.
+  `historicalNovelty` is always `UNKNOWN`, always `null` — never
+  reconstructed.
+- **Evolution Proposal Engine** (`lib/ai/evolutionProposal/`) — drafts a
+  structured, non-executable proposal ONLY when
+  `need === "EVOLUTION_WARRANTED"`. `proposalId` is a deterministic
+  composite key (`source:symbol:gapCategory`), not a random UUID, so
+  re-detecting the same gap updates rather than duplicates a proposal.
+  `status` is closed to `DRAFT`/`AWAITING_VALIDATION` —
+  `APPROVED`/`ACTIVE`/`DEPLOYED` do not exist as values anywhere.
+  `proposedChange` always describes an investigation
+  ("Investigate whether... validate through historical replay before
+  considering any production change"), never a directly-executable
+  instruction (no "change threshold from X to Y"). New table
+  `evolution_proposals` (`supabase/learning/schema.sql`) — additive,
+  service-role-only, no policies, same as every other table in this
+  schema. `persistEvolutionProposals()` exists and is independently
+  testable but is NOT called from the read-only AI Performance route or
+  anywhere else yet — proposals are computed for display only in this
+  pass, matching every prior Phase 8 "callable but not automatically
+  wired" recompute function.
+
+All five surface through the same `AI Performance` route and
+"Self Performance & Novelty" panel 8.6.1 introduced — no new page, no
+new route. UI language is deliberately "candidate"/"observed"/
+"proposed"/"awaiting validation"; nothing claims "AI improved itself" or
+shows a self-evolving badge.
+
 ```
 Monitor → Detect → Decide → Propose → Test → Protect → Human Approval
-           \_____8.6.1_____/
+           \_____8.6.1_____/\___8.6.2-8.6.4___/
 ```
 
-Any future self-evolution work is expected to require:
+Any future self-evolution work (8.6.5+) is expected to require:
 - **Replay validation** against the Cognitive Replay mechanism already
   built in Phase 8.3.7, so a proposed change can be checked against real
   historical cycles before being trusted.
@@ -380,8 +447,10 @@ Any future self-evolution work is expected to require:
 - **Human approval** as a hard gate before any self-modification takes
   effect — not an optional review step.
 
-The system today does not propose or apply changes to its own reasoning;
-this section describes a direction, not a capability.
+The system today drafts structured, non-executable proposals (8.6.4) but
+does not test, approve, or apply any change to its own reasoning —
+`Test`/`Protect`/`Human Approval`/version promotion remain a direction,
+not a capability.
 
 ---
 
@@ -426,6 +495,10 @@ intelligence features.
 - Cognitive Replay and Causal Graph, evidence-proof-only (8.3.7, 8.3.8)
 - Self Performance Monitor + Novelty Detection (8.6.1) — read-only
   observation layer only; not read by any decision-making path
+- Cognitive Gap Detector, Evolution Need Evaluator, Evolution Proposal
+  Engine (8.6.2-8.6.4) — evidence-gated observation + propose-only
+  layer; drafts structured, non-executable proposals but never applies
+  them, never read by any decision-making path
 - Paper trading, live trading (Binance Testnet/Live), journal
 - On-chain membership gating, ELS token, faucet, swap/sell, reward
   distributor, Bug Hunter escrow (all BSC Testnet)
@@ -441,10 +514,13 @@ intelligence features.
 
 ### Roadmap
 - Controlled Self-Evolution (Monitor→Detect→Decide→Propose→Test→Protect→Human
-  Approval) — as of 8.6.1, `Monitor`/`Detect` has a real, observation-only
-  implementation (Self Performance Monitor + Novelty Detection); everything
-  from `Decide` onward (acting on a detected gap, proposing/testing/applying
-  a change) remains design direction only, no implementation
+  Approval) — as of 8.6.4, `Monitor`/`Detect`/`Decide`/`Propose` have a
+  real, evidence-gated implementation (Self Performance Monitor, Novelty
+  Detection, Cognitive/Reasoning Gap Detection, Evolution Need Evaluator,
+  Evolution Proposal Engine — the last producing DRAFT proposals only);
+  `Test` (replay validation), `Protect` (regression guard), and
+  `Human Approval` (plus any version promotion / application of a
+  change) remain design direction only, no implementation
 - Mainnet deployment (all contracts are BSC Testnet only today)
 - Cross-chain support beyond BNB Smart Chain
 - Full multi-target (TP1/TP2/TP3) risk-plan redesign — explicitly deferred

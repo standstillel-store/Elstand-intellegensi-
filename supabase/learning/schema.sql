@@ -826,3 +826,47 @@ create index if not exists runtime_events_created_at_idx on runtime_events (crea
 alter table runtime_events enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.6.4 addition: evolution_proposals — structured, auditable
+-- self-improvement proposals drafted by the Evolution Proposal Engine
+-- (lib/ai/evolutionProposal). A proposal describes WHAT should be
+-- investigated or changed; it is never executable and nothing in this
+-- repository reads it back into qualification/arbitration/execution/risk.
+-- `status` is deliberately closed to DRAFT/AWAITING_VALIDATION only —
+-- APPROVED/ACTIVE/DEPLOYED do not exist as values anywhere yet; adding
+-- them is a separately-approved, later phase's decision, not this one's.
+-- Recompute-and-upsert on `proposal_id` (a deterministic composite key,
+-- see lib/ai/evolutionProposal/contracts.ts) — the SAME observed gap
+-- always identifies the SAME proposal, so re-running detection updates
+-- rather than duplicates the existing row, matching
+-- failure_pattern_candidates/adaptive_constraints/constraint_validations'
+-- own aggregate-state convention (never append-only like
+-- decision_evaluations).
+-- ---------------------------------------------------------------------------
+create table if not exists evolution_proposals (
+  id uuid primary key default gen_random_uuid(),
+  proposal_id text not null unique,
+  proposal_version integer not null default 1,
+  source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  symbol text not null,
+  current_system_version text not null,
+  gap_category text not null check (gap_category in (
+    'CONTRADICTION_GAP','CONTEXT_GAP','REASONING_CONSISTENCY_GAP',
+    'CONFIDENCE_ALIGNMENT_GAP','EVIDENCE_GAP','PATTERN_GAP'
+  )),
+  gap_severity text not null check (gap_severity in ('LOW', 'MEDIUM', 'HIGH')),
+  evidence jsonb not null,
+  hypothesis text not null,
+  proposed_change text not null,
+  expected_effect text not null,
+  validation_requirements jsonb not null,
+  status text not null default 'DRAFT' check (status in ('DRAFT', 'AWAITING_VALIDATION')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists evolution_proposals_source_symbol_idx on evolution_proposals (source, symbol);
+
+alter table evolution_proposals enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.

@@ -13,6 +13,12 @@ import { classifyNovelty } from "@/lib/ai/noveltyDetection/classify";
 import { getSelfPerformanceReport } from "@/lib/ai/selfPerformance/repository";
 import type { SelfPerformanceReport } from "@/lib/ai/selfPerformance/contracts";
 import { isLearningSupabaseConfigured } from "@/lib/ai/learning/db";
+import { buildCognitiveGapReport } from "@/lib/ai/cognitiveGap/repository";
+import type { CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
+import { deriveReasoningGapObservations } from "@/lib/ai/reasoningGap/derive";
+import { evaluateEvolutionNeed } from "@/lib/ai/evolutionNeed/evaluate";
+import { buildSelfEvaluationSummary } from "@/lib/ai/selfEvaluation/build";
+import { draftEvolutionProposals } from "@/lib/ai/evolutionProposal/propose";
 
 // ---------------------------------------------------------------------------
 // GET /api/ai-performance/cognitive
@@ -54,6 +60,19 @@ import { isLearningSupabaseConfigured } from "@/lib/ai/learning/db";
 // all" — see lib/ai/noveltyDetection/contracts.ts's own documented
 // limitation for why that distinction cannot be made inside
 // classifyNovelty() itself today.
+//
+// Phase 8.6.2-8.6.4 addition: also composes `cognitiveGaps` (8.6.2 —
+// familiarity + 0-or-more deterministic, evidence-gated gaps per symbol)
+// and `evolution` (8.6.3/8.6.4 — reasoning-gap framing, the
+// EVOLUTION_WARRANTED/MONITOR/etc. gate, the OBSERVED/INFERRED/UNKNOWN
+// self-evaluation summary, and any DRAFT proposals). All four are pure
+// derivations over data already fetched on this route except one new
+// per-symbol read (the same decision_experiences x decision_evaluations
+// join selfPerformance already performs — see
+// lib/ai/cognitiveGap/repository.ts). Proposals are computed for display
+// only; this route never calls persistEvolutionProposals() — see
+// lib/ai/evolutionProposal/repository.ts's own header. None of this is
+// read by qualification/arbitration/execution/risk anywhere.
 //
 // ELVOID PRO Oracle telemetry (snapshots + validations + memory + trace)
 // is membership-gated, same as the existing autonomous routes — but paper
@@ -122,5 +141,40 @@ export async function GET() {
       : [];
   const selfPerformance = selfPerformanceEntries.map(([symbol, report]) => ({ symbol, report }));
 
-  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured() });
+  // Phase 8.6.2 — one buildCognitiveGapReport() call per symbol, reusing
+  // memoryBySymbol + validationLists already fetched above. The only NEW
+  // read is the same getDecisionMemoryJoinedExperiences() join
+  // selfPerformance already performs (see
+  // lib/ai/cognitiveGap/repository.ts's own header) — no second memory
+  // system, no new query shape.
+  const validationsBySymbol = new Map(symbols.map((symbol, i) => [symbol, validationLists[i] ?? []]));
+  const selfPerformanceBySymbol = new Map(selfPerformance.map(({ symbol, report }) => [symbol, report]));
+
+  const cognitiveGapEntries: [string, CognitiveGapReport | null][] =
+    hasOracleMembership && symbols.length > 0
+      ? await Promise.all(symbols.map(async (symbol): Promise<[string, CognitiveGapReport | null]> => [symbol, await buildCognitiveGapReport("ELVOID_PRO_ORACLE", symbol, memoryBySymbol.get(symbol) ?? null, validationsBySymbol.get(symbol) ?? [])]))
+      : [];
+  const cognitiveGaps = cognitiveGapEntries.map(([symbol, report]) => ({ symbol, report }));
+
+  // Phase 8.6.3/8.6.4 — pure derivations over the gap report +
+  // selfPerformance coverage already computed above. Zero new reads.
+  // Proposals are COMPUTED ONLY, never persisted from this GET route —
+  // see lib/ai/evolutionProposal/repository.ts's own header for why
+  // `persistEvolutionProposals()` is deliberately left uncalled here,
+  // matching every prior Phase 8 "callable but not automatically wired
+  // yet" recompute function.
+  const evolution = cognitiveGapEntries.map(([symbol, gapReport]) => {
+    const performanceReport = selfPerformanceBySymbol.get(symbol) ?? null;
+    if (gapReport === null || performanceReport === null) {
+      return { symbol, reasoningGaps: [], evolutionNeed: null, selfEvaluation: null, proposals: [] };
+    }
+    const hasValidConstraint = (validationsBySymbol.get(symbol) ?? []).some((v) => v.status === "VALID");
+    const reasoningGaps = deriveReasoningGapObservations(gapReport.gaps);
+    const evolutionNeed = evaluateEvolutionNeed("ELVOID_PRO_ORACLE", symbol, performanceReport.coverage, gapReport.gaps, hasValidConstraint);
+    const selfEvaluation = buildSelfEvaluationSummary("ELVOID_PRO_ORACLE", symbol, performanceReport.performance, performanceReport.coverage, gapReport.familiarityEvidence, gapReport.gaps, reasoningGaps, evolutionNeed);
+    const proposals = draftEvolutionProposals(evolutionNeed);
+    return { symbol, reasoningGaps, evolutionNeed, selfEvaluation, proposals };
+  });
+
+  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), cognitiveGaps, evolution });
 }

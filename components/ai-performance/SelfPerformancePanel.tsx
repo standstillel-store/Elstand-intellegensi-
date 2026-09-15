@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import type { EvaluationCoverageStatus, SelfPerformanceReport } from "@/lib/ai/selfPerformance/contracts";
 import type { NoveltyClassification, NoveltyAssessment } from "@/lib/ai/noveltyDetection/contracts";
+import type { GapCategory, GapSeverity, CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
+import type { EvolutionNeed, EvolutionNeedAssessment } from "@/lib/ai/evolutionNeed/contracts";
+import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
 
 // ---------------------------------------------------------------------------
 // Phase 8.6.1 Part 7+8 — Self Performance + Novelty observation panel.
@@ -25,7 +28,27 @@ import type { NoveltyClassification, NoveltyAssessment } from "@/lib/ai/noveltyD
 // not exist yet; see lib/ai/noveltyDetection/contracts.ts's own header).
 // This panel never claims "AI is improving" or "self-evolving" — Phase
 // 8.6.1 observes and measures only.
+//
+// Phase 8.6.2-8.6.4 addition: also renders `cognitiveGaps` (0-or-more
+// deterministic, evidence-gated gaps per symbol) and `evolution` (the
+// NO_EVOLUTION_NEEDED/INSUFFICIENT_EVIDENCE/MONITOR/EVOLUTION_WARRANTED
+// gate plus any DRAFT proposals). Language throughout is deliberately
+// "candidate" / "observed" / "proposed" / "awaiting validation" — never
+// "AI improved itself" or a fake self-evolving badge. A proposal here is
+// always DRAFT: nothing on this page can move a proposal to a later
+// status, let alone apply it.
 // ---------------------------------------------------------------------------
+
+interface CognitiveGapEntry {
+  readonly symbol: string;
+  readonly report: CognitiveGapReport | null;
+}
+
+interface EvolutionEntry {
+  readonly symbol: string;
+  readonly evolutionNeed: EvolutionNeedAssessment | null;
+  readonly proposals: readonly EvolutionProposalWithoutTimestamp[];
+}
 
 // Matches app/api/ai-performance/cognitive/route.ts's Phase 8.6.1 addition
 // exactly: `selfPerformance` is `{symbol, report}[]` (report is `null`
@@ -44,6 +67,8 @@ interface CognitiveRoutePayload {
   readonly selfPerformance?: readonly SelfPerformanceEntry[];
   readonly novelty?: readonly NoveltyAssessment[];
   readonly learningDbConfigured?: boolean;
+  readonly cognitiveGaps?: readonly CognitiveGapEntry[];
+  readonly evolution?: readonly EvolutionEntry[];
 }
 
 const COVERAGE_LABEL: Record<EvaluationCoverageStatus, string> = {
@@ -74,6 +99,35 @@ const NOVELTY_COLOR: Record<NoveltyClassification, string> = {
   UNAVAILABLE: "text-ink-faint",
 };
 
+const GAP_SEVERITY_COLOR: Record<GapSeverity, string> = {
+  LOW: "text-ink-muted",
+  MEDIUM: "text-amber",
+  HIGH: "text-cyan",
+};
+
+const GAP_CATEGORY_LABEL: Record<GapCategory, string> = {
+  CONTRADICTION_GAP: "Contradiction",
+  CONTEXT_GAP: "Context",
+  REASONING_CONSISTENCY_GAP: "Reasoning consistency",
+  CONFIDENCE_ALIGNMENT_GAP: "Confidence alignment",
+  EVIDENCE_GAP: "Evidence resolution",
+  PATTERN_GAP: "Recurring pattern",
+};
+
+const EVOLUTION_NEED_LABEL: Record<EvolutionNeed, string> = {
+  NO_EVOLUTION_NEEDED: "No evolution needed",
+  INSUFFICIENT_EVIDENCE: "Insufficient evidence",
+  MONITOR: "Monitoring — not yet warranted",
+  EVOLUTION_WARRANTED: "Evolution candidate observed",
+};
+
+const EVOLUTION_NEED_COLOR: Record<EvolutionNeed, string> = {
+  NO_EVOLUTION_NEEDED: "text-up",
+  INSUFFICIENT_EVIDENCE: "text-ink-faint",
+  MONITOR: "text-amber",
+  EVOLUTION_WARRANTED: "text-cyan",
+};
+
 export function SelfPerformancePanel() {
   const [data, setData] = useState<CognitiveRoutePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +151,8 @@ export function SelfPerformancePanel() {
 
   const selfPerformance = data?.selfPerformance ?? [];
   const novelty = data?.novelty ?? [];
+  const cognitiveGaps = data?.cognitiveGaps ?? [];
+  const evolution = data?.evolution ?? [];
 
   return (
     <div className="glow-card p-3 sm:p-4">
@@ -137,6 +193,58 @@ export function SelfPerformancePanel() {
                 <span className="text-ink-muted">
                   <span className={NOVELTY_COLOR[n.classification]}>{NOVELTY_LABEL[n.classification]}</span> · {n.matchedExperienceCount} exp · {n.matchedPatternCount} pattern(s)
                 </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {cognitiveGaps.length > 0 && (
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Observed Cognitive Gaps</p>
+          <p className="text-[10px] text-ink-faint">Deterministic, evidence-gated — never from a single decision. Absence below means no gap met the evidence bar, not that none could ever exist.</p>
+          <ul className="mt-1.5 space-y-1.5">
+            {cognitiveGaps.map(({ symbol, report }) => (
+              <li key={symbol} className="text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-ink">{symbol}</span>
+                  <span className="text-ink-faint">{report ? (report.gaps.length === 0 ? "No gap observed" : `${report.gaps.length} gap(s) observed`) : "Learning DB unavailable"}</span>
+                </div>
+                {report && report.gaps.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 pl-2">
+                    {report.gaps.map((gap) => (
+                      <li key={gap.category} className="text-ink-muted">
+                        {GAP_CATEGORY_LABEL[gap.category]} — <span className={GAP_SEVERITY_COLOR[gap.severity]}>{gap.severity}</span> ({gap.evidence.occurrenceCount}/{gap.evidence.evaluatedCount})
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {evolution.length > 0 && (
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Evolution Need & Candidate Proposals</p>
+          <p className="text-[10px] text-ink-faint">Observation and proposal only — nothing here executes, and no proposal moves past DRAFT on this page. 8.6.1-8.6.4 do not prove self-improvement.</p>
+          <ul className="mt-1.5 space-y-2">
+            {evolution.map(({ symbol, evolutionNeed, proposals }) => (
+              <li key={symbol} className="text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-ink">{symbol}</span>
+                  <span className={evolutionNeed ? EVOLUTION_NEED_COLOR[evolutionNeed.need] : "text-ink-faint"}>{evolutionNeed ? EVOLUTION_NEED_LABEL[evolutionNeed.need] : "Learning DB unavailable"}</span>
+                </div>
+                {proposals.length > 0 && (
+                  <ul className="mt-1 space-y-1 pl-2">
+                    {proposals.map((proposal) => (
+                      <li key={proposal.proposalId} className="text-ink-muted">
+                        <span className="text-ink-faint">Candidate proposal (DRAFT)</span> — {GAP_CATEGORY_LABEL[proposal.gapCategory]}: {proposal.hypothesis}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>
