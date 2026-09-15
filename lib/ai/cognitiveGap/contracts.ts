@@ -38,11 +38,11 @@
 
 import type { DecisionSource } from "@/lib/ai/decisionOutcome/contracts";
 import type { EvaluationEvidenceTag } from "@/lib/ai/decisionEvaluation/contracts";
-import type { NoveltyAssessment } from "@/lib/ai/noveltyDetection/contracts";
+import type { NoveltyAssessment, DecisionMemoryResult } from "@/lib/ai/noveltyDetection/contracts";
 
 // Re-exported so familiarity.ts/detect.ts/repository.ts (and fixtures)
 // have a single import source for the shapes they consume.
-export type { DecisionSource, EvaluationEvidenceTag, NoveltyAssessment };
+export type { DecisionSource, EvaluationEvidenceTag, NoveltyAssessment, DecisionMemoryResult };
 
 /**
  * Deliberately 6, not the 7 the Phase 8.6.2 brief suggested — see this
