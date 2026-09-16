@@ -25,8 +25,8 @@ import type { DecisionSource, GapCategory, GapSeverity, CognitiveGap } from "@/l
 
 export type { DecisionSource, GapCategory, GapSeverity, CognitiveGap };
 
-/** The 4 of 8.6.2's 6 categories that represent a reasoning concern, not an outcome/pattern concern. PATTERN_GAP and CONFIDENCE_ALIGNMENT_GAP are handled elsewhere: PATTERN_GAP is explicitly about recurring OUTCOMES, and CONFIDENCE_ALIGNMENT_GAP is already its own well-named, self-explanatory category — narrating it further would not add information. */
-export const REASONING_GAP_CATEGORIES: readonly GapCategory[] = ["CONTRADICTION_GAP", "CONTEXT_GAP", "REASONING_CONSISTENCY_GAP", "EVIDENCE_GAP"];
+/** The 4 of 8.6.2's 6 categories that represent a reasoning concern, not an outcome/pattern concern. PATTERN_GAP and CONFIDENCE_ALIGNMENT_GAP are handled elsewhere: PATTERN_GAP is explicitly about recurring OUTCOMES, and CONFIDENCE_ALIGNMENT_GAP is already its own well-named, self-explanatory category — narrating it further would not add information. Deliberately NOT annotated `: readonly GapCategory[]` — that would widen the inferred type back to all 6 members and break every `(typeof REASONING_GAP_CATEGORIES)[number]` usage below; `as const satisfies` keeps the narrow 4-member literal type while still verifying every entry is a genuine `GapCategory`. */
+export const REASONING_GAP_CATEGORIES = ["CONTRADICTION_GAP", "CONTEXT_GAP", "REASONING_CONSISTENCY_GAP", "EVIDENCE_GAP"] as const satisfies readonly GapCategory[];
 
 export interface ReasoningGapObservation {
   readonly source: DecisionSource;
