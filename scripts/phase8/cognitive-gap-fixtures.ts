@@ -61,7 +61,7 @@ function row(overrides: { source?: DecisionSource; symbol?: string; evidence?: r
   return { experience, evaluation };
 }
 
-function repeat(count: number, build: (i: number) => DecisionMemoryJoinedRow): DecisionMemoryJoinedRow[] {
+function repeat<T>(count: number, build: (i: number) => T): T[] {
   return Array.from({ length: count }, (_, i) => build(i));
 }
 
