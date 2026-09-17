@@ -7,6 +7,8 @@ import type { NoveltyClassification, NoveltyAssessment } from "@/lib/ai/noveltyD
 import type { GapCategory, GapSeverity, CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
 import type { EvolutionNeed, EvolutionNeedAssessment } from "@/lib/ai/evolutionNeed/contracts";
 import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
+import type { EvolutionCandidateWithoutTimestamp, CandidateStatus } from "@/lib/ai/evolutionCandidate/contracts";
+import type { EvolutionValidationWithoutTimestamp, ValidationResult } from "@/lib/ai/evolutionValidation/contracts";
 
 // ---------------------------------------------------------------------------
 // Phase 8.6.1 Part 7+8 — Self Performance + Novelty observation panel.
@@ -37,6 +39,15 @@ import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionPropos
 // "AI improved itself" or a fake self-evolving badge. A proposal here is
 // always DRAFT: nothing on this page can move a proposal to a later
 // status, let alone apply it.
+// Phase 8.6.5-8.6.6 addition: also renders `evolution[].candidates`
+// (0-or-more `{candidate, validation}` pairs per symbol). A candidate is
+// a split-history replication check, never executable code — see
+// lib/ai/evolutionCandidate/contracts.ts's own header. Language here is
+// deliberately "Validated candidate — awaiting human approval" /
+// "Blocked" / "Insufficient evidence" / "Inconclusive" — never "AI
+// EVOLVED", "SELF-IMPROVED", or "SUPER AI". Nothing on this page can
+// move a candidate past DRAFT/REPLAY_PASSED/VALID; there is no control
+// here that applies, approves, or promotes anything.
 // ---------------------------------------------------------------------------
 
 interface CognitiveGapEntry {
@@ -44,10 +55,16 @@ interface CognitiveGapEntry {
   readonly report: CognitiveGapReport | null;
 }
 
+interface EvolutionCandidateEntry {
+  readonly candidate: EvolutionCandidateWithoutTimestamp;
+  readonly validation: EvolutionValidationWithoutTimestamp;
+}
+
 interface EvolutionEntry {
   readonly symbol: string;
   readonly evolutionNeed: EvolutionNeedAssessment | null;
   readonly proposals: readonly EvolutionProposalWithoutTimestamp[];
+  readonly candidates: readonly EvolutionCandidateEntry[];
 }
 
 // Matches app/api/ai-performance/cognitive/route.ts's Phase 8.6.1 addition
@@ -126,6 +143,34 @@ const EVOLUTION_NEED_COLOR: Record<EvolutionNeed, string> = {
   INSUFFICIENT_EVIDENCE: "text-ink-faint",
   MONITOR: "text-amber",
   EVOLUTION_WARRANTED: "text-cyan",
+};
+
+const CANDIDATE_STATUS_LABEL: Record<CandidateStatus, string> = {
+  CANDIDATE_CREATED: "Candidate created",
+  REPLAYING: "Replaying",
+  REPLAY_PASSED: "Replay passed",
+  REPLAY_FAILED: "Replay failed",
+  VALIDATION_BLOCKED: "Blocked (out of scope)",
+};
+
+/**
+ * Deliberately NOT "AI EVOLVED" / "SELF-IMPROVED" / "SUPER AI" anywhere
+ * — see this file's header. VALID reads as "Validated candidate —
+ * awaiting human approval", matching the Phase 8.6.6 brief's required
+ * vocabulary exactly; nothing here implies the candidate was applied.
+ */
+const VALIDATION_RESULT_LABEL: Record<ValidationResult, string> = {
+  VALID: "Validated candidate — awaiting human approval",
+  INVALID: "Invalid",
+  INSUFFICIENT_EVIDENCE: "Insufficient evidence",
+  INCONCLUSIVE: "Inconclusive",
+};
+
+const VALIDATION_RESULT_COLOR: Record<ValidationResult, string> = {
+  VALID: "text-cyan",
+  INVALID: "text-down",
+  INSUFFICIENT_EVIDENCE: "text-ink-faint",
+  INCONCLUSIVE: "text-amber",
 };
 
 export function SelfPerformancePanel() {
@@ -247,6 +292,39 @@ export function SelfPerformancePanel() {
                 )}
               </li>
             ))}
+          </ul>
+        </div>
+      )}
+
+      {evolution.some((e) => e.candidates.length > 0) && (
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Evolution Candidates</p>
+          <p className="text-[10px] text-ink-faint">Split-history replication check only — never execution of modified logic. Human approval has not occurred; nothing below has been applied.</p>
+          <ul className="mt-1.5 space-y-3">
+            {evolution.map(({ symbol, candidates }) =>
+              candidates.map(({ candidate, validation }) => (
+                <li key={candidate.candidateId} className="rounded border border-line/60 p-2 text-[11px]">
+                  <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                    <span className="font-medium text-ink">
+                      {symbol} · {candidate.candidateId.replace("candidate:", "#")}
+                    </span>
+                    <span className={VALIDATION_RESULT_COLOR[validation.result]}>{VALIDATION_RESULT_LABEL[validation.result]}</span>
+                  </div>
+                  <p className="mt-0.5 text-ink-muted">
+                    Gap: {GAP_CATEGORY_LABEL[candidate.gapCategory]} ({candidate.gapSeverity})
+                  </p>
+                  <p className="mt-0.5 text-ink-muted">Proposal: {candidate.proposedChange}</p>
+                  <p className="mt-0.5 text-ink-faint">
+                    Baseline: {candidate.baselineVersion} · Candidate: {candidate.candidateVersion}
+                  </p>
+                  <p className="mt-0.5 text-ink-muted">
+                    Replay: <span className={candidate.status === "REPLAY_PASSED" ? "text-up" : "text-down"}>{CANDIDATE_STATUS_LABEL[candidate.status]}</span> · Regression:{" "}
+                    <span className={validation.regressionCheck.regressionDetected ? "text-down" : "text-up"}>{validation.regressionCheck.regressionDetected ? "Detected" : "None"}</span>
+                  </p>
+                  {validation.evidence.length > 0 && <p className="mt-0.5 text-ink-faint">Evidence: {validation.evidence.join(" ")}</p>}
+                </li>
+              ))
+            )}
           </ul>
         </div>
       )}

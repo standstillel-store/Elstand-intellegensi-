@@ -870,3 +870,84 @@ create index if not exists evolution_proposals_source_symbol_idx on evolution_pr
 alter table evolution_proposals enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.6.5 addition: evolution_candidates — a candidate improvement
+-- derived from an evolution_proposals row, plus its split-history replay
+-- comparison (lib/ai/evolutionCandidate). NOT executable code, NOT a
+-- diff/patch — `hypothesis`/`proposed_change` are the same fixed,
+-- template-generated prose evolution_proposals already carries.
+-- `status` is closed to CANDIDATE_CREATED/REPLAYING/REPLAY_PASSED/
+-- REPLAY_FAILED/VALIDATION_BLOCKED — APPROVED/ACTIVE/DEPLOYED do not
+-- exist as values anywhere. Recompute-and-upsert on `candidate_id` (a
+-- deterministic composite key, `candidate:<proposal_id>`), same
+-- aggregate-state convention as every other Phase 8.6 table.
+-- ---------------------------------------------------------------------------
+create table if not exists evolution_candidates (
+  id uuid primary key default gen_random_uuid(),
+  candidate_id text not null unique,
+  proposal_id text not null,
+  source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  symbol text not null,
+  gap_category text not null check (gap_category in (
+    'CONTRADICTION_GAP','CONTEXT_GAP','REASONING_CONSISTENCY_GAP',
+    'CONFIDENCE_ALIGNMENT_GAP','EVIDENCE_GAP','PATTERN_GAP'
+  )),
+  gap_severity text not null check (gap_severity in ('LOW', 'MEDIUM', 'HIGH')),
+  hypothesis text not null,
+  proposed_change text not null,
+  baseline_version text not null,
+  candidate_version text not null,
+  scope jsonb not null,
+  status text not null check (status in (
+    'CANDIDATE_CREATED','REPLAYING','REPLAY_PASSED','REPLAY_FAILED','VALIDATION_BLOCKED'
+  )),
+  -- Null exactly when status is VALIDATION_BLOCKED (replay never ran) —
+  -- see lib/ai/evolutionCandidate/contracts.ts's own header.
+  replay jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists evolution_candidates_source_symbol_idx on evolution_candidates (source, symbol);
+create index if not exists evolution_candidates_proposal_id_idx on evolution_candidates (proposal_id);
+
+alter table evolution_candidates enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.6.6 addition: evolution_validations — the validation verdict
+-- for one evolution_candidates row (lib/ai/evolutionValidation). A
+-- SEPARATE table from evolution_candidates on purpose, even though both
+-- live in this same database — keeps 8.6.5 (candidate/replay) and 8.6.6
+-- (validation/regression-guard) write-responsibility architecturally
+-- distinct, linked only by `candidate_id`. `result` is closed to
+-- VALID/INVALID/INSUFFICIENT_EVIDENCE/INCONCLUSIVE. VALID here means
+-- only "replicated evidence weakened, nothing else regressed" — never
+-- "apply this change". Recompute-and-upsert on `candidate_id` (unique) —
+-- one current validation per candidate, never duplicated.
+-- ---------------------------------------------------------------------------
+create table if not exists evolution_validations (
+  id uuid primary key default gen_random_uuid(),
+  candidate_id text not null unique references evolution_candidates (candidate_id),
+  proposal_id text not null,
+  source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  symbol text not null,
+  candidate_status text not null,
+  baseline_reference text not null,
+  candidate_reference text not null,
+  replay_dataset_reference text not null,
+  metrics_observed jsonb,
+  regression_check jsonb not null,
+  invariant_checks jsonb not null,
+  result text not null check (result in ('VALID', 'INVALID', 'INSUFFICIENT_EVIDENCE', 'INCONCLUSIVE')),
+  evidence jsonb not null,
+  limitations jsonb not null,
+  validated_at timestamptz not null default now()
+);
+
+create index if not exists evolution_validations_source_symbol_idx on evolution_validations (source, symbol);
+
+alter table evolution_validations enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.

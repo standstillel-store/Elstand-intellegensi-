@@ -19,6 +19,8 @@ import { deriveReasoningGapObservations } from "@/lib/ai/reasoningGap/derive";
 import { evaluateEvolutionNeed } from "@/lib/ai/evolutionNeed/evaluate";
 import { buildSelfEvaluationSummary } from "@/lib/ai/selfEvaluation/build";
 import { draftEvolutionProposals } from "@/lib/ai/evolutionProposal/propose";
+import { buildEvolutionCandidate } from "@/lib/ai/evolutionCandidate/repository";
+import { validateEvolutionCandidate } from "@/lib/ai/evolutionValidation/validate";
 
 // ---------------------------------------------------------------------------
 // GET /api/ai-performance/cognitive
@@ -163,18 +165,40 @@ export async function GET() {
   // `persistEvolutionProposals()` is deliberately left uncalled here,
   // matching every prior Phase 8 "callable but not automatically wired
   // yet" recompute function.
-  const evolution = cognitiveGapEntries.map(([symbol, gapReport]) => {
-    const performanceReport = selfPerformanceBySymbol.get(symbol) ?? null;
-    if (gapReport === null || performanceReport === null) {
-      return { symbol, reasoningGaps: [], evolutionNeed: null, selfEvaluation: null, proposals: [] };
-    }
-    const hasValidConstraint = (validationsBySymbol.get(symbol) ?? []).some((v) => v.status === "VALID");
-    const reasoningGaps = deriveReasoningGapObservations(gapReport.gaps);
-    const evolutionNeed = evaluateEvolutionNeed("ELVOID_PRO_ORACLE", symbol, performanceReport.coverage, gapReport.gaps, hasValidConstraint);
-    const selfEvaluation = buildSelfEvaluationSummary("ELVOID_PRO_ORACLE", symbol, performanceReport.performance, performanceReport.coverage, gapReport.familiarityEvidence, gapReport.gaps, reasoningGaps, evolutionNeed);
-    const proposals = draftEvolutionProposals(evolutionNeed);
-    return { symbol, reasoningGaps, evolutionNeed, selfEvaluation, proposals };
-  });
+  //
+  // Phase 8.6.5/8.6.6 — for each drafted proposal, buildEvolutionCandidate()
+  // (one new read per candidate: the same getDecisionMemoryJoinedExperiences()
+  // join every other Phase 8.6 module already reuses) then
+  // validateEvolutionCandidate() (pure, zero reads). Candidates/validations
+  // are COMPUTED ONLY here too — see lib/ai/evolutionCandidate/repository.ts's
+  // and lib/ai/evolutionValidation/repository.ts's own headers for why
+  // persistEvolutionCandidate()/persistEvolutionValidation() are never
+  // called from this GET route.
+  const evolution = await Promise.all(
+    cognitiveGapEntries.map(async ([symbol, gapReport]) => {
+      const performanceReport = selfPerformanceBySymbol.get(symbol) ?? null;
+      if (gapReport === null || performanceReport === null) {
+        return { symbol, reasoningGaps: [], evolutionNeed: null, selfEvaluation: null, proposals: [], candidates: [] };
+      }
+      const hasValidConstraint = (validationsBySymbol.get(symbol) ?? []).some((v) => v.status === "VALID");
+      const reasoningGaps = deriveReasoningGapObservations(gapReport.gaps);
+      const evolutionNeed = evaluateEvolutionNeed("ELVOID_PRO_ORACLE", symbol, performanceReport.coverage, gapReport.gaps, hasValidConstraint);
+      const selfEvaluation = buildSelfEvaluationSummary("ELVOID_PRO_ORACLE", symbol, performanceReport.performance, performanceReport.coverage, gapReport.familiarityEvidence, gapReport.gaps, reasoningGaps, evolutionNeed);
+      const proposals = draftEvolutionProposals(evolutionNeed);
+
+      const candidateEntries = await Promise.all(
+        proposals.map(async (proposal) => {
+          const candidate = await buildEvolutionCandidate(proposal);
+          if (candidate === null) return null;
+          const validation = validateEvolutionCandidate(candidate);
+          return { candidate, validation };
+        })
+      );
+      const candidates = candidateEntries.filter((entry) => entry !== null);
+
+      return { symbol, reasoningGaps, evolutionNeed, selfEvaluation, proposals, candidates };
+    })
+  );
 
   return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), cognitiveGaps, evolution });
 }

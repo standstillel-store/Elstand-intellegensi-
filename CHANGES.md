@@ -431,26 +431,86 @@ new route. UI language is deliberately "candidate"/"observed"/
 "proposed"/"awaiting validation"; nothing claims "AI improved itself" or
 shows a self-evolving badge.
 
+**8.6.5-8.6.6 (`2026-09-14`) — Improvement Proposal Execution + Replay
+Validation, Versioned Learning Validation + Regression Guard.** Extends
+the observation/propose layer through `Implement Candidate`/`Replay`/
+`Version Validation`/`Regression Guard` — still stops at
+`Await Human Approval`, never applies anything. Forensic audit finding
+that shaped this pass: `lib/ai/cognitiveReplay` (8.3.7) is a read-only
+RECONSTRUCTION of a single already-recorded cycle, never a "run
+different logic" engine, and no execution engine anywhere in this
+repository can run a hypothetical modified decision rule against
+history — building one would mean writing and running real candidate
+code, explicitly forbidden. An `EvolutionCandidate` is therefore NOT a
+counterfactual re-execution; it is a **split-history replication
+check**: the exact same pure 8.6.1/8.6.2 functions
+(`computeEvaluationCoverage`, `aggregatePerformance`,
+`detectCognitiveGaps`) are run once on the older half and once on the
+newer half of the same historical (source, symbol) population,
+comparing whether the targeted gap's evidence rate fell (one axis) and
+whether any OTHER gap category became active in the newer half (the
+regression axis) — never a counterfactual, never claimed as proof.
+
+- **Evolution Candidate + Replay Engine** (`lib/ai/evolutionCandidate/`)
+  — `checkCandidateScope()` (a fixed forbidden-keyword scan of
+  `hypothesis`/`proposedChange` only — never `validationRequirements`,
+  which safely mentions qualification/arbitration as a human-review
+  reminder) runs BEFORE any historical data is read, so an out-of-scope
+  proposal never reaches replay at all. `status` is closed to
+  `CANDIDATE_CREATED`/`REPLAYING`/`REPLAY_PASSED`/`REPLAY_FAILED`/
+  `VALIDATION_BLOCKED` — the first two are never actually produced by
+  this fully-synchronous implementation (documented, not silently
+  dropped). `candidateId` is deterministic
+  (`candidate:<proposalId>`), never random.
+- **Versioned Learning Validation + Regression Guard**
+  (`lib/ai/evolutionValidation/`) — `result` closed to
+  `VALID`/`INVALID`/`INSUFFICIENT_EVIDENCE`/`INCONCLUSIVE`. Regression is
+  checked on exactly one honestly-measurable axis: did MORE gap
+  categories (other than the one targeted) become active in the newer
+  window than the older one — if so, `INVALID` with
+  `regressionDetected: true`, even when the targeted metric itself
+  improved ("improvement yang naik tetapi merusak yang lain" never
+  becomes `VALID`). `VALID` means only "the targeted gap's rate fell and
+  nothing else regressed" — never "apply this". Qualification/
+  arbitration/risk/execution invariants report `true` because nothing in
+  either new module ever imports from those modules, by construction
+  (verified by static-scan fixtures, not re-tested at runtime); source/
+  symbol isolation ARE empirically checked against the candidate's own
+  replay data.
+
+Two new tables, kept deliberately separate to preserve the 8.6.5/8.6.6
+architectural boundary even though both live in the same database:
+`evolution_candidates` (8.6.5's own writes) and `evolution_validations`
+(8.6.6's own writes, linked by `candidate_id`). Neither is written from
+the read-only AI Performance route — both are computed fresh on every
+request and persisted only when explicitly called, matching every prior
+Phase 8.6 "callable but not automatically wired" convention.
+
+Surfaced in the same "Self Performance & Novelty" panel as a new
+"Evolution Candidates" section — `Candidate #<id>` / `Gap:` / `Proposal:`
+/ `Baseline:` / `Candidate:` / `Replay:` / `Regression:` / `Evidence:` /
+a result badge reading "Validated candidate — awaiting human approval" /
+"Blocked (out of scope)" / "Insufficient evidence" / "Inconclusive" —
+never "AI EVOLVED", "SELF-IMPROVED", or "SUPER AI".
+
 ```
-Monitor → Detect → Decide → Propose → Test → Protect → Human Approval
-           \_____8.6.1_____/\___8.6.2-8.6.4___/
+Monitor → Detect → Decide → Propose → Test  → Protect → Human Approval
+           \_____8.6.1_____/\___8.6.2-8.6.4___/\____8.6.5-8.6.6____/
 ```
 
-Any future self-evolution work (8.6.5+) is expected to require:
-- **Replay validation** against the Cognitive Replay mechanism already
-  built in Phase 8.3.7, so a proposed change can be checked against real
-  historical cycles before being trusted.
-- **Regression guard** — the same fixture-suite discipline every 7.x/8.x
-  sub-phase already used (re-running every prior phase's fixtures before
-  accepting a new change).
-- **Versioning** of whatever logic would be subject to change.
+Any future self-evolution work (8.6.7) is expected to require:
 - **Human approval** as a hard gate before any self-modification takes
-  effect — not an optional review step.
+  effect — not an optional review step. This is the ONLY item left on
+  this list after 8.6.5-8.6.6: replay validation, regression guard, and
+  versioning now have real, evidence-gated implementations (above).
+- **Execution/promotion** — a Git branch, commit, push/PR, CI run, and
+  final promotion, none of which exist anywhere in this repository yet.
 
-The system today drafts structured, non-executable proposals (8.6.4) but
-does not test, approve, or apply any change to its own reasoning —
-`Test`/`Protect`/`Human Approval`/version promotion remain a direction,
-not a capability.
+The system today produces `VALID`/`INVALID`/`INSUFFICIENT_EVIDENCE`/
+`INCONCLUSIVE` candidates, awaiting a human, but does not itself
+approve, execute, promote, or apply any change to its own reasoning —
+`Human Approval` and everything after it (Git/PR/CI/deployment) remain
+a direction, not a capability.
 
 ---
 
@@ -499,6 +559,12 @@ intelligence features.
   Engine (8.6.2-8.6.4) — evidence-gated observation + propose-only
   layer; drafts structured, non-executable proposals but never applies
   them, never read by any decision-making path
+- Evolution Candidate + Replay Engine, Versioned Learning Validation +
+  Regression Guard (8.6.5-8.6.6) — split-history replication check
+  (never counterfactual code execution), evidence-gated
+  VALID/INVALID/INSUFFICIENT_EVIDENCE/INCONCLUSIVE verdicts; never
+  applies, approves, or promotes anything, never read by any
+  decision-making path
 - Paper trading, live trading (Binance Testnet/Live), journal
 - On-chain membership gating, ELS token, faucet, swap/sell, reward
   distributor, Bug Hunter escrow (all BSC Testnet)
@@ -514,13 +580,14 @@ intelligence features.
 
 ### Roadmap
 - Controlled Self-Evolution (Monitor→Detect→Decide→Propose→Test→Protect→Human
-  Approval) — as of 8.6.4, `Monitor`/`Detect`/`Decide`/`Propose` have a
-  real, evidence-gated implementation (Self Performance Monitor, Novelty
-  Detection, Cognitive/Reasoning Gap Detection, Evolution Need Evaluator,
-  Evolution Proposal Engine — the last producing DRAFT proposals only);
-  `Test` (replay validation), `Protect` (regression guard), and
-  `Human Approval` (plus any version promotion / application of a
-  change) remain design direction only, no implementation
+  Approval) — as of 8.6.6, every step through `Protect` (regression
+  guard) has a real, evidence-gated implementation (Self Performance
+  Monitor, Novelty Detection, Cognitive/Reasoning Gap Detection,
+  Evolution Need Evaluator, Evolution Proposal Engine, Evolution
+  Candidate + Replay Engine, Versioned Learning Validation + Regression
+  Guard); only `Human Approval` and everything after it (execution,
+  Git branch/commit/push/PR, CI, version promotion — Phase 8.6.7)
+  remain design direction only, no implementation
 - Mainnet deployment (all contracts are BSC Testnet only today)
 - Cross-chain support beyond BNB Smart Chain
 - Full multi-target (TP1/TP2/TP3) risk-plan redesign — explicitly deferred
