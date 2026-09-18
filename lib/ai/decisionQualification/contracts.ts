@@ -45,11 +45,14 @@
 //     recomputed from a source outside `context` itself.
 //   - Pure data shape only — no logic lives in this file. See `qualify.ts`
 //     for the pure, deterministic evaluator function.
-//   - UNWIRED: nothing in the app imports from
-//     `lib/ai/decisionQualification/*` yet. No route, no cron, no UI, no
-//     execution call-site. Wiring a consumer (and any EXECUTE/WAIT/REJECT
-//     logic that would read this status) is a separately-approved future
-//     phase.
+//   - WIRED: `lib/ai/autonomousRuntime/orchestrator.ts` (Phase 8.2.9) is
+//     the one real call site — `qualifyAutonomousDecision()` runs every
+//     autonomous cycle and its `status` is read by
+//     `lib/ai/preEntryValidation/validate.ts` and
+//     `lib/ai/autonomousDecision/decide.ts`. (This note previously said
+//     "UNWIRED" — true when Phase 8.2.2 first shipped, stale once 8.2.9
+//     wired it in; corrected here, alongside the Phase 8.2.2.1 negative-
+//     memory correction below, rather than left misleading.)
 // ---------------------------------------------------------------------------
 
 import type { AutonomousDecisionContext, AutonomousCanonicalSnapshot, DecisionSource } from "@/lib/ai/autonomous/contracts";
@@ -134,6 +137,132 @@ export interface QualificationSignals {
   readonly cautionConstraintPresent: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 8.2.2.1 — Bounded Negative-Memory Evaluation
+//
+// Corrective phase, added after two independent forensic audits confirmed
+// the original `negativeMemorySignalPresent` computation (a bare
+// existence check over `context.memory.matchedEvaluations`) treated a
+// single, unbounded-age negative evaluation as sufficient, on its own,
+// to produce `CONFLICTED` — effectively a permanent veto from one old
+// loss, with no minimum occurrence, no freshness window, and no
+// consideration of any positive evidence for the same
+// (source, symbol, side). `matchedPatterns` (Phase 8.1.2's own,
+// already-thresholded `MIN_OCCURRENCE_COUNT`/temporal-spread signal) was
+// never the problem and is NOT touched by anything below — it continues
+// to be read exactly as `qualify.ts` always has, verbatim, unfiltered.
+//
+// This section adds a closed, five-state read on the RAW
+// `matchedEvaluations` population only — the half of the old check that
+// had no threshold of its own. `negativeMemorySignalPresent` (above)
+// keeps its exact original type and meaning (a plain boolean,
+// `QualificationSignals` stays boolean-only) and is now
+// `hasMatchedPattern || (state === "CURRENT_NEGATIVE_EVIDENCE")` — see
+// `qualify.ts`. The richer state is additionally exposed on
+// `AutonomousQualificationResult.negativeMemory` below for observability
+// and future calibration; it is never itself a second input to
+// `selectQualificationStatus()`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed five-state read on `context.memory.matchedEvaluations` alone
+ * (never `matchedPatterns` — see header above). Exactly one state is
+ * ever produced; see `qualify.ts::evaluateRawMemoryEvidence()` for the
+ * deterministic, priority-ordered selection.
+ *
+ *   - `INSUFFICIENT_EVIDENCE` — no negative-class evaluation exists at
+ *     all for this query. Never contributes to `CONFLICTED`.
+ *   - `FAMILIAR_NEGATIVE` — one or more negative-class evaluations exist
+ *     within the freshness window, but fewer than
+ *     `NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT` of them. This is the state
+ *     the original, corrected "one loss = permanent CONFLICTED" case
+ *     falls into today; it behaves like a lesser concern, never an
+ *     independent veto.
+ *   - `CURRENT_NEGATIVE_EVIDENCE` — meets
+ *     `NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT` within the freshness
+ *     window, and is not offset by a comparable amount of fresh positive
+ *     evidence (see `MIXED_EVIDENCE`). The only state that may
+ *     independently justify `CONFLICTED`.
+ *   - `STALE_MEMORY` — negative-class evaluations exist, but none of
+ *     them are within the freshness window. A historical concern that no
+ *     longer independently justifies `CONFLICTED` on its own.
+ *   - `MIXED_EVIDENCE` — enough fresh negative evidence to otherwise
+ *     qualify as `CURRENT_NEGATIVE_EVIDENCE`, but fresh positive
+ *     evidence is also present and the negative share of the two
+ *     combined does not clear `NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD`
+ *     — positive evidence is not ignored, matching the corrected
+ *     "positive vs negative evidence" requirement.
+ */
+export type NegativeMemoryState = "INSUFFICIENT_EVIDENCE" | "FAMILIAR_NEGATIVE" | "CURRENT_NEGATIVE_EVIDENCE" | "STALE_MEMORY" | "MIXED_EVIDENCE";
+
+/**
+ * A group of qualifying (fresh, within-window) occurrences must reach at
+ * least this count before the raw evaluation signal can, on its own,
+ * reach `CURRENT_NEGATIVE_EVIDENCE`. PROVISIONAL CALIBRATION BASELINE —
+ * this repository already has one existing, reviewed answer to "how many
+ * occurrences make a recurring negative-outcome signal statistically
+ * real": `lib/ai/failurePatterns/detect.ts::MIN_OCCURRENCE_COUNT` (5).
+ * This constant starts at that same value as a defensible baseline, not
+ * because 5 has been separately, empirically proven optimal for this
+ * specific, raw-evaluation gate — it has not. It is intentionally a
+ * distinct, locally-scoped constant (not an import of that one) so the
+ * two can be recalibrated independently once enough live data exists
+ * (see the corrective design report, Part 6) without one accidentally
+ * moving the other.
+ */
+export const NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT = 5;
+
+/**
+ * A `matchedEvaluations` row's `evaluatedAt` must fall within this many
+ * days of `context.generatedAt` to count toward `FAMILIAR_NEGATIVE` /
+ * `CURRENT_NEGATIVE_EVIDENCE` / `MIXED_EVIDENCE` at all; beyond this
+ * window it can only ever contribute to `STALE_MEMORY`. PROVISIONAL
+ * CALIBRATION BASELINE — mirrors
+ * `lib/ai/learningValidation/validate.ts::FRESHNESS_WINDOW_DAYS` (30) as
+ * a starting point for the same reason `NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT`
+ * mirrors `MIN_OCCURRENCE_COUNT` above — a distinct constant, not an
+ * import, not yet independently calibrated.
+ */
+export const NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS = 30;
+
+/**
+ * Within the fresh (in-window) pool only, the negative share
+ * (`freshNegativeCount / (freshNegativeCount + freshPositiveCount)`)
+ * must reach at least this share for the signal to resolve to
+ * `CURRENT_NEGATIVE_EVIDENCE` rather than `MIXED_EVIDENCE`, once the
+ * minimum-occurrence bar is already met. PROVISIONAL CALIBRATION
+ * BASELINE — mirrors
+ * `lib/ai/learningValidation/validate.ts::OVERFIT_DOMINANCE_SHARE_THRESHOLD`
+ * (0.95), the only existing "how dominant is dominant enough"
+ * share-threshold convention in this repository; reused as a starting
+ * point, not asserted as separately proven for this use.
+ */
+export const NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD = 0.95;
+
+/**
+ * The raw-evaluation detail behind `QualificationSignals.negativeMemorySignalPresent`.
+ * Read-only, observational — nothing here is a second input to
+ * `selectQualificationStatus()`; `state` is derived purely from
+ * `context.memory.matchedEvaluations` (see `qualify.ts`), and
+ * `matchedPatternPresent` is `context.memory.matchedPatterns.length > 0`,
+ * copied verbatim, exactly as `negativeMemorySignalPresent` has always
+ * read it. All counts are plain occurrence counts, never a
+ * probability/likelihood claim.
+ */
+export interface NegativeMemoryEvaluation {
+  readonly state: NegativeMemoryState;
+  /** Total negative-class `matchedEvaluations` rows, any age. */
+  readonly negativeCount: number;
+  /** Of `negativeCount`, how many fall within `NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS` of `context.generatedAt`. */
+  readonly freshNegativeCount: number;
+  /** Positive-class `matchedEvaluations` rows within the same freshness window. */
+  readonly freshPositiveCount: number;
+  /** `freshNegativeCount / (freshNegativeCount + freshPositiveCount)`, rounded to 4 decimal places; `0` when that denominator is `0`. */
+  readonly negativeShare: number;
+  /** `context.memory !== null && context.memory.matchedPatterns.length > 0` — the pre-existing, already-thresholded Phase 8.1.2 signal, unchanged. */
+  readonly matchedPatternPresent: boolean;
+}
+
 /**
  * The pure engine's single output type. `symbol`, `source`, and
  * `generatedAt` are copied verbatim from the input `context` — never
@@ -143,12 +272,19 @@ export interface QualificationSignals {
  * alone.
  */
 export interface AutonomousQualificationResult {
-  /** Schema-evolution marker only — bump when adding fields, never to reinterpret existing ones. */
-  readonly version: 1;
+  /**
+   * Schema-evolution marker only — bump when adding fields, never to
+   * reinterpret existing ones. Bumped 1 -> 2 in Phase 8.2.2.1 for the
+   * additive `negativeMemory` field below; every existing field's value
+   * and meaning is unchanged.
+   */
+  readonly version: 2;
   readonly symbol: string;
   readonly source: DecisionSource;
   /** = `context.generatedAt`, copied verbatim — the instant the *context* was assembled, not a new qualification-time read. */
   readonly generatedAt: string;
   readonly status: QualificationStatus;
   readonly signals: QualificationSignals;
+  /** Phase 8.2.2.1 — observational detail behind `signals.negativeMemorySignalPresent`. See `NegativeMemoryEvaluation` above. */
+  readonly negativeMemory: NegativeMemoryEvaluation;
 }

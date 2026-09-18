@@ -2,17 +2,22 @@
 // ELVOID Intelligence — Autonomous Decision Qualification Engine (Phase 8.2.2)
 //
 // Pure, deterministic functions only. Zero database/network/LLM/fetch
-// calls. Zero `Date.now()` — every timestamp in the output is copied
-// verbatim from the caller-supplied `context` (`context.generatedAt`),
+// calls. Zero `Date.now()` — every timestamp compared against (including
+// the freshness check added in Phase 8.2.2.1) is either copied verbatim
+// from the caller-supplied `context` (`context.generatedAt`) or already
+// present on a `context.memory` row (`DecisionEvaluation.evaluatedAt`);
 // never wall-clock-read internally, mirroring how `validatedAt`/
 // `computedAt`/`evaluatedAt` are added by their respective repository
 // layers, not by their pure `validate.ts`/`detect.ts`/`evaluate.ts`
 // counterparts. Zero randomness. Zero imports from lib/ai/oracle/*,
 // lib/ai/cognitive/*, lib/elvoid/*, or any trading-execution module — this
-// file depends ONLY on the plain `AutonomousDecisionContext` it is given
-// (plus the one re-exported constant from `lib/ai/failurePatterns/
-// detect.ts`, itself already zero-dependency on any of those paths — see
-// that file's own header).
+// file depends ONLY on the plain `AutonomousDecisionContext` it is given,
+// two re-exported constants from `lib/ai/failurePatterns/detect.ts`
+// (itself already zero-dependency on any of those paths — see that
+// file's own header), and one type-only import of `DecisionEvaluation`
+// from `lib/ai/decisionEvaluation/contracts.ts` (Phase 8.2.2.1 — erased
+// at compile time, no runtime dependency, and the exact same type
+// `context.memory.matchedEvaluations` already carries).
 //
 // THIS IS NOT A SECOND ORACLE GRADING ENGINE. `qualifyAutonomousDecision()`
 // never recomputes `grade`/`confidence`/`side`/`riskStatus`, never derives
@@ -24,27 +29,105 @@
 // threshold or a plain existence check, and never written anywhere.
 // ---------------------------------------------------------------------------
 
-import { NEGATIVE_EVALUATION_CLASSES } from "@/lib/ai/failurePatterns/detect";
-import type { AutonomousDecisionContext, AutonomousQualificationResult, QualificationSignals, QualificationStatus } from "./contracts";
-import { QUALIFIABLE_SOURCE } from "./contracts";
+import { NEGATIVE_EVALUATION_CLASSES, POSITIVE_EVALUATION_CLASSES } from "@/lib/ai/failurePatterns/detect";
+import type { AutonomousDecisionContext, AutonomousQualificationResult, NegativeMemoryEvaluation, NegativeMemoryState, QualificationSignals, QualificationStatus } from "./contracts";
+import { NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD, NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS, NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT, QUALIFIABLE_SOURCE } from "./contracts";
+import type { DecisionEvaluation } from "@/lib/ai/decisionEvaluation/contracts";
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
- * Pure existence/threshold check over `context.memory` alone — never
- * re-filters, re-ranks, or re-thresholds anything Phase 8.1.3 (Decision
- * Memory) or Phase 8.1.2 (Failure Pattern Detection) already computed.
- * `matchedEvaluations`/`matchedPatterns` are read exactly as
- * `DecisionMemoryResult` already carries them.
- *
- * Returns `false` when `context.memory === null` — a missing memory
- * retrieval is a valid, expected state (see `autonomous/contracts.ts`'s
- * own doc comment on `memory`), not itself evidence of conflict, so it
- * must never be treated as if it were a positive negative-signal.
+ * Pure freshness check, mirroring `learningValidation/validate.ts`'s
+ * `isWithinFreshnessWindow()` exactly: is `evaluatedAt` within
+ * `NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS` of `generatedAt`?
+ * `generatedAt` earlier than `evaluatedAt` (a context assembled at a
+ * moment before the evaluation's own timestamp — not expected in
+ * practice, but not itself invalid) is treated as within-window.
  */
-function hasNegativeMemorySignal(context: AutonomousDecisionContext): boolean {
-  if (context.memory === null) return false;
-  const hasNegativeEvaluation = context.memory.matchedEvaluations.some((evaluation) => NEGATIVE_EVALUATION_CLASSES.includes(evaluation.evaluationClass));
-  const hasMatchedPattern = context.memory.matchedPatterns.length > 0;
-  return hasNegativeEvaluation || hasMatchedPattern;
+function isWithinNegativeMemoryFreshnessWindow(evaluatedAt: string, generatedAt: string): boolean {
+  const generatedAtMs = Date.parse(generatedAt);
+  const evaluatedAtMs = Date.parse(evaluatedAt);
+  if (!Number.isFinite(generatedAtMs) || !Number.isFinite(evaluatedAtMs)) return false;
+  const ageMs = generatedAtMs - evaluatedAtMs;
+  if (ageMs <= 0) return true;
+  return ageMs <= NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS * MS_PER_DAY;
+}
+
+/**
+ * Deterministic, fail-closed, priority-ordered state selection — see
+ * `NegativeMemoryState`'s own doc comment (contracts.ts) for the meaning
+ * of each state. Exactly one state is ever returned.
+ *
+ *   1. `negativeCount === 0` -> `INSUFFICIENT_EVIDENCE` (nothing negative
+ *      on record at all; never contributes to CONFLICTED).
+ *   2. `freshNegativeCount === 0` -> `STALE_MEMORY` (negative evidence
+ *      exists historically, but none of it is fresh).
+ *   3. `freshNegativeCount < NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT` ->
+ *      `FAMILIAR_NEGATIVE` (fresh negative evidence exists, but not yet
+ *      enough of it).
+ *   4. `freshPositiveCount > 0 && negativeShare < NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD`
+ *      -> `MIXED_EVIDENCE` (enough fresh negative evidence on its own,
+ *      but meaningful fresh positive evidence is also present).
+ *   5. Otherwise -> `CURRENT_NEGATIVE_EVIDENCE`.
+ */
+function selectNegativeMemoryState(negativeCount: number, freshNegativeCount: number, freshPositiveCount: number, negativeShare: number): NegativeMemoryState {
+  if (negativeCount === 0) return "INSUFFICIENT_EVIDENCE";
+  if (freshNegativeCount === 0) return "STALE_MEMORY";
+  if (freshNegativeCount < NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT) return "FAMILIAR_NEGATIVE";
+  if (freshPositiveCount > 0 && negativeShare < NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD) return "MIXED_EVIDENCE";
+  return "CURRENT_NEGATIVE_EVIDENCE";
+}
+
+/**
+ * Pure, deterministic evaluation of `matchedEvaluations` alone — never
+ * `matchedPatterns` (that remains a separate, already-thresholded
+ * signal; see `computeSignals()` below). Replaces the old bare
+ * "`.some(negative-class)`" existence check with the bounded,
+ * sample-size- and freshness-aware, positive-evidence-aware read
+ * documented on `NegativeMemoryEvaluation` (contracts.ts). The same
+ * `(matchedEvaluations, generatedAt)` pair always produces byte-identical
+ * output; never mutates `matchedEvaluations`.
+ */
+function evaluateRawMemoryEvidence(matchedEvaluations: readonly DecisionEvaluation[], generatedAt: string): Omit<NegativeMemoryEvaluation, "matchedPatternPresent"> {
+  const negative = matchedEvaluations.filter((evaluation) => NEGATIVE_EVALUATION_CLASSES.includes(evaluation.evaluationClass));
+  const positive = matchedEvaluations.filter((evaluation) => POSITIVE_EVALUATION_CLASSES.includes(evaluation.evaluationClass));
+  const freshNegative = negative.filter((evaluation) => isWithinNegativeMemoryFreshnessWindow(evaluation.evaluatedAt, generatedAt));
+  const freshPositive = positive.filter((evaluation) => isWithinNegativeMemoryFreshnessWindow(evaluation.evaluatedAt, generatedAt));
+
+  const freshTotal = freshNegative.length + freshPositive.length;
+  const negativeShare = freshTotal > 0 ? Math.round((freshNegative.length / freshTotal) * 10000) / 10000 : 0;
+
+  return {
+    state: selectNegativeMemoryState(negative.length, freshNegative.length, freshPositive.length, negativeShare),
+    negativeCount: negative.length,
+    freshNegativeCount: freshNegative.length,
+    freshPositiveCount: freshPositive.length,
+    negativeShare,
+  };
+}
+
+/**
+ * Phase 8.2.2.1 — the corrected replacement for the original bare
+ * existence check. `context.memory === null` (a missing memory
+ * retrieval — a valid, expected state, not itself evidence of conflict)
+ * resolves to `INSUFFICIENT_EVIDENCE` with `matchedPatternPresent: false`
+ * and all counts at `0`, the same "absence is not itself a signal"
+ * treatment the original function always gave it.
+ *
+ * `matchedPatterns` is read exactly as before — a plain
+ * `.length > 0` existence check, never re-filtered, re-ranked, or
+ * re-thresholded here; Phase 8.1.2's own `MIN_OCCURRENCE_COUNT` and
+ * temporal-spread rule already gated whether a pattern exists at all.
+ */
+function evaluateNegativeMemorySignal(context: AutonomousDecisionContext): NegativeMemoryEvaluation {
+  if (context.memory === null) {
+    return { state: "INSUFFICIENT_EVIDENCE", negativeCount: 0, freshNegativeCount: 0, freshPositiveCount: 0, negativeShare: 0, matchedPatternPresent: false };
+  }
+
+  const rawEvidence = evaluateRawMemoryEvidence(context.memory.matchedEvaluations, context.generatedAt);
+  const matchedPatternPresent = context.memory.matchedPatterns.length > 0;
+
+  return { ...rawEvidence, matchedPatternPresent };
 }
 
 /**
@@ -52,13 +135,24 @@ function hasNegativeMemorySignal(context: AutonomousDecisionContext): boolean {
  * status decision is a pure function of. Each field reads a fixed set of
  * already-computed `context` fields and nothing else — no recomputation,
  * no re-derivation of any upstream value.
+ *
+ * `negativeMemorySignalPresent` keeps its original type (a plain
+ * boolean) and its original meaning ("does documented historical
+ * evidence, on its own, conflict with treating this assessment as
+ * trustworthy"). Phase 8.2.2.1 changes only HOW it is computed: a
+ * bounded, priority-ordered state (`evaluateNegativeMemorySignal()`,
+ * above) instead of a bare `.some()` existence check. It is `true` iff
+ * the already-thresholded `matchedPatterns` signal is present, or the
+ * bounded raw-evaluation state reaches `CURRENT_NEGATIVE_EVIDENCE` — the
+ * only state that state model was designed to independently justify
+ * `CONFLICTED` (see `NegativeMemoryState`'s doc comment).
  */
-function computeSignals(context: AutonomousDecisionContext): QualificationSignals {
+function computeSignals(context: AutonomousDecisionContext, negativeMemory: NegativeMemoryEvaluation): QualificationSignals {
   const sourceEligible = context.source === QUALIFIABLE_SOURCE;
   const canonicalAssessmentPresent = context.canonical !== null;
   const gradeQualifies = canonicalAssessmentPresent && context.canonical!.grade !== "NO_TRADE";
   const riskValid = canonicalAssessmentPresent && context.canonical!.riskStatus === "valid";
-  const negativeMemorySignalPresent = hasNegativeMemorySignal(context);
+  const negativeMemorySignalPresent = negativeMemory.matchedPatternPresent || negativeMemory.state === "CURRENT_NEGATIVE_EVIDENCE";
   const cautionConstraintPresent = context.validConstraints.length > 0;
 
   return {
@@ -130,14 +224,16 @@ function selectQualificationStatus(signals: QualificationSignals): Qualification
  * would risk inventing an undocumented seventh concern.
  */
 export function qualifyAutonomousDecision(context: AutonomousDecisionContext): AutonomousQualificationResult {
-  const signals = computeSignals(context);
+  const negativeMemory = evaluateNegativeMemorySignal(context);
+  const signals = computeSignals(context, negativeMemory);
 
   return {
-    version: 1,
+    version: 2,
     symbol: context.symbol,
     source: context.source,
     generatedAt: context.generatedAt,
     status: selectQualificationStatus(signals),
     signals,
+    negativeMemory,
   };
 }

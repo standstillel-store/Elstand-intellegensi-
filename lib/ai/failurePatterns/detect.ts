@@ -41,6 +41,25 @@ export const MAX_CONFIDENCE = 0.7;
  */
 export const NEGATIVE_EVALUATION_CLASSES: readonly FailurePatternEvaluationClass[] = ["GOOD_DECISION_BAD_OUTCOME", "BAD_DECISION_BAD_OUTCOME"];
 
+/**
+ * The symmetric, outcome-based complement of `NEGATIVE_EVALUATION_CLASSES`
+ * above (`marketOutcome === "POSITIVE"`, regardless of the separate
+ * `decisionQuality` axis — same "group on outcome, never on quality"
+ * convention). This module itself does not consume this constant — it
+ * only ever counts negative-outcome occurrences (see
+ * `detectFailurePatternCandidates()` below, unchanged). It is exported
+ * from here, next to its negative sibling, so any other module that
+ * needs to weigh positive evidence against negative evidence (e.g.
+ * `lib/ai/decisionQualification/qualify.ts`'s bounded negative-memory
+ * signal, Phase 8.2.2.1) has a single, shared, already-reviewed
+ * definition of "positive" to import, rather than a second, possibly
+ * inconsistent one. `NEUTRAL_OUTCOME` and `INSUFFICIENT_EVIDENCE` are
+ * deliberately in neither list — see `EvaluationClass`'s own doc comment
+ * on why a neutral/breakeven result and a genuinely missing result are
+ * each their own, distinct thing.
+ */
+export const POSITIVE_EVALUATION_CLASSES: readonly FailurePatternEvaluationClass[] = ["GOOD_DECISION_GOOD_OUTCOME", "BAD_DECISION_GOOD_OUTCOME"];
+
 function isNegativeEvaluationClass(evaluationClass: FailurePatternEvaluationClass): boolean {
   return NEGATIVE_EVALUATION_CLASSES.includes(evaluationClass);
 }

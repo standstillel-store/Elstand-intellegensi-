@@ -47,12 +47,14 @@ function decisionContext(overrides: Partial<AutonomousDecisionContext> = {}): Au
 
 function qualification(overrides: Partial<AutonomousQualificationResult> = {}): AutonomousQualificationResult {
   return {
-    version: 1,
+    version: 2,
     symbol: "BTCUSDT",
     source: "ELVOID_PRO_ORACLE",
     generatedAt: ASOF,
     status: "QUALIFIED",
     signals: { sourceEligible: true, canonicalAssessmentPresent: true, gradeQualifies: true, riskValid: true, negativeMemorySignalPresent: false, cautionConstraintPresent: false },
+    // Phase 8.2.2.1 — default fixture detail behind negativeMemorySignalPresent: false above; matches evaluateNegativeMemorySignal()'s own context.memory === null / no-evidence result.
+    negativeMemory: { state: "INSUFFICIENT_EVIDENCE", negativeCount: 0, freshNegativeCount: 0, freshPositiveCount: 0, negativeShare: 0, matchedPatternPresent: false },
     ...overrides,
   };
 }

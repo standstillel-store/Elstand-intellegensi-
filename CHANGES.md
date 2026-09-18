@@ -667,3 +667,134 @@ boundary, account for what actually happened after it decided. Phase 8.x
 to change the system's own logic, gated behind human approval — and is the
 clearest boundary between what ELSTAND Intelligence does today and what it
 is designed, but not yet built, to do next.
+
+---
+
+## Phase 8.2.2.1 — Learning-Loop Correction (Post-Forensic-Audit)
+
+*Added after this document's `2026-09-11` cutoff — not yet folded into the
+nine-phase narrative above. Recorded here per this correction's own
+validation requirements rather than left undocumented.*
+
+### Confirmed root cause
+Two independent forensic audits, plus a corrective-design audit, converged
+on the same finding: `lib/ai/decisionQualification/qualify.ts`'s
+`hasNegativeMemorySignal()` treated a single, unbounded-age negative
+`decision_evaluations` row as sufficient, on its own, to set
+`qualification.status = "CONFLICTED"` — which `decideAutonomous()` turns
+directly into `REJECT`. The feeding `queryDecisionMemory()` call
+(`autonomousRuntime/orchestrator.ts`) carried no `since`/`limit`. Live
+Learning DB data (read-only query, `2026-09-17`) showed this was not
+theoretical: 82.9% of REJECTs in a 7-day/1,275-cycle window traced to this
+one mechanism, with 22 of 28 tracked `(symbol, side)` pairs already
+permanently affected by single trades up to 17 days old. The separate,
+properly-designed adaptive-constraint/learning-validation system
+(`lib/ai/failurePatterns`, `lib/ai/adaptiveConstraint`,
+`lib/ai/learningValidation`) was confirmed NOT the cause — it had produced
+exactly one constraint in the project's history, flagged `OVERFIT_RISK`,
+and had never once been the deciding factor (`CAUTION` occurred 0/1,275
+times in the same window).
+
+### Corrective design
+A five-state, sample-size- and freshness-aware read on the raw
+`matchedEvaluations` population (`NegativeMemoryState`:
+`INSUFFICIENT_EVIDENCE` / `FAMILIAR_NEGATIVE` / `CURRENT_NEGATIVE_EVIDENCE`
+/ `STALE_MEMORY` / `MIXED_EVIDENCE`), replacing the old bare existence
+check, while leaving the already-thresholded `matchedPatterns` signal
+(Phase 8.1.2) untouched. Full design rationale, alternatives considered,
+and the six-way concept separation (negative memory / adaptive constraint
+/ risk block / market context block / insufficient context / rejected
+decision observation) are in the corrective-design report produced ahead
+of implementation (not committed to this repository).
+
+### P0 implementation — DONE
+- `lib/ai/failurePatterns/detect.ts` — added `POSITIVE_EVALUATION_CLASSES`
+  (additive; `detectFailurePatternCandidates()`'s own behavior unchanged).
+- `lib/ai/decisionQualification/contracts.ts` — added `NegativeMemoryState`,
+  `NegativeMemoryEvaluation`, and three new, locally-scoped, explicitly
+  PROVISIONAL constants (`NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT = 5`,
+  `NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS = 30`,
+  `NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD = 0.95` — each a citation of
+  an existing repository convention for the same shape of question, not
+  an independently-proven value for this new use — see the constants'
+  own doc comments). `AutonomousQualificationResult.version` bumped
+  `1 -> 2` for the additive `negativeMemory` field; every existing field's
+  meaning is unchanged. Also corrected a stale "UNWIRED" header comment
+  in the same file (accurate when Phase 8.2.2 first shipped, stale since
+  Phase 8.2.9 wired it in — corrected while already editing this file,
+  not a separate change).
+- `lib/ai/decisionQualification/qualify.ts` — replaced
+  `hasNegativeMemorySignal()` with `evaluateNegativeMemorySignal()` and
+  its supporting pure functions. `QualificationSignals.negativeMemorySignalPresent`
+  keeps its exact original boolean type and meaning; only how it is
+  computed changed (`matchedPatternPresent || state === "CURRENT_NEGATIVE_EVIDENCE"`
+  instead of a bare `.some()`).
+- `lib/ai/autonomousRuntime/orchestrator.ts` — `queryDecisionMemory()` is
+  now called with a `since` bound (`asOf` minus
+  `NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS`), a defense-in-depth,
+  payload-size measure; the primary correctness fix is `qualify.ts`'s own
+  `evaluatedAt`-based freshness check, which this bound can only ever be
+  equal to or looser than (see the inline comment at the call site for
+  why). `matchedPatterns` is unaffected by `since` (confirmed against
+  `decisionMemory/contracts.ts`'s own documented query semantics).
+- Fixtures: `scripts/phase8/decision-qualification-fixtures.ts` — updated
+  two existing cases whose expected outcome intentionally changed (a
+  single negative evaluation no longer reaches `CONFLICTED` — that was
+  exactly the defect), and added a 16-case matrix (section 21) covering
+  every dimension this correction was required to handle: zero evidence,
+  stale-only evidence, single recent evidence, a genuinely repeated
+  current-negative population (confirmed still reaching `CONFLICTED`),
+  repeated stale evidence, small mixed evidence below the occurrence
+  floor, positive-dominated mixed evidence, negative-dominated evidence,
+  source isolation, the occurrence-count boundary, the freshness-window
+  boundary, the `negativeShare` formula, `matchedPatterns`'s continued
+  independence from this change, determinism, and input immutability.
+  Three other fixture scripts (`external-intelligence-gate-fixtures.ts`,
+  `pre-entry-validation-fixtures.ts`, `autonomous-decision-fixtures.ts`)
+  were updated only to keep their own, unrelated `qualification()` mock
+  builders structurally valid against the new required field/version —
+  none of their actual assertions changed.
+
+### Validation status — HONEST ACCOUNTING
+This sandbox has no outbound network access and no installed
+`node_modules`, so `npm run build`/`tsc --noEmit`/the fixture scripts
+above could **not** be executed here. What *was* done: every changed
+type/field was traced by hand against its exact existing declaration
+(no field renamed, no existing field's meaning changed, every new
+literal object checked against its target interface field-by-field);
+every one of the 16 new fixture cases was manually traced against the
+implemented logic and confirmed to produce its asserted outcome; every
+other consumer of the touched types was located by repository-wide
+search and either confirmed unaffected (reads `.status` only) or updated
+(the three mock-builder fixture files above). This is not a substitute
+for actually running `node --experimental-strip-types
+--loader ./scripts/phase7/alias-loader.mjs
+scripts/phase8/decision-qualification-fixtures.ts` and the project's
+`npm run build` in a real environment — both remain required before this
+change is trusted in production, and are explicitly NOT claimed to have
+passed here.
+
+### P1 (Decision Population Observation, 8.6.1/8.6.2/8.6.4 wiring) and P2
+(confluence-source attribution) — NOT YET IMPLEMENTED. Designed, not
+built. See the corrective-design report.
+
+### Known limitations after P0 alone
+- 8.6.1–8.6.6 remain unable to observe REJECT/WAIT decisions at all
+  (that is P1's scope, not P0's) — this correction fixes the qualification
+  defect itself, not the self-improvement pipeline's blind spot to it.
+- The three PROVISIONAL constants above are starting baselines, not
+  calibrated values — see the corrective-design report's calibration
+  requirements before treating them as final.
+- Setup-vs-execution/context attribution (P2) is unchanged.
+
+### 8.6.5–8.6.7
+Unimplemented, untouched by this phase. ELVOID's self-improvement
+capability remains a **controlled self-improvement proposal pipeline**
+with **human-gated evolution** — observation, gap detection, and proposal
+drafting only; no production decision logic can be auto-modified by
+anything in `lib/ai/cognitiveGap`, `lib/ai/reasoningGap`,
+`lib/ai/evolutionNeed`, `lib/ai/evolutionProposal`,
+`lib/ai/evolutionCandidate`, or `lib/ai/evolutionValidation`, confirmed
+again by this phase's own repository-wide import/keyword scan (no match
+for any auto-promotion, Git-push, deployment, or messaging mechanism in
+any of those directories).

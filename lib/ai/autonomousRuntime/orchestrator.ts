@@ -75,6 +75,7 @@ import { queryDecisionMemory } from "@/lib/ai/decisionMemory/repository";
 import { getConstraintValidations } from "@/lib/ai/learningValidation/repository";
 import { buildAutonomousDecisionContext } from "@/lib/ai/autonomous/context";
 import { qualifyAutonomousDecision } from "@/lib/ai/decisionQualification/qualify";
+import { NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS } from "@/lib/ai/decisionQualification/contracts";
 import { analyzeMacroIntelligence } from "@/lib/ai/macroIntelligence/analyze";
 import { analyzeEventImpact } from "@/lib/ai/eventImpact/analyze";
 import { validatePreEntry } from "@/lib/ai/preEntryValidation/validate";
@@ -414,7 +415,23 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
   }
 
   // --- Step 3: Decision Memory (Phase 8.1.3) + Learning Validation read (Phase 8.1.5). ---
-  const memory = await queryDecisionMemory({ source: AUTONOMOUS_SOURCE, symbol, side: assessment.side ?? undefined }).catch(() => null);
+  // Phase 8.2.2.1 — `since` bounds the underlying `matchedExperiences`/
+  // `matchedEvaluations` read to the same freshness window
+  // `qualifyAutonomousDecision()` itself now applies when weighing raw
+  // negative evidence (see `decisionQualification/contracts.ts`'s
+  // `NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS`). This is a defense-in-depth
+  // payload-size bound, not the primary correctness fix — that lives in
+  // `qualify.ts`'s own `evaluatedAt`-based freshness check, which this
+  // `since` (bounding the earlier `decisionTimestamp` instead) can only
+  // ever be equal to or looser than, never stricter: a decision made
+  // before `since` was necessarily evaluated no earlier than it was
+  // decided, so nothing `qualify.ts` would still count as fresh is ever
+  // excluded here. Never applied to `matchedPatterns` — see
+  // `DecisionMemoryQuery.since`'s own doc comment
+  // (`decisionMemory/contracts.ts`); that signal remains exactly as
+  // before. Source/symbol/side filters are unchanged.
+  const negativeMemorySince = new Date(Date.parse(asOf) - NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const memory = await queryDecisionMemory({ source: AUTONOMOUS_SOURCE, symbol, side: assessment.side ?? undefined, since: negativeMemorySince }).catch(() => null);
   const rawConstraints = await getConstraintValidations(AUTONOMOUS_SOURCE, symbol).catch(() => null);
 
   // --- Step 4: Autonomous Decision Context assembly (Phase 8.2.0). ---

@@ -20,6 +20,7 @@ import type { DecisionExperienceRecord } from "@/lib/ai/decisionOutcome/contract
 import type { DecisionEvaluation } from "@/lib/ai/decisionEvaluation/contracts";
 import type { FailurePatternCandidate } from "@/lib/ai/failurePatterns/contracts";
 import type { ConstraintValidation } from "@/lib/ai/learningValidation/contracts";
+import { NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD, NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS, NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT } from "@/lib/ai/decisionQualification/contracts";
 
 let failures = 0;
 let passed = 0;
@@ -89,6 +90,21 @@ function memory(overrides: Partial<DecisionMemoryResult> = {}): DecisionMemoryRe
     matchedPatterns: [],
     ...overrides,
   };
+}
+
+/** `GENERATED_AT` minus `days`, as an ISO 8601 string — for building `DecisionEvaluation.evaluatedAt` fixtures at a known age relative to the context's own `generatedAt`. */
+function daysBeforeGenerated(days: number): string {
+  return new Date(Date.parse(GENERATED_AT) - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/** `count` distinct negative-class `DecisionEvaluation` rows, each `ageDays` before `GENERATED_AT`, each with a unique `sourceSignalId`. */
+function negativeEvals(count: number, ageDays: number, evaluationClass: DecisionEvaluation["evaluationClass"] = "GOOD_DECISION_BAD_OUTCOME"): DecisionEvaluation[] {
+  return Array.from({ length: count }, (_, i) => evaluation({ sourceSignalId: `neg-${ageDays}d-${i}`, evaluationClass, evaluatedAt: daysBeforeGenerated(ageDays) }));
+}
+
+/** `count` distinct positive-class `DecisionEvaluation` rows, each `ageDays` before `GENERATED_AT`, each with a unique `sourceSignalId`. */
+function positiveEvals(count: number, ageDays: number, evaluationClass: DecisionEvaluation["evaluationClass"] = "GOOD_DECISION_GOOD_OUTCOME"): DecisionEvaluation[] {
+  return Array.from({ length: count }, (_, i) => evaluation({ sourceSignalId: `pos-${ageDays}d-${i}`, evaluationClass, evaluatedAt: daysBeforeGenerated(ageDays) }));
 }
 
 function validConstraint(overrides: Partial<ConstraintValidation> = {}): ConstraintValidation {
@@ -178,19 +194,42 @@ function context(overrides: Partial<AutonomousDecisionContext> = {}): Autonomous
 }
 
 // ===========================================================================
-// 5. Negative matched evaluation present -> CONFLICTED
+// 5. Single negative matched evaluation -> NOT CONFLICTED (Phase 8.2.2.1)
+//
+// INTENTIONAL BEHAVIOR CHANGE: before Phase 8.2.2.1, 5a/5b asserted a
+// SINGLE negative-class evaluation produced CONFLICTED — that was
+// exactly the confirmed defect (two independent forensic audits + a live
+// production trace: one old loss becoming an effectively permanent
+// veto). 5a/5b now assert the corrected behavior: one negative
+// evaluation alone is `FAMILIAR_NEGATIVE`, not `CURRENT_NEGATIVE_EVIDENCE`,
+// and must NOT reach CONFLICTED. See section 21 below for the full
+// bounded-negative-memory fixture matrix (repeated/current evidence
+// still correctly reaching CONFLICTED, staleness, positive/negative
+// mixing, etc.).
 // ===========================================================================
 {
   const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [evaluation({ evaluationClass: "BAD_DECISION_BAD_OUTCOME" })] }) }));
-  check("5a. matchedEvaluations contains BAD_DECISION_BAD_OUTCOME -> CONFLICTED", result.status === "CONFLICTED" && result.signals.negativeMemorySignalPresent, JSON.stringify(result));
+  check(
+    "5a. ONE matchedEvaluations row (BAD_DECISION_BAD_OUTCOME) -> NOT CONFLICTED, state FAMILIAR_NEGATIVE (was CONFLICTED pre-8.2.2.1 — intentional fix)",
+    result.status !== "CONFLICTED" && !result.signals.negativeMemorySignalPresent && result.negativeMemory.state === "FAMILIAR_NEGATIVE",
+    JSON.stringify(result),
+  );
 }
 {
   const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [evaluation({ evaluationClass: "GOOD_DECISION_BAD_OUTCOME" })] }) }));
-  check("5b. matchedEvaluations contains GOOD_DECISION_BAD_OUTCOME -> CONFLICTED", result.status === "CONFLICTED" && result.signals.negativeMemorySignalPresent, JSON.stringify(result));
+  check(
+    "5b. ONE matchedEvaluations row (GOOD_DECISION_BAD_OUTCOME) -> NOT CONFLICTED, state FAMILIAR_NEGATIVE (was CONFLICTED pre-8.2.2.1 — intentional fix)",
+    result.status !== "CONFLICTED" && !result.signals.negativeMemorySignalPresent && result.negativeMemory.state === "FAMILIAR_NEGATIVE",
+    JSON.stringify(result),
+  );
 }
 {
   const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [evaluation({ evaluationClass: "GOOD_DECISION_GOOD_OUTCOME" })] }) }));
-  check("5c. matchedEvaluations with only a positive class -> negativeMemorySignalPresent false, not CONFLICTED", !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED", JSON.stringify(result));
+  check(
+    "5c. matchedEvaluations with only a positive class -> negativeMemorySignalPresent false, not CONFLICTED, state INSUFFICIENT_EVIDENCE",
+    !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED" && result.negativeMemory.state === "INSUFFICIENT_EVIDENCE",
+    JSON.stringify(result),
+  );
 }
 
 // ===========================================================================
@@ -349,6 +388,141 @@ function stripComments(src: string): string {
 {
   const statuses = new Set([qualifyAutonomousDecision(context()).status, qualifyAutonomousDecision(context({ canonical: canonical({ riskStatus: "invalid" }) })).status, qualifyAutonomousDecision(context({ memory: memory({ matchedPatterns: [pattern()] }) })).status, qualifyAutonomousDecision(context({ canonical: null })).status]);
   check("20. QUALIFIED, CAUTION, CONFLICTED, INSUFFICIENT_CONTEXT all reachable", statuses.has("QUALIFIED") && statuses.has("CAUTION") && statuses.has("CONFLICTED") && statuses.has("INSUFFICIENT_CONTEXT"), `statuses: ${JSON.stringify([...statuses])}`);
+}
+
+// ===========================================================================
+// 21. Phase 8.2.2.1 — Bounded Negative Memory (P0 minimum validation matrix)
+//
+// A fresh evaluation is `ageDays < NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS`
+// (30); "recent" fixtures below use 5 days, "old"/"stale" fixtures use
+// 45 days — both comfortably clear of the 30-day boundary so these
+// cases can never flip if the constant is later recalibrated within a
+// reasonable range. Boundary-exact cases (21.11) test the edge directly.
+// ===========================================================================
+
+// --- 21.1 Zero negative evidence -> INSUFFICIENT_EVIDENCE, not CONFLICTED ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [] }) }));
+  check("21.1 zero negative evidence -> INSUFFICIENT_EVIDENCE, not CONFLICTED", result.negativeMemory.state === "INSUFFICIENT_EVIDENCE" && !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED", JSON.stringify(result));
+}
+
+// --- 21.2 One OLD (stale) negative evaluation -> STALE_MEMORY, not CONFLICTED ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(1, 45) }) }));
+  check("21.2 ONE OLD LOSS (45d) != PERMANENT CONFLICTED -> STALE_MEMORY, not CONFLICTED", result.negativeMemory.state === "STALE_MEMORY" && !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED", JSON.stringify(result));
+}
+
+// --- 21.3 One RECENT negative evaluation -> FAMILIAR_NEGATIVE, not CONFLICTED ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(1, 5) }) }));
+  check("21.3 one recent (5d) loss alone -> FAMILIAR_NEGATIVE, not CONFLICTED", result.negativeMemory.state === "FAMILIAR_NEGATIVE" && !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED", JSON.stringify(result));
+}
+
+// --- 21.4 Repeated RECENT negative evaluations (meets minimum) -> CURRENT_NEGATIVE_EVIDENCE, CONFLICTED ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT, 5) }) }));
+  check(`21.4 ${NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT} recent (5d) losses -> CURRENT_NEGATIVE_EVIDENCE, CONFLICTED (genuine current negative population still gates)`, result.negativeMemory.state === "CURRENT_NEGATIVE_EVIDENCE" && result.signals.negativeMemorySignalPresent && result.status === "CONFLICTED", JSON.stringify(result));
+}
+
+// --- 21.5 Repeated STALE negative evaluations -> STALE_MEMORY, not CONFLICTED ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT + 5, 45) }) }));
+  check("21.5 many OLD (45d) losses, none fresh -> STALE_MEMORY, not CONFLICTED (age, not just count, gates)", result.negativeMemory.state === "STALE_MEMORY" && !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED", JSON.stringify(result));
+}
+
+// --- 21.6 Recent positive + one recent negative (below minimum) -> FAMILIAR_NEGATIVE ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [...negativeEvals(1, 5), ...positiveEvals(1, 5)] }) }));
+  check("21.6 1 recent negative + 1 recent positive -> FAMILIAR_NEGATIVE (below minimum occurrence regardless of positive evidence), not CONFLICTED", result.negativeMemory.state === "FAMILIAR_NEGATIVE" && !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED", JSON.stringify(result));
+}
+
+// --- 21.7 Positive evidence dominating negative (both meet/exceed minimum) -> MIXED_EVIDENCE, not CONFLICTED ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [...negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT, 5), ...positiveEvals(20, 5)] }) }));
+  check(`21.7 ${NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT} recent negative + 20 recent positive -> MIXED_EVIDENCE, not CONFLICTED (positive evidence is not ignored)`, result.negativeMemory.state === "MIXED_EVIDENCE" && !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED" && result.negativeMemory.negativeShare < NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD, JSON.stringify(result));
+}
+
+// --- 21.8 Negative evidence dominating a small amount of positive -> CURRENT_NEGATIVE_EVIDENCE, CONFLICTED ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [...negativeEvals(20, 5), ...positiveEvals(1, 5)] }) }));
+  check("21.8 20 recent negative + 1 recent positive (share ~0.952 >= 0.95) -> CURRENT_NEGATIVE_EVIDENCE, CONFLICTED (negative dominance still gates despite minor positive presence)", result.negativeMemory.state === "CURRENT_NEGATIVE_EVIDENCE" && result.signals.negativeMemorySignalPresent && result.status === "CONFLICTED" && result.negativeMemory.negativeShare >= NEGATIVE_MEMORY_DOMINANCE_SHARE_THRESHOLD, JSON.stringify(result));
+}
+
+// --- 21.9 Mixed evidence below minimum sample -> FAMILIAR_NEGATIVE (occurrence gate outranks the mixed-evidence check; documented design choice) ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [...negativeEvals(3, 5), ...positiveEvals(3, 5)] }) }));
+  check(
+    "21.9 3 recent negative + 3 recent positive (below minimum) -> FAMILIAR_NEGATIVE, not MIXED_EVIDENCE, not CONFLICTED (occurrence-count gate is checked before the mixed-evidence check — see selectNegativeMemoryState priority order)",
+    result.negativeMemory.state === "FAMILIAR_NEGATIVE" && !result.signals.negativeMemorySignalPresent && result.status !== "CONFLICTED",
+    JSON.stringify(result),
+  );
+}
+
+// --- 21.10 Source mismatch -> INSUFFICIENT_CONTEXT outranks a would-be negative signal (source isolation) ---
+{
+  const result = qualifyAutonomousDecision(context({ source: "AI_SIGNAL" as DecisionSource, memory: memory({ matchedEvaluations: negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT, 5) }) }));
+  check("21.10 source !== ELVOID_PRO_ORACLE, even with a would-be CURRENT_NEGATIVE_EVIDENCE population -> INSUFFICIENT_CONTEXT, not CONFLICTED", result.status === "INSUFFICIENT_CONTEXT" && !result.signals.sourceEligible, JSON.stringify(result));
+}
+
+// NOTE on symbol/side isolation (cases the task numbers 11/12): source,
+// symbol, and side isolation for `matchedEvaluations` are enforced
+// entirely upstream by `lib/ai/decisionMemory/retrieve.ts`'s existing,
+// UNCHANGED query filters (see that file's own fixtures,
+// `decision-memory-fixtures.ts`) before `context.memory` ever reaches
+// this module. `qualify.ts` has never read symbol/side off individual
+// `matchedEvaluations` rows and still does not — there is nothing for a
+// symbol/side-mismatch fixture inside THIS file to meaningfully exercise
+// beyond what 21.10 already demonstrates for `source`.
+
+// --- 21.11 Minimum-occurrence boundary: exactly N-1 vs exactly N fresh negatives ---
+{
+  const below = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT - 1, 5) }) }));
+  const atThreshold = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT, 5) }) }));
+  check(
+    `21.11 boundary: ${NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT - 1} fresh negatives -> FAMILIAR_NEGATIVE, exactly ${NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT} -> CURRENT_NEGATIVE_EVIDENCE (inclusive lower bound)`,
+    below.negativeMemory.state === "FAMILIAR_NEGATIVE" && atThreshold.negativeMemory.state === "CURRENT_NEGATIVE_EVIDENCE",
+    `${JSON.stringify(below.negativeMemory)} vs ${JSON.stringify(atThreshold.negativeMemory)}`,
+  );
+}
+
+// --- 21.12 Freshness-window boundary: exactly at NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS is still fresh; one day beyond is stale ---
+{
+  const withinWindow = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT, NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS) }) }));
+  const beyondWindow = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: negativeEvals(NEGATIVE_MEMORY_MIN_OCCURRENCE_COUNT, NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS + 1) }) }));
+  check(
+    `21.12 boundary: exactly ${NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS}d old -> still fresh (CURRENT_NEGATIVE_EVIDENCE); ${NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS + 1}d old -> STALE_MEMORY`,
+    withinWindow.negativeMemory.state === "CURRENT_NEGATIVE_EVIDENCE" && beyondWindow.negativeMemory.state === "STALE_MEMORY",
+    `${JSON.stringify(withinWindow.negativeMemory)} vs ${JSON.stringify(beyondWindow.negativeMemory)}`,
+  );
+}
+
+// --- 21.13 negativeShare computed correctly (21.8's population: 20 negative / 21 fresh total) ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [...negativeEvals(20, 5), ...positiveEvals(1, 5)] }) }));
+  const expectedShare = Math.round((20 / 21) * 10000) / 10000;
+  check(`21.13 negativeShare === 20/21 rounded (${expectedShare})`, result.negativeMemory.negativeShare === expectedShare, `got ${result.negativeMemory.negativeShare}`);
+}
+
+// --- 21.14 matchedPatterns (Phase 8.1.2, already-thresholded) is untouched: still independently sufficient for CONFLICTED even with zero raw evaluations ---
+{
+  const result = qualifyAutonomousDecision(context({ memory: memory({ matchedEvaluations: [], matchedPatterns: [pattern()] }) }));
+  check("21.14 matchedPatterns alone (no raw matchedEvaluations at all) -> still CONFLICTED, matchedPatternPresent true (Phase 8.1.2 signal unchanged by this phase)", result.status === "CONFLICTED" && result.signals.negativeMemorySignalPresent && result.negativeMemory.matchedPatternPresent && result.negativeMemory.state === "INSUFFICIENT_EVIDENCE", JSON.stringify(result));
+}
+
+// --- 21.15 Determinism + immutability for the new evaluation, mirroring 14/15 above ---
+{
+  const input = context({ memory: memory({ matchedEvaluations: [...negativeEvals(20, 5), ...positiveEvals(3, 5)] }) });
+  const beforeSnapshot = JSON.parse(JSON.stringify(input));
+  const a = qualifyAutonomousDecision(input);
+  const b = qualifyAutonomousDecision(input);
+  check("21.15a same context -> byte-identical negativeMemory across two calls", JSON.stringify(a.negativeMemory) === JSON.stringify(b.negativeMemory), `${JSON.stringify(a.negativeMemory)} vs ${JSON.stringify(b.negativeMemory)}`);
+  check("21.15b context deep-equal before/after -> evaluateNegativeMemorySignal() never mutates input", JSON.stringify(input) === JSON.stringify(beforeSnapshot), "context mutated");
+}
+
+// --- 21.16 version bumped 1 -> 2 ---
+{
+  const result = qualifyAutonomousDecision(context());
+  check("21.16 AutonomousQualificationResult.version === 2", (result as { version: number }).version === 2, `got ${(result as { version: number }).version}`);
 }
 
 // ---------------------------------------------------------------------------
