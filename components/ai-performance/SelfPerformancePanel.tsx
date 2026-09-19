@@ -129,6 +129,14 @@ const GAP_CATEGORY_LABEL: Record<GapCategory, string> = {
   CONFIDENCE_ALIGNMENT_GAP: "Confidence alignment",
   EVIDENCE_GAP: "Evidence resolution",
   PATTERN_GAP: "Recurring pattern",
+  // Phase 8.6 P1 — evidence source is the full decision population
+  // (lib/ai/decisionPopulation), not decision_evaluations like every
+  // category above. Never actually looked up via `gaps.map()` below
+  // (that array's categories still only ever come from the unchanged
+  // detectCognitiveGaps()) — this entry exists so the type stays
+  // exhaustive, and so it's ready if a future pass renders
+  // `report.populationGaps` here too.
+  REJECT_DOMINANCE_GAP: "Reject dominance",
 };
 
 const EVOLUTION_NEED_LABEL: Record<EvolutionNeed, string> = {

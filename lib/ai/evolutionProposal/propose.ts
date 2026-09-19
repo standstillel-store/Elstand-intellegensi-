@@ -70,6 +70,27 @@ const COPY_BY_CATEGORY: Record<GapCategory, CategoryCopy> = {
     expectedEffect: "If confirmed, a future revision could reduce the recurrence of this failure pattern for this source/symbol. Not yet demonstrated.",
     validationRequirements: ["Historical replay against past cycles for this source/symbol", "Review the corresponding failure_pattern_candidates / constraint_validations rows directly", "Human review before any qualification/arbitration change"],
   },
+  // Phase 8.6 P1 addition. Structurally required for Record<GapCategory,
+  // CategoryCopy> to stay exhaustive, but NOT currently reachable at
+  // runtime through this function: evolutionNeed.consideredGaps is
+  // still derived only from the original 6-category `gaps` array
+  // (lib/ai/cognitiveGap/detect.ts, unchanged) — REJECT_DOMINANCE_GAP
+  // lives on CognitiveGapReport.populationGaps, a separate field
+  // nothing feeds into evolutionNeed yet (a deliberate P1 scoping
+  // decision — see CHANGES.md's "Deliberate scoping decision" entry for
+  // that phase). Written now, correctly, so that whenever a future,
+  // separately-approved phase does wire populationGaps into
+  // evolutionNeed, the copy is already right — and so it points at the
+  // ACTUAL mechanism from the start, unlike PATTERN_GAP's template
+  // above (which two forensic audits found investigates "adaptive
+  // constraint scoping" — not where the confirmed REJECT-dominance
+  // defect actually lived; see the corrective-design report).
+  REJECT_DOMINANCE_GAP: {
+    hypothesis: (gap) => `REJECT dominates the observed decision population for this source/symbol (${gap.evidence.occurrenceCount} of ${gap.evidence.evaluatedCount} observed cycles).`,
+    proposedChange: "Investigate the bounded negative-memory evaluation (lib/ai/decisionQualification/qualify.ts's evaluateNegativeMemorySignal(), Phase 8.2.2.1) and the decision-path attribution breakdown (lib/ai/decisionPopulation, Phase 8.6 P1) for this source/symbol — determine whether REJECTs are concentrated in LEARNING_MEMORY_REJECTION, MARKET_CONTEXT_REJECTION, or another attributed path before considering any production change; validate through historical replay first.",
+    expectedEffect: "If confirmed, a future revision could reduce disproportionate REJECT concentration for this source/symbol. Not yet demonstrated.",
+    validationRequirements: ["Historical replay against past cycles for this source/symbol", "Break down decisionPathAttribution for the window in question rather than treating REJECT as one undifferentiated cause", "Human review before any qualification/pre-entry change"],
+  },
 };
 
 const CURRENT_SYSTEM_VERSION = "phase-8.6.4";

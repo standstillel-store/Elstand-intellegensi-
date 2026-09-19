@@ -960,3 +960,68 @@ directory returned no matches, same check as the corrective-design
 report's Part 3, re-run for this phase's new files too).
 
 ### P2 (confluence-source attribution) — still not implemented; unaffected by this phase.
+
+---
+
+## Hotfix — REJECT_DOMINANCE_GAP missing from two exhaustive Record<GapCategory,...> maps
+
+Reported by a real `npm run build` in the actual project environment
+(the sandbox this work was done in cannot run that build — see Phase
+8.6 P1's validation entry above), pointing at
+`components/ai-performance/SelfPerformancePanel.tsx:125` —
+`Record<GapCategory, string>` was missing the new `REJECT_DOMINANCE_GAP`
+key added in Phase 8.6 P1. This is exactly the kind of consumer a
+repository-wide grep for `CognitiveGapReport`/`buildCognitiveGapReport()`
+does not surface — a `Record<GapCategory, ...>` keys off the TYPE, not
+the function, and this particular one lives in a `.tsx` component that
+earlier searches during P1 did not specifically check.
+
+**Fixed, both real, both located and closed before either could surface
+as a second broken build:**
+- `components/ai-performance/SelfPerformancePanel.tsx` — added
+  `REJECT_DOMINANCE_GAP: "Reject dominance"` to `GAP_CATEGORY_LABEL`.
+  Not reachable at runtime through this component today (`gap.category`
+  in the `.map()` this label serves only ever iterates `report.gaps`,
+  still exclusively the original 6 categories) — added for type
+  soundness and so it's ready if a future pass renders
+  `report.populationGaps` here too.
+- `lib/ai/evolutionProposal/propose.ts` — same situation, a SECOND,
+  independently-discovered exhaustive `Record<GapCategory, CategoryCopy>`
+  (`COPY_BY_CATEGORY`) that would have failed the same way. Added a real
+  template entry — not a placeholder — pointing investigation at the
+  ACTUAL mechanism (`qualify.ts`'s bounded negative-memory signal +
+  `lib/ai/decisionPopulation`'s decision-path attribution), correcting
+  the exact misdirection two forensic audits found in `PATTERN_GAP`'s
+  own template ("adaptive constraint scoping" — not where that defect
+  lived). Also not reachable at runtime today, same reason as above —
+  `evolutionNeed.consideredGaps` still only ever contains the original 6
+  categories.
+
+**Verification:** a repository-wide re-grep for every remaining
+`Record<GapCategory` and every file referencing `GapCategory` at all
+(not scoped to `.ts`, included `.tsx`) found no third instance. Re-ran
+`tsc --noEmit` project-wide: the specific reported error
+("Property 'REJECT_DOMINANCE_GAP' is missing... required in type
+Record<GapCategory, string>") no longer appears anywhere in the output.
+Re-ran all six 8.6.x fixture scripts that could plausibly be affected —
+`decision-qualification-fixtures.ts` (40/40),
+`decision-population-fixtures.ts` (44/44), `cognitive-gap-fixtures.ts`
+(19/19), `evolution-need-fixtures.ts` (17/17),
+`evolution-proposal-fixtures.ts` (15/15 — including the new
+`REJECT_DOMINANCE_GAP` template entry, exercised by this run),
+`evolution-candidate-fixtures.ts` (17/17),
+`evolution-validation-fixtures.ts` (15/15) — all pass, zero
+regressions.
+
+**Honest limitation:** this sandbox still cannot run the project's real
+`npm run build` (same missing-`node_modules` constraint as every prior
+entry in this file) — `tsc --noEmit` here is running against a
+different, incomplete type environment than the user's real one (their
+build has working `@types/react`; this sandbox does not, which is why
+its own `tsc` output is dominated by unrelated React/JSX noise this
+entry did not chase down). The SPECIFIC reported error is the textbook
+"object literal missing a required key" shape, and the fix is the
+complete, structural fix for that shape of error — but a second,
+different error surfacing on the user's next real build (from something
+this sandbox's degraded type-checking couldn't see) cannot be ruled out
+with certainty from here.
