@@ -9,11 +9,12 @@
 //     tag here already exists and is already computed deterministically
 //     by `decisionEvaluation/evaluate.ts`; this module counts tag
 //     FREQUENCY across a population, it never re-derives what a tag means.
-//   - DELIBERATELY 6 CATEGORIES, NOT 7: `MEMORY_GAP` (the 7th category
-//     the Phase 8.6.2 brief suggested) is NOT implemented. The only
-//     available "familiarity" signal is `classifyNovelty()`'s CURRENT,
-//     single-cycle retrieval read — there is no persisted historical
-//     novelty trail (see `HISTORICAL_NOVELTY_AT_DECISION_TIME` in
+//   - `detectCognitiveGaps()`/`detect.ts` COVERS 6 CATEGORIES, NOT THE 7
+//     THE PHASE 8.6.2 BRIEF ORIGINALLY SUGGESTED: `MEMORY_GAP` is NOT
+//     implemented there. The only available "familiarity" signal is
+//     `classifyNovelty()`'s CURRENT, single-cycle retrieval read — there
+//     is no persisted historical novelty trail (see
+//     `HISTORICAL_NOVELTY_AT_DECISION_TIME` in
 //     lib/ai/noveltyDetection/contracts.ts). Every other gap category
 //     requires >=MIN_OCCURRENCE_COUNT REPEATED occurrences before it is
 //     even raised; a single current novelty read can never honestly meet
@@ -23,7 +24,12 @@
 //     the Evolution Need Evaluator (8.6.3) — and simply never becomes a
 //     `CognitiveGap` of its own. This is the Phase 8.6.2 brief's own
 //     "if the repository cannot support a category, do not create it
-//     merely for completeness" instruction, applied honestly.
+//     merely for completeness" instruction, applied honestly. (A
+//     genuinely different 7th category, `REJECT_DOMINANCE_GAP`, WAS
+//     added in Phase 8.6 P1 — its evidence source and reasoning are
+//     entirely different from the rejected `MEMORY_GAP`; see
+//     `GapCategory`'s own doc comment below and
+//     `detectPopulationGap.ts`.)
 //   - Every gap requires >=MIN_OCCURRENCE_COUNT (reused unchanged from
 //     lib/ai/failurePatterns/detect.ts, never redefined) occurrences
 //     before it is raised at all — "the last trade lost" can never
@@ -62,8 +68,21 @@ export type { DecisionSource, EvaluationEvidenceTag, NoveltyAssessment, Decision
  *     lib/ai/failurePatterns/detect.ts), and/or an already-qualified
  *     failure pattern (`matchedPatterns.length > 0`), and/or a
  *     non-`VALID` `constraint_validations` row for this source/symbol.
+ *
+ * A 7th category, `REJECT_DOMINANCE_GAP`, was added in Phase 8.6 P1 —
+ * see `lib/ai/cognitiveGap/detectPopulationGap.ts`. It is deliberately
+ * NOT detected by `detectCognitiveGaps()`/`detect.ts` above (that
+ * function, and its `DecisionMemoryJoinedRow[]` input, are unchanged by
+ * P1) and is deliberately NOT included in `CognitiveGapReport.gaps`
+ * below — it is reported in its own, separate `populationGaps` field.
+ * This keeps `gaps`' existing meaning (evidence drawn from the
+ * EXECUTE/evaluated population only) exactly what every prior consumer
+ * (`lib/ai/reasoningGap`, `lib/ai/evolutionNeed`) already assumes it to
+ * be, so `REJECT_DOMINANCE_GAP` existing at all changes nothing about
+ * their existing, unchanged behavior — see `detectPopulationGap.ts`'s
+ * own header for the full reasoning.
  */
-export type GapCategory = "CONTRADICTION_GAP" | "CONTEXT_GAP" | "REASONING_CONSISTENCY_GAP" | "CONFIDENCE_ALIGNMENT_GAP" | "EVIDENCE_GAP" | "PATTERN_GAP";
+export type GapCategory = "CONTRADICTION_GAP" | "CONTEXT_GAP" | "REASONING_CONSISTENCY_GAP" | "CONFIDENCE_ALIGNMENT_GAP" | "EVIDENCE_GAP" | "PATTERN_GAP" | "REJECT_DOMINANCE_GAP";
 
 /**
  * LOW/MEDIUM/HIGH, deterministic from two existing conventions only —
@@ -117,6 +136,19 @@ export interface CognitiveGapReport {
   readonly source: DecisionSource;
   readonly symbol: string;
   readonly familiarityEvidence: FamiliarityEvidence;
-  /** 0 or more — most (source, symbol) pairs are expected to have zero. */
+  /** 0 or more — most (source, symbol) pairs are expected to have zero. Evidence drawn from the EXECUTE/evaluated population only (`detectCognitiveGaps()`) — unchanged meaning, Phase 8.6 P1 does not touch this field's contents. */
   readonly gaps: readonly CognitiveGap[];
+  /**
+   * Phase 8.6 P1 addition — 0 or 1 `REJECT_DOMINANCE_GAP`, detected over
+   * the full observed decision population (EXECUTE+WAIT+REJECT,
+   * `lib/ai/decisionPopulation`) rather than `gaps`' EXECUTE-only
+   * population. Kept in its own field rather than appended to `gaps` so
+   * every existing consumer of `gaps` (`reasoningGap`, `evolutionNeed`)
+   * is completely unaffected by this addition — see
+   * `detectPopulationGap.ts`'s own header. `[]` when no
+   * `DecisionPopulationReport` was supplied to
+   * `buildCognitiveGapReport()`, or the gap's own evidence bar was not
+   * met.
+   */
+  readonly populationGaps: readonly CognitiveGap[];
 }

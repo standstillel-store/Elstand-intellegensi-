@@ -755,24 +755,45 @@ of implementation (not committed to this repository).
   builders structurally valid against the new required field/version —
   none of their actual assertions changed.
 
-### Validation status — HONEST ACCOUNTING
-This sandbox has no outbound network access and no installed
-`node_modules`, so `npm run build`/`tsc --noEmit`/the fixture scripts
-above could **not** be executed here. What *was* done: every changed
-type/field was traced by hand against its exact existing declaration
-(no field renamed, no existing field's meaning changed, every new
-literal object checked against its target interface field-by-field);
-every one of the 16 new fixture cases was manually traced against the
-implemented logic and confirmed to produce its asserted outcome; every
-other consumer of the touched types was located by repository-wide
-search and either confirmed unaffected (reads `.status` only) or updated
-(the three mock-builder fixture files above). This is not a substitute
-for actually running `node --experimental-strip-types
---loader ./scripts/phase7/alias-loader.mjs
-scripts/phase8/decision-qualification-fixtures.ts` and the project's
-`npm run build` in a real environment — both remain required before this
-change is trusted in production, and are explicitly NOT claimed to have
-passed here.
+### Validation status — CORRECTED, RE-RUN FOR REAL (see Phase 8.6 P1's own entry below)
+The paragraph originally here said the fixture script and `tsc` could not
+be executed in this sandbox. That was wrong, and was corrected in the
+same working session as Phase 8.6 P1 below, before either phase shipped
+to the user: this sandbox has no outbound network and no installed
+`node_modules`, but Node 22 and a global `tsc` ARE both present, and
+neither is needed to run a file that imports no actual npm package.
+Every fixture file this phase touches imports only other files under
+`lib/ai/` — none of them import `@supabase/supabase-js` or anything
+else from `node_modules`. Actually run:
+
+```
+node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/decision-qualification-fixtures.ts
+# -> 40 passed, 0 failed
+node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/autonomous-decision-fixtures.ts
+# -> 25 passed, 0 failed
+node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/external-intelligence-gate-fixtures.ts
+# -> all fixtures passed
+node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/pre-entry-validation-fixtures.ts
+# -> 25 passed, 0 failed
+```
+
+`tsc --noEmit -p tsconfig.json` was also actually run (global `tsc`,
+still no `node_modules`). As expected, it reports ~11,000 errors
+project-wide — all `TS2307`/`TS2591` "cannot find module
+next/server|react|viem" / "cannot find name process|crypto|Buffer",
+the exact, uniform signature of missing `node_modules`/`@types/node`,
+identical across files this phase never touched. Filtered to only the
+files this phase changed
+(`lib/ai/decisionQualification/{contracts,qualify}.ts`,
+`lib/ai/failurePatterns/detect.ts`,
+`lib/ai/autonomousRuntime/orchestrator.ts`, all four fixture files):
+every remaining error is that same missing-node_modules signature —
+**zero** type errors of any other kind (no `TS2339`/`TS2322`/`TS2345`/
+`TS2741` — no property mismatch, no assignability error, no missing
+required field) in any of them. `npm run build` itself still was not
+attempted (needs the full `next`/React toolchain from `node_modules`,
+which is genuinely not installed) — that step remains for the real
+environment.
 
 ### P1 (Decision Population Observation, 8.6.1/8.6.2/8.6.4 wiring) and P2
 (confluence-source attribution) — NOT YET IMPLEMENTED. Designed, not
@@ -798,3 +819,144 @@ anything in `lib/ai/cognitiveGap`, `lib/ai/reasoningGap`,
 again by this phase's own repository-wide import/keyword scan (no match
 for any auto-promotion, Git-push, deployment, or messaging mechanism in
 any of those directories).
+
+---
+
+## Phase 8.6 P1 — Decision Population Observation + 8.6 Wiring
+
+*Builds on Phase 8.2.2.1 (P0) above. P0's files/behavior are unchanged by
+this phase — confirmed by `git diff` showing no further edits to
+`qualify.ts`/`decisionQualification/contracts.ts`/`failurePatterns/detect.ts`
+beyond what P0 already delivered.*
+
+### Problem this phase closes
+`decision_experiences`/`decision_evaluations` (the population
+`lib/ai/selfPerformance` and `lib/ai/cognitiveGap` already read) are
+EXECUTE-only — `lib/ai/autonomousExecution/execute.ts`'s
+`SKIPPED_WAIT`/`SKIPPED_REJECT` paths never write one. WAIT/REJECT
+decisions were invisible to 8.6.1/8.6.2 before this phase.
+
+### Architecture (files added/changed)
+- `lib/ai/decisionPopulation/{contracts,observe,repository}.ts` (new) —
+  read-only observer. Source of truth: `runtime_events`'
+  `component: "DECISION"` rows (Phase 8.5), NOT `cognitive_trace` —
+  verified during this phase that neither `cognitive_trace` nor
+  `decision_traces` actually persists `qualification.status`/
+  `preEntry.status` as fields (an earlier, higher-level design pass had
+  assumed `cognitive_trace` alone would suffice; closer inspection here
+  corrected that before any code was written — see
+  `decisionPopulation/contracts.ts`'s header for the full account). The
+  `DECISION` component's own `metadata` already carries `decision`,
+  `rawDecision`, `side`, `dedupApplied`, `qualificationStatus`, AND
+  `preEntryStatus` together, keyed by a real `cycleId` — no fuzzy/
+  timestamp-based join across tables was needed or attempted.
+- `lib/ai/runtimeEvents/repository.ts` — `listRuntimeEvents()` gained an
+  optional `components` filter (additive; every existing caller
+  unaffected) and now re-exports `RuntimeEventComponent`/`RuntimeEventStatus`.
+- `lib/ai/cognitiveGap/{contracts,repository}.ts` +
+  `lib/ai/cognitiveGap/detectPopulationGap.ts` (new file) — a 7th
+  `GapCategory`, `REJECT_DOMINANCE_GAP`, detected by a genuinely separate
+  pure function (NOT a branch inside the existing, unchanged
+  `detectCognitiveGaps()`) over the new `DecisionPopulationReport`
+  instead of the EXECUTE-only population. Surfaced on a NEW,
+  SEPARATE `CognitiveGapReport.populationGaps` field — never appended to
+  the existing `gaps` field, so `reasoningGap`/`evolutionNeed` (both
+  unchanged, both still reading `gaps` only) are unaffected.
+- `app/api/ai-performance/cognitive/route.ts` — composes
+  `decisionPopulation` (one `fetchDecisionPopulationReport()` per
+  symbol) alongside the existing `selfPerformance`, and passes each
+  symbol's report into `buildCognitiveGapReport()` as a new 5th, optional
+  argument.
+
+### Deliberate scoping decision — 8.6.3/8.6.4 NOT auto-wired
+`evaluateEvolutionNeed()` (8.6.3) and `draftEvolutionProposals()` (8.6.4)
+are BYTE-IDENTICAL to before this phase — confirmed by `git diff`
+showing no changes to `lib/ai/evolutionNeed/evaluate.ts` or
+`lib/ai/evolutionProposal/propose.ts`. `REJECT_DOMINANCE_GAP` is
+computed and visible (`populationGaps`) but deliberately NOT merged into
+the `gaps` array `evaluateEvolutionNeed()` reads, and deliberately NOT
+given its own proposal-drafting trigger in this phase. Reasoning: the
+task's own brief for this wiring is explicitly hedged ("may use
+observed population gaps, BUT: do not create an evolution proposal
+merely because EXECUTE is low") and `evaluateEvolutionNeed()`'s
+existing `coverage.status === "INSUFFICIENT_DATA"` gate returns early
+without even inspecting `gaps` — under current live data volumes
+(sparse evaluated-experience counts per symbol), merging the new gap in
+would mean it either gets silently swallowed by that gate most of the
+time, or — if the gate were loosened to let it through — a
+production-decision-adjacent behavior would be changing on the strength
+of a single, not-yet-execution-tested phase. The data is fully available
+and typed for 8.6.3/8.6.4 to consume in a future, separately-approved
+wiring pass; this phase stops at making it visible.
+
+### Fixtures
+`scripts/phase8/decision-population-fixtures.ts` (new) — unit coverage
+of every `attributeDecisionPath()` branch, every `parse*()` function's
+malformed/missing-value handling, and the population-level matrix the
+task specified (all-EXECUTE, all-WAIT, all-REJECT, mixed, missing
+decision/qualification/pre-entry fields, unknown-reason, symbol
+isolation, side breakdown, empty dataset, partial/insufficient/complete
+coverage, dedup counting, determinism, immutability), plus
+`detectDecisionPopulationGap()`'s gate and severity logic. Existing
+`cognitive-gap-fixtures.ts` exercises `detectCognitiveGaps()`/
+`buildFamiliarityEvidence()` directly (both pure, both unchanged by this
+phase) and constructs no `CognitiveGapReport`/`AutonomousQualificationResult`
+literals — confirmed unaffected, not edited.
+
+### Validation status — ACTUALLY RUN (see the correction on P0's own entry above for why this is possible in this sandbox)
+```
+node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/decision-population-fixtures.ts
+```
+First run: 41 passed, 3 failed. All 3 failures traced to one bug in the
+FIXTURE FILE's own `decisionEvent()` test builder (a ternary using
+`value === undefined` couldn't distinguish "caller omitted this
+override" from "caller wants the metadata key itself absent" — so cases
+3f/3g/3l silently got a builder-supplied default instead of exercising
+the missing-key path they claimed to). It was not a bug in
+`observe.ts`: `parseObservedQualificationStatus`/`parseObservedPreEntryStatus`'s
+own direct unit tests (section 2) already covered `undefined` input
+correctly and were passing. Fixed the builder (explicit
+`omitQualificationStatus`/`omitPreEntryStatus` flags instead of an
+ambiguous `undefined`), re-ran: **44 passed, 0 failed.**
+
+`tsc --noEmit -p tsconfig.json`, filtered to every file this phase
+touched (`lib/ai/decisionPopulation/*`, `lib/ai/cognitiveGap/*`,
+`lib/ai/runtimeEvents/repository.ts`,
+`app/api/ai-performance/cognitive/route.ts`,
+`scripts/phase8/decision-population-fixtures.ts`): the same
+missing-`node_modules` signature only (`next/server`, `process`) where
+those files happen to reference them —
+`lib/ai/decisionPopulation/*`, `lib/ai/cognitiveGap/contracts.ts`,
+`lib/ai/cognitiveGap/repository.ts`, and
+`lib/ai/cognitiveGap/detectPopulationGap.ts` specifically produced
+**zero** `tsc` errors of any kind. `npm run build` was not attempted —
+same reason as P0.
+
+### Final forensic check (this phase's own required self-answers)
+A. Observe REJECT/WAIT/EXECUTE independently — YES.
+B. Distinguish observed population from evaluated-experience population —
+YES, two separate reports, never merged; `evaluatedExperienceCount` is
+threaded through read-only, never recomputed by this module.
+C. Can 8.6.1 see the complete observed population — YES, `decisionPopulation`
+is composed alongside `selfPerformance` on the same route response.
+D. Can 8.6.2 detect repeated WAIT/REJECT patterns — YES,
+`REJECT_DOMINANCE_GAP`, gated at >= `MIN_OCCURRENCE_COUNT` REJECTs and a
+>50% REJECT share.
+E. Can 8.6.3/8.6.4 consume this without changing production decisions —
+the data is available and typed for them to consume; NOT auto-wired
+into either module's existing decision gate in this phase (see the
+scoping decision above) — a deliberate stop short of "yes, and it already
+does", not a gap.
+F. Any causal attribution inferred without persisted evidence — NO;
+`attributeDecisionPath()` reads only two already-persisted status
+fields against `decide.ts`'s/`validate.ts`'s own unchanged, already-
+audited branch logic, and returns `UNKNOWN` whenever either input
+itself is `UNKNOWN` — never inferred from row ordering.
+G. Did any Phase 7 behavior change — NO.
+H. Did P0 behavior change — NO (no further edits to any P0 file).
+I. Are 8.6.5-8.6.7 still untouched — YES (repository-wide scan for
+auto-promotion/Git-push/deployment/messaging keywords inside every 8.6.x
+directory returned no matches, same check as the corrective-design
+report's Part 3, re-run for this phase's new files too).
+
+### P2 (confluence-source attribution) — still not implemented; unaffected by this phase.

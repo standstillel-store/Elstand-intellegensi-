@@ -13,6 +13,8 @@ import { classifyNovelty } from "@/lib/ai/noveltyDetection/classify";
 import { getSelfPerformanceReport } from "@/lib/ai/selfPerformance/repository";
 import type { SelfPerformanceReport } from "@/lib/ai/selfPerformance/contracts";
 import { isLearningSupabaseConfigured } from "@/lib/ai/learning/db";
+import { fetchDecisionPopulationReport } from "@/lib/ai/decisionPopulation/repository";
+import type { DecisionPopulationReport } from "@/lib/ai/decisionPopulation/contracts";
 import { buildCognitiveGapReport } from "@/lib/ai/cognitiveGap/repository";
 import type { CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
 import { deriveReasoningGapObservations } from "@/lib/ai/reasoningGap/derive";
@@ -75,6 +77,26 @@ import { validateEvolutionCandidate } from "@/lib/ai/evolutionValidation/validat
 // only; this route never calls persistEvolutionProposals() — see
 // lib/ai/evolutionProposal/repository.ts's own header. None of this is
 // read by qualification/arbitration/execution/risk anywhere.
+//
+// Phase 8.6 P1 addition: also composes `decisionPopulation` — one new
+// fetchDecisionPopulationReport() read per symbol
+// (lib/ai/decisionPopulation/repository.ts, reading `runtime_events`,
+// Phase 8.5 — NOT a re-derivation of `decision_experiences`/
+// `decision_evaluations`; that population and this one are reported
+// side by side, deliberately never merged, since one answers "what did
+// the system decide, including WAIT/REJECT" and the other answers "of
+// what executed, how did it turn out" — see
+// lib/ai/decisionPopulation/contracts.ts's header for the full
+// reasoning). `evaluatedExperienceCount` on each report is threaded
+// through, read-only, from the SAME `selfPerformanceBySymbol` already
+// computed for `cognitiveGaps`/`evolution` below — never re-queried.
+// `decisionPopulation[i].report` also feeds `buildCognitiveGapReport()`
+// as a 5th, optional argument, which may add a `REJECT_DOMINANCE_GAP` to
+// that symbol's own new `populationGaps` field (kept separate from the
+// existing `gaps` field — `reasoningGap`/`evolutionNeed` below still
+// read `gaps` only, exactly as before P1). Same
+// qualification/arbitration/execution/risk isolation as every field
+// above: nothing on this route is read by any of them.
 //
 // ELVOID PRO Oracle telemetry (snapshots + validations + memory + trace)
 // is membership-gated, same as the existing autonomous routes — but paper
@@ -143,6 +165,29 @@ export async function GET() {
       : [];
   const selfPerformance = selfPerformanceEntries.map(([symbol, report]) => ({ symbol, report }));
 
+  // Phase 8.6 P1 — one fetchDecisionPopulationReport() read per symbol.
+  // Genuinely NEW data (`runtime_events`, Phase 8.5) — not a re-derivation
+  // of anything `selfPerformance` above already fetched; see
+  // lib/ai/decisionPopulation/contracts.ts's header for why
+  // `cognitive_trace`/`decision_experiences` were not reused instead.
+  // `evaluatedExperienceCount` is threaded through from the SAME
+  // `selfPerformanceBySymbol` computed just below, per
+  // `DecisionPopulationDataQuality`'s own "never re-computed" rule — this
+  // is why `selfPerformanceBySymbol` is built before this block rather
+  // than after, one line earlier than Phase 8.6.2 originally needed it.
+  const selfPerformanceBySymbol = new Map(selfPerformance.map(({ symbol, report }) => [symbol, report]));
+  const decisionPopulationEntries: [string, DecisionPopulationReport | null][] =
+    hasOracleMembership && symbols.length > 0
+      ? await Promise.all(
+          symbols.map(async (symbol): Promise<[string, DecisionPopulationReport | null]> => [
+            symbol,
+            await fetchDecisionPopulationReport("ELVOID_PRO_ORACLE", symbol, { evaluatedExperienceCount: selfPerformanceBySymbol.get(symbol)?.coverage.evaluatedExperienceCount ?? null }),
+          ])
+        )
+      : [];
+  const decisionPopulation = decisionPopulationEntries.map(([symbol, report]) => ({ symbol, report }));
+  const decisionPopulationBySymbol = new Map(decisionPopulationEntries);
+
   // Phase 8.6.2 — one buildCognitiveGapReport() call per symbol, reusing
   // memoryBySymbol + validationLists already fetched above. The only NEW
   // read is the same getDecisionMemoryJoinedExperiences() join
@@ -150,11 +195,15 @@ export async function GET() {
   // lib/ai/cognitiveGap/repository.ts's own header) — no second memory
   // system, no new query shape.
   const validationsBySymbol = new Map(symbols.map((symbol, i) => [symbol, validationLists[i] ?? []]));
-  const selfPerformanceBySymbol = new Map(selfPerformance.map(({ symbol, report }) => [symbol, report]));
 
   const cognitiveGapEntries: [string, CognitiveGapReport | null][] =
     hasOracleMembership && symbols.length > 0
-      ? await Promise.all(symbols.map(async (symbol): Promise<[string, CognitiveGapReport | null]> => [symbol, await buildCognitiveGapReport("ELVOID_PRO_ORACLE", symbol, memoryBySymbol.get(symbol) ?? null, validationsBySymbol.get(symbol) ?? [])]))
+      ? await Promise.all(
+          symbols.map(async (symbol): Promise<[string, CognitiveGapReport | null]> => [
+            symbol,
+            await buildCognitiveGapReport("ELVOID_PRO_ORACLE", symbol, memoryBySymbol.get(symbol) ?? null, validationsBySymbol.get(symbol) ?? [], decisionPopulationBySymbol.get(symbol) ?? null),
+          ])
+        )
       : [];
   const cognitiveGaps = cognitiveGapEntries.map(([symbol, report]) => ({ symbol, report }));
 
@@ -200,5 +249,5 @@ export async function GET() {
     })
   );
 
-  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), cognitiveGaps, evolution });
+  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), decisionPopulation, cognitiveGaps, evolution });
 }
