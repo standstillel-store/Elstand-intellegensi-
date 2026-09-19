@@ -62,6 +62,7 @@ import type { OracleGrade } from "@/lib/ai/oracle/types";
 import type { OracleRiskStatus } from "@/lib/ai/oracle/gradingTypes";
 import type { CognitiveConflictState } from "@/lib/ai/cognitive/conflict";
 import type { ClassifiedContradiction } from "@/lib/ai/oracle/contradiction";
+import type { NormalizedEvidence } from "@/lib/ai/oracle/evidence";
 import type { ExternalIntelligenceSignal } from "@/lib/ai/wiring/externalIntelligenceGate";
 
 /** ELVOID Pro only, matching decisionTrace/autonomousSnapshot's own hard boundary this generation of phases. */
@@ -98,6 +99,23 @@ export interface CognitiveTraceEvidenceStage {
   readonly regimeAvailable: boolean;
   readonly scenariosAvailable: boolean;
   readonly liquidityOrderFlowAvailable: boolean;
+  /**
+   * Phase 8.6 P2 addition. Verbatim `CognitiveObservation.evidence`
+   * (`lib/ai/cognitive/observation.ts`'s `buildCognitiveObservation()`,
+   * Phase 8.0.1 — already computed every cycle this stage is written,
+   * from the SAME `confluence.factors` the three narrative strings
+   * above are already individually derived from via
+   * `evidenceForSource()`) — never recomputed here, just persisted for
+   * the first time. One entry per confluence factor that fired this
+   * cycle (bounded by `ConfluenceSource`'s own 8 members, so this array
+   * is never large). `null` on a `NO_ASSESSMENT` cycle (same rule as
+   * every other field on this stage) AND on any row written before this
+   * field existed — both cases are honestly `null`, never backfilled or
+   * fabricated; see `lib/ai/confluenceAttribution/contracts.ts` for how
+   * that distinction is reported (`NOT_RECORDED`, not `OBSERVED` with a
+   * guessed value).
+   */
+  readonly confluenceEvidence: readonly NormalizedEvidence[] | null;
 }
 
 /** Verbatim `CognitiveConflictState` (Phase 8.0.4) — the full, unnarrowed shape (state + reasons + contributingFactors), never the narrowed `conflictState` enum `LearningContextSnapshot` stores. `null` only on a NO_ASSESSMENT cycle. */

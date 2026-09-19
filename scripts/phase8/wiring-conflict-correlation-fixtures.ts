@@ -37,7 +37,7 @@ function syntheticTrace(overrides: Partial<CognitiveTraceRecord> = {}): Cognitiv
     input: { interval: "15m", candleCount: 300, currentPrice: 60000, sufficientHistory: true, insufficientReason: null },
     analysis: { dominantSide: "LONG", grade: "A", confidence: 72, riskStatus: "valid", riskPlanPresent: true },
     analysisAt: "2026-09-07T11:55:01.000Z",
-    evidence: { liquidityEvidence: "test", structureEvidence: "test", volumeEvidence: "test", mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true },
+    evidence: { liquidityEvidence: "test", structureEvidence: "test", volumeEvidence: "test", mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true, confluenceEvidence: null },
     evidenceAt: "2026-09-07T11:55:01.000Z",
     conflict: { state: "CONSISTENT", reasons: [], contributingFactors: [] },
     conflictAt: "2026-09-07T11:55:01.000Z",

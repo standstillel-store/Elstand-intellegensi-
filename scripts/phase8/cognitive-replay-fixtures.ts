@@ -67,7 +67,7 @@ function fullCycleWaitTrace(): CognitiveTraceRecord {
     input: { interval: "1h", candleCount: 200, currentPrice: 2500, sufficientHistory: true, insufficientReason: null },
     analysis: { dominantSide: "LONG", grade: "B+", confidence: 0.55, riskStatus: "valid", riskPlanPresent: true },
     analysisAt: "2026-09-05T01:00:01.000Z",
-    evidence: { liquidityEvidence: "thin book above", structureEvidence: "range mid", volumeEvidence: "declining", mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true },
+    evidence: { liquidityEvidence: "thin book above", structureEvidence: "range mid", volumeEvidence: "declining", mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true, confluenceEvidence: null },
     evidenceAt: "2026-09-05T01:00:02.000Z",
     conflict: { state: "CAUTIOUS", reasons: ["mixed mtf bias"], contributingFactors: [{ source: "arbitration", detail: "mixed mtf bias" }] },
     conflictAt: "2026-09-05T01:00:03.000Z",

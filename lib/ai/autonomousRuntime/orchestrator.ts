@@ -655,6 +655,12 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
       regimeAvailable: regime !== null,
       scenariosAvailable: scenarios !== null,
       liquidityOrderFlowAvailable: liquidityOrderFlow !== null,
+      // Phase 8.6 P2 — cognitiveObservation.evidence is already computed
+      // above (Step 5, buildCognitiveObservation()) from these SAME
+      // confluence.factors; this is its first persistence, not a second
+      // computation. null on a NO_ASSESSMENT cycle, matching every other
+      // field in this object (cognitiveObservation itself is null then).
+      confluenceEvidence: cognitiveObservation?.evidence ?? null,
     },
     evidenceAt,
     conflict: cognitiveConflictInternal,

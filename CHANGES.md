@@ -1025,3 +1025,197 @@ complete, structural fix for that shape of error — but a second,
 different error surfacing on the user's next real build (from something
 this sandbox's degraded type-checking couldn't see) cannot be ruled out
 with certainty from here.
+
+---
+
+## Phase 8.6 P2 — Confluence-Source Attribution
+
+*Builds on P0 and P1 above, both confirmed unchanged by this phase (see
+"P0/P1 regression" below).*
+
+### Forensic finding
+The canonical, 8-member `ConfluenceSource` vocabulary
+(`lib/ai/oracle/confluenceTypes.ts`:
+`market_structure|smc_ict|tpo|footprint|orderbook|liquidity|microstructure|macro`)
+is computed for every real confluence factor, every cycle, and
+immediately re-expressed as fully-structured `NormalizedEvidence[]`
+(source + cluster + direction + strength + quality + text, Phase 7.1,
+`lib/ai/oracle/evidence.ts`), then wrapped into
+`CognitiveObservation.evidence` (Phase 8.0.1,
+`lib/ai/cognitive/observation.ts`) — already computed, every cycle,
+before this phase. None of it reached persistence: `cognitive_trace`'s
+own `evidence` stage only ever stored three hardcoded narrative STRINGS
+(`liquidityEvidence`/`structureEvidence`/`volumeEvidence`, for exactly 3
+of the 8 real sources via `orchestrator.ts::evidenceForSource()`),
+discarding direction/strength/quality and the other 5 sources entirely.
+`decision_experiences`/`decision_evaluations`' `EvaluationEvidenceTag`
+vocabulary has no confluence-source dimension at all (confirmed
+unchanged, matches the original forensic audit). The one place
+structured `ConfluenceSource` data already reached persistence:
+`cognitive_trace.contradictions` (`ClassifiedContradiction[]`, Phase
+8.3.5) — real, already-queryable historical data, but scoped to
+disagreeing factor pairs only, never "which sources were present."
+
+### Minimal, safe instrumentation added
+One new field, `CognitiveTraceEvidenceStage.confluenceEvidence`
+(verbatim `CognitiveObservation.evidence`, already computed, now
+persisted for the first time instead of discarded). `cognitive_trace.evidence`
+is an existing `jsonb` column — **no database migration was needed**,
+only a documentation note added to `supabase/learning/schema.sql`. No
+change to Phase 7, Oracle decision logic, qualification, pre-entry,
+arbitration, risk, execution, or paper trading — confirmed by `git diff`
+touching only `lib/ai/cognitiveTrace/contracts.ts` (the type) and one
+object literal inside `lib/ai/autonomousRuntime/orchestrator.ts`'s
+already-existing `persistCognitiveTrace()` call (the value).
+
+### Architecture
+`lib/ai/confluenceAttribution/{contracts,derive,repository}.ts` (new),
+modeled on `lib/ai/decisionPopulation` (Phase 8.6 P1)'s own shape. Two
+deliberately SEPARATE, never-merged tallies per `ConfluenceSource` (8
+entries always present, zero-filled honestly, never omitted):
+- `evidenceSources` — from the new `confluenceEvidence` field. Real
+  direction/strength/quality, but only populated for cycles run AFTER
+  this phase ships (every historical row honestly reports
+  `NOT_RECORDED` for this half — there is no data yet, and none is
+  fabricated).
+- `contradictionSources` — from the pre-existing `contradictions`
+  field. Real, already-populated historical data, narrower in meaning
+  (disagreement, not presence).
+Both reuse `lib/ai/decisionPopulation/contracts.ts`'s
+`ObservedDecisionCounts` (EXECUTE/WAIT/REJECT) type verbatim for the
+per-source decision breakdown — satisfying "connect to decision
+population" via type-level reuse; the decision itself is read directly
+off the SAME `cognitive_trace` row (`decision.decision`), no join to
+`runtime_events` needed for this phase. `ConfluenceAttributionStatus`
+(`OBSERVED`/`INFERRED`/`UNKNOWN`/`NOT_RECORDED`) is a closed 4-value
+vocabulary per the brief; this phase's own derivation only ever produces
+`OBSERVED` or `NOT_RECORDED` — everything it reads is a controlled,
+already-typed `jsonb` array (not free-text metadata needing defensive
+parsing the way P1's `runtime_events.metadata` did), so nothing is ever
+deduced (`INFERRED`) or malformed (`UNKNOWN`) by construction. Wired into
+`GET /api/ai-performance/cognitive` as a new, additive
+`confluenceAttribution: [{symbol, report}]` field — `decisionPopulation`,
+`cognitiveGaps`, `selfPerformance`, `novelty`, `evolution` all untouched.
+NOT wired into `buildCognitiveGapReport()`/`evaluateEvolutionNeed()`/
+`draftEvolutionProposals()` — same deliberate "observe now, wire in a
+later explicit phase" scoping decision P1 made for `populationGaps`.
+
+### Files added
+`lib/ai/confluenceAttribution/contracts.ts`, `derive.ts`, `repository.ts`;
+`scripts/phase8/confluence-attribution-fixtures.ts` (22 cases).
+
+### Files modified
+`lib/ai/cognitiveTrace/contracts.ts` (new field, new import);
+`lib/ai/autonomousRuntime/orchestrator.ts` (one object literal, one new
+line); `app/api/ai-performance/cognitive/route.ts` (new composed field);
+`supabase/learning/schema.sql` (doc comment only, no migration).
+
+**Lesson applied from the P1 hotfix, before this phase shipped, not
+after:** adding a required field to `CognitiveTraceEvidenceStage`
+carries the exact same risk P1's `GapCategory` extension did —
+pre-existing object literals typed against that interface need the new
+key too. This time, searched for every constructor BEFORE calling the
+phase done, not after a real build failed: `grep -rn "liquidityEvidence"`
+across the whole repository (not scoped to any one directory) found and
+fixed FOUR pre-existing fixture files that construct this exact object
+literal — `cognitive-replay-fixtures.ts`, `wiring-conflict-correlation-fixtures.ts`,
+`cognitive-trace-fixtures.ts`, `cognitive-memory-conflict-learning-fixtures.ts`
+— each given `confluenceEvidence: null` (the correct, honest default;
+none of these fixtures concern confluence evidence). Two structurally
+similar but genuinely SEPARATE types
+(`components/elvoid-pro/AISignalIntelligence/AISignalIntelligencePanel.tsx`'s
+local `Snapshot` interface, `lib/ai/autonomousSnapshot/contracts.ts`'s
+own evidence fields — a different table, `autonomous_intelligence_snapshot`)
+were checked and confirmed NOT affected, correctly left untouched.
+
+### Validation status — actually run
+```
+node --experimental-strip-types --loader ./scripts/phase7/alias-loader.mjs scripts/phase8/confluence-attribution-fixtures.ts
+-> 22 passed, 0 failed
+```
+Also re-ran every fixture script that could plausibly be touched by the
+`CognitiveTraceEvidenceStage` field addition, for real:
+`cognitive-replay-fixtures.ts` (61/61), `cognitive-trace-fixtures.ts`
+(16/16), `cognitive-memory-conflict-learning-fixtures.ts` (27/27),
+`wiring-conflict-correlation-fixtures.ts` (17/17) — all pass, zero
+regressions. Re-ran P0/P1's own suites again too:
+`decision-qualification-fixtures.ts` (40/40),
+`decision-population-fixtures.ts` (44/44), `cognitive-gap-fixtures.ts`
+(19/19), `evolution-proposal-fixtures.ts` (15/15),
+`evolution-need-fixtures.ts` (17/17) — unchanged, still all pass.
+
+`tsc --noEmit -p tsconfig.json`, actually run, filtered to every file
+this phase touched: the P2 fixture file's own import statement
+originally reached into `lib/ai/oracle/evidence.ts` for two types
+(`ConfluenceSource`, `OracleDataQuality`) that module only imports
+internally, not re-exports — a real `TS2459` error, caught by this run,
+fixed by importing both from `lib/ai/confluenceAttribution/contracts.ts`
+instead (which already re-exports them). Every other file this phase
+touched: zero errors beyond the project's pre-existing, uniform missing-
+`node_modules`/`@types/node` noise (confirmed identical in files this
+phase never touched). Re-ran the FULL project `tsc --noEmit` a second
+time after that fix: zero `TS2459` errors anywhere, zero "is missing in
+type ... Record<GapCategory" or equivalent exhaustiveness errors
+introduced by this phase. `npm run build` was not attempted — same
+reason as every prior phase (`node_modules` genuinely not installed in
+this sandbox).
+
+### P0 regression
+`git diff` confirms zero further edits to `lib/ai/decisionQualification/{contracts,qualify}.ts`,
+`lib/ai/failurePatterns/detect.ts` beyond what P0/the hotfix already
+delivered.
+
+### P1 regression
+`git diff` confirms zero further edits to `lib/ai/decisionPopulation/*`,
+`lib/ai/runtimeEvents/repository.ts`. `lib/ai/cognitiveGap/{contracts,repository,detectPopulationGap.ts}`
+and `lib/ai/evolutionProposal/propose.ts` (touched by the hotfix, not
+this phase) are also unchanged by P2. `decisionPopulation`'s own
+composed field on the API route is untouched — `confluenceAttribution`
+was added as a new, separate field alongside it, not merged in.
+
+### Phase 7 regression
+Zero. `computeConfluence()`/`gradeConfluence()`/`normalizeEvidence()`/
+`buildCognitiveObservation()` are all read-only inputs to this phase's
+new persistence line — none of their own logic was touched. Confirmed
+by `git diff` showing no changes under `lib/ai/oracle/` or
+`lib/ai/cognitive/observation.ts` themselves — only orchestrator.ts's
+own call-site object literal changed.
+
+### Known limitations
+- `evidenceSources` will report `NOT_RECORDED` for essentially all
+  traffic until real cycles run after this phase ships — this is
+  expected and honestly reported, not a bug.
+- `listCognitiveTracesBySymbol()` has no `since` parameter (unlike P1's
+  `listRuntimeEvents`, which gained one) — population windowing is
+  `limit`-only for this phase; noted as a possible future enhancement,
+  not implemented now, to keep this phase's footprint minimal.
+- Side (`LONG`/`SHORT`) is available on each raw `cognitive_trace` row
+  but deliberately not broken out as its own tally dimension in this
+  phase (see contracts.ts header) — combinatorial growth (8 sources x 3
+  decisions x 3 sides x 2 tally types) was judged not worth it for a
+  first pass; a caller can pre-filter rows by side before calling
+  `deriveConfluenceAttribution()` if needed today.
+- `contradictionSources` structurally cannot report per-source
+  direction/quality (a `ClassifiedContradiction` doesn't carry them) —
+  `directionCounts`/`qualityCounts` are `null` there by design, not a
+  gap.
+
+### P2 completion
+A-L (this phase's own acceptance criteria): satisfied. Vocabulary was
+audited, not invented (A/B); attribution is a pure, deterministic
+function of persisted jsonb arrays (C); OBSERVED vs NOT_RECORDED is
+explicit and INFERRED/UNKNOWN are reserved, never fabricated (D);
+source x decision aggregation exists and is descriptive-only, with an
+explicit non-causal-language check in the fixtures (E/F); P0/P1/Phase 7
+unchanged (G/H, see above); tests actually executed, results reported
+honestly including the one real bug found and fixed (I/J); 8.6.5-8.6.7
+untouched, no self-modification exists anywhere in this module (K/L).
+
+### 8.6.3/8.6.4 wiring decision — not reviewed by this phase
+Per this phase's own Step 8, `confluenceAttribution` was deliberately
+NOT wired into `evaluateEvolutionNeed()`/`draftEvolutionProposals()`,
+mirroring P1's identical decision for `populationGaps`. Whether/how to
+wire either (or both) in is a decision for a future, explicit,
+separately-scoped phase — this phase does not recommend a timeline for
+that review, only that the data both would need is now available and
+type-compatible.

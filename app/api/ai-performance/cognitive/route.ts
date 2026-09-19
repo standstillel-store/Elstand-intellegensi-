@@ -15,6 +15,8 @@ import type { SelfPerformanceReport } from "@/lib/ai/selfPerformance/contracts";
 import { isLearningSupabaseConfigured } from "@/lib/ai/learning/db";
 import { fetchDecisionPopulationReport } from "@/lib/ai/decisionPopulation/repository";
 import type { DecisionPopulationReport } from "@/lib/ai/decisionPopulation/contracts";
+import { fetchConfluenceAttributionReport } from "@/lib/ai/confluenceAttribution/repository";
+import type { ConfluenceAttributionReport } from "@/lib/ai/confluenceAttribution/contracts";
 import { buildCognitiveGapReport } from "@/lib/ai/cognitiveGap/repository";
 import type { CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
 import { deriveReasoningGapObservations } from "@/lib/ai/reasoningGap/derive";
@@ -188,6 +190,19 @@ export async function GET() {
   const decisionPopulation = decisionPopulationEntries.map(([symbol, report]) => ({ symbol, report }));
   const decisionPopulationBySymbol = new Map(decisionPopulationEntries);
 
+  // Phase 8.6 P2 — one fetchConfluenceAttributionReport() read per
+  // symbol. Independent of decisionPopulation above (different source
+  // table — cognitive_trace, not runtime_events — and a different
+  // question: WHICH confluence sources were present, not what the final
+  // decision/qualification/pre-entry status was). Not threaded into
+  // buildCognitiveGapReport() or evolutionNeed — see
+  // lib/ai/confluenceAttribution/contracts.ts's header: this phase is
+  // deliberately observation-only, matching P1's own "not yet wired"
+  // scoping decision for populationGaps.
+  const confluenceAttributionEntries: [string, ConfluenceAttributionReport][] =
+    hasOracleMembership && symbols.length > 0 ? await Promise.all(symbols.map(async (symbol): Promise<[string, ConfluenceAttributionReport]> => [symbol, await fetchConfluenceAttributionReport("ELVOID_PRO_ORACLE", symbol)])) : [];
+  const confluenceAttribution = confluenceAttributionEntries.map(([symbol, report]) => ({ symbol, report }));
+
   // Phase 8.6.2 — one buildCognitiveGapReport() call per symbol, reusing
   // memoryBySymbol + validationLists already fetched above. The only NEW
   // read is the same getDecisionMemoryJoinedExperiences() join
@@ -249,5 +264,5 @@ export async function GET() {
     })
   );
 
-  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), decisionPopulation, cognitiveGaps, evolution });
+  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), decisionPopulation, confluenceAttribution, cognitiveGaps, evolution });
 }

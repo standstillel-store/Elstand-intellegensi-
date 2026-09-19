@@ -70,7 +70,7 @@ function fullTrace(): CognitiveTraceInput {
     input: { interval: "1h", candleCount: 200, currentPrice: 65000, sufficientHistory: true, insufficientReason: null },
     analysis: { dominantSide: "LONG", grade: "A", confidence: 0.74, riskStatus: "valid", riskPlanPresent: true },
     analysisAt: "2026-09-05T00:00:00.400Z",
-    evidence: { liquidityEvidence: "POC 64800", structureEvidence: "BOS bullish H1", volumeEvidence: null, mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true },
+    evidence: { liquidityEvidence: "POC 64800", structureEvidence: "BOS bullish H1", volumeEvidence: null, mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true, confluenceEvidence: null },
     evidenceAt: "2026-09-05T00:00:00.800Z",
     conflict: { state: "CONSISTENT", reasons: ["Arbitration STRONGLY_SUPPORTED tanpa kontradiksi genuine."], contributingFactors: [{ source: "arbitration", detail: "arbitration.alignment = STRONGLY_SUPPORTED" }] },
     conflictAt: "2026-09-05T00:00:00.820Z",

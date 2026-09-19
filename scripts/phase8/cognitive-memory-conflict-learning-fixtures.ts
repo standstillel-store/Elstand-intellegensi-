@@ -39,7 +39,7 @@ function trace(overrides: Partial<CognitiveTraceRecord> = {}): CognitiveTraceRec
     input: { interval: "1h", candleCount: 200, currentPrice: 65000, sufficientHistory: true, insufficientReason: null },
     analysis: { dominantSide: "LONG", grade: "A", confidence: 0.7, riskStatus: "valid", riskPlanPresent: true },
     analysisAt: now,
-    evidence: { liquidityEvidence: "POC", structureEvidence: "BOS", volumeEvidence: null, mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true },
+    evidence: { liquidityEvidence: "POC", structureEvidence: "BOS", volumeEvidence: null, mtfAvailable: true, regimeAvailable: true, scenariosAvailable: true, liquidityOrderFlowAvailable: true, confluenceEvidence: null },
     evidenceAt: now,
     conflict: { state: "CONSISTENT", reasons: [], contributingFactors: [] },
     conflictAt: now,

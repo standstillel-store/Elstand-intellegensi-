@@ -731,6 +731,13 @@ create table if not exists cognitive_trace (
   -- runAutonomousCycle()).
   analysis jsonb,
   analysis_at timestamptz,
+  -- Phase 8.6 P2: gained a `confluenceEvidence` key (verbatim
+  -- CognitiveObservation.evidence — see lib/ai/cognitive/observation.ts)
+  -- alongside the original liquidityEvidence/structureEvidence/
+  -- volumeEvidence/*Available fields. No migration needed — this is an
+  -- existing jsonb column gaining a new key in the JS object shape that
+  -- gets written here, not a new column. Rows written before Phase 8.6
+  -- P2 simply lack the key; read as null, never backfilled.
   evidence jsonb,
   evidence_at timestamptz,
   -- Full CognitiveConflictState (state + reasons + contributingFactors),
