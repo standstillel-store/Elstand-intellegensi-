@@ -33,15 +33,61 @@
 // forbids. Within a replay slice, PATTERN_GAP is judged on repeated
 // negative evaluation classes ALONE, honestly narrowed and documented
 // rather than silently approximated.
+//
+// SAMPLE ACCOUNTING (Phase 8.6.5b): every slice reports exactly which of
+// its scoped rows fed its metrics and which did not, and why — see
+// `SampleAccounting` in contracts.ts. This adds numbers about rows that
+// were ALREADY being counted or skipped; it changes none of the existing
+// slice fields, none of the comparison deltas, and no sufficiency gate.
 // ---------------------------------------------------------------------------
 
 import { computeEvaluationCoverage, aggregatePerformance } from "@/lib/ai/selfPerformance/aggregate";
 import { detectCognitiveGaps } from "@/lib/ai/cognitiveGap/detect";
 import type { DecisionMemoryJoinedRow } from "@/lib/ai/decisionMemory/contracts";
-import type { DecisionSource, GapCategory, ReplaySlice, ReplayComparison } from "./contracts";
+import { SAMPLE_EXCLUSION_REASONS } from "./semantics";
+import type { DecisionSource, GapCategory, ReplaySlice, ReplayComparison, SampleAccounting, SampleExclusionReason } from "./contracts";
 
 function isInScope(row: DecisionMemoryJoinedRow, source: DecisionSource, symbol: string): boolean {
   return row.experience.source === source && row.experience.symbol === symbol;
+}
+
+/**
+ * Every scoped row is either ELIGIBLE (carries a persisted evaluation —
+ * exactly the set `aggregatePerformance()`/`detectCognitiveGaps()`
+ * consume) or excluded for exactly one reason:
+ *   - `OPEN_NO_OUTCOME`: no evaluation and no recorded outcome yet.
+ *   - `CLOSED_UNEVALUATED`: an outcome exists but no evaluation does.
+ * Pure; never mutates `halfRows`.
+ */
+export function buildSampleAccounting(halfRows: readonly DecisionMemoryJoinedRow[]): SampleAccounting {
+  const counts: Record<SampleExclusionReason, number> = { OPEN_NO_OUTCOME: 0, CLOSED_UNEVALUATED: 0 };
+  let eligible = 0;
+  for (const row of halfRows) {
+    if (row.evaluation !== null) eligible++;
+    else if (row.experience.outcome === null) counts.OPEN_NO_OUTCOME++;
+    else counts.CLOSED_UNEVALUATED++;
+  }
+  return {
+    scopedTotal: halfRows.length,
+    eligible,
+    excluded: halfRows.length - eligible,
+    exclusionReasons: SAMPLE_EXCLUSION_REASONS.map((reason) => ({ reason, count: counts[reason] })),
+  };
+}
+
+/**
+ * Normalizes a replay read back from a jsonb column. A slice persisted
+ * before 8.6.5b has no `sampleAccounting`; it is reported as `null` (not
+ * recorded) — never reconstructed from `coverage`, which cannot tell open
+ * rows from closed-unevaluated ones for the whole scoped slice.
+ */
+export function normalizePersistedReplay(raw: ReplayComparison | null): ReplayComparison | null {
+  if (raw === null || raw === undefined) return null;
+  return {
+    ...raw,
+    baseline: { ...raw.baseline, sampleAccounting: raw.baseline.sampleAccounting ?? null },
+    candidate: { ...raw.candidate, sampleAccounting: raw.candidate.sampleAccounting ?? null },
+  };
 }
 
 function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSource, symbol: string, halfRows: readonly DecisionMemoryJoinedRow[], gapCategory: GapCategory): ReplaySlice {
@@ -65,6 +111,7 @@ function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSou
     targetGapOccurrenceCount,
     targetGapRate,
     otherActiveGapCount,
+    sampleAccounting: buildSampleAccounting(halfRows),
   };
 }
 

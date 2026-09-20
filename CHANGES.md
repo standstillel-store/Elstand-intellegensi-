@@ -491,7 +491,10 @@ Surfaced in the same "Self Performance & Novelty" panel as a new
 / `Baseline:` / `Candidate:` / `Replay:` / `Regression:` / `Evidence:` /
 a result badge reading "Validated candidate — awaiting human approval" /
 "Blocked (out of scope)" / "Insufficient evidence" / "Inconclusive" —
-never "AI EVOLVED", "SELF-IMPROVED", or "SUPER AI".
+never "AI EVOLVED", "SELF-IMPROVED", or "SUPER AI". **Superseded by
+Phase 8.6.5b:** "Validated candidate" overstated what a split-history
+result shows and is no longer used anywhere in the UI — see the
+Phase 8.6.5b entry at the end of this file.
 
 ```
 Monitor → Detect → Decide → Propose → Test  → Protect → Human Approval
@@ -560,11 +563,12 @@ intelligence features.
   layer; drafts structured, non-executable proposals but never applies
   them, never read by any decision-making path
 - Evolution Candidate + Replay Engine, Versioned Learning Validation +
-  Regression Guard (8.6.5-8.6.6) — split-history replication check
-  (never counterfactual code execution), evidence-gated
-  VALID/INVALID/INSUFFICIENT_EVIDENCE/INCONCLUSIVE verdicts; never
-  applies, approves, or promotes anything, never read by any
-  decision-making path
+  Regression Guard (8.6.5-8.6.6, hardened by 8.6.5b) — an
+  OBSERVATIONAL split-history check (never counterfactual code
+  execution; `counterfactualAvailable` is always `false`),
+  evidence-gated VALID/INVALID/INSUFFICIENT_EVIDENCE/INCONCLUSIVE/
+  NOT_APPLICABLE results; never applies, approves, or promotes anything,
+  never read by any decision-making path
 - Paper trading, live trading (Binance Testnet/Live), journal
 - On-chain membership gating, ELS token, faucet, swap/sell, reward
   distributor, Bug Hunter escrow (all BSC Testnet)
@@ -809,10 +813,14 @@ built. See the corrective-design report.
 - Setup-vs-execution/context attribution (P2) is unchanged.
 
 ### 8.6.5–8.6.7
-Unimplemented, untouched by this phase. ELVOID's self-improvement
-capability remains a **controlled self-improvement proposal pipeline**
-with **human-gated evolution** — observation, gap detection, and proposal
-drafting only; no production decision logic can be auto-modified by
+Status correction (Phase 8.6.5b): this entry originally described all
+three as unimplemented. **8.6.5–8.6.6 were already implemented** (see the
+"8.6.5-8.6.6" entry under Phase 8.x, commit `a17dbd0`) and are untouched
+by P0's own changes; **8.6.7 (Human Approval Gate) remains unimplemented.**
+ELVOID's self-improvement capability remains a **controlled
+self-improvement proposal pipeline** with **human-gated evolution** —
+observation, gap detection, proposal drafting, and observational
+replay/validation only; no production decision logic can be auto-modified by
 anything in `lib/ai/cognitiveGap`, `lib/ai/reasoningGap`,
 `lib/ai/evolutionNeed`, `lib/ai/evolutionProposal`,
 `lib/ai/evolutionCandidate`, or `lib/ai/evolutionValidation`, confirmed
@@ -954,7 +962,8 @@ audited branch logic, and returns `UNKNOWN` whenever either input
 itself is `UNKNOWN` — never inferred from row ordering.
 G. Did any Phase 7 behavior change — NO.
 H. Did P0 behavior change — NO (no further edits to any P0 file).
-I. Are 8.6.5-8.6.7 still untouched — YES (repository-wide scan for
+I. Did this phase touch 8.6.5-8.6.7 — NO (8.6.5-8.6.6 were already
+implemented before this phase; 8.6.7 is not started; repository-wide scan for
 auto-promotion/Git-push/deployment/messaging keywords inside every 8.6.x
 directory returned no matches, same check as the corrective-design
 report's Part 3, re-run for this phase's new files too).
@@ -1208,8 +1217,9 @@ explicit and INFERRED/UNKNOWN are reserved, never fabricated (D);
 source x decision aggregation exists and is descriptive-only, with an
 explicit non-causal-language check in the fixtures (E/F); P0/P1/Phase 7
 unchanged (G/H, see above); tests actually executed, results reported
-honestly including the one real bug found and fixed (I/J); 8.6.5-8.6.7
-untouched, no self-modification exists anywhere in this module (K/L).
+honestly including the one real bug found and fixed (I/J); 8.6.5-8.6.6
+(already implemented before this phase) and 8.6.7 (not started) untouched
+by this phase, no self-modification exists anywhere in this module (K/L).
 
 ### 8.6.3/8.6.4 wiring decision — not reviewed by this phase
 Per this phase's own Step 8, `confluenceAttribution` was deliberately
@@ -1219,3 +1229,97 @@ wire either (or both) in is a decision for a future, explicit,
 separately-scoped phase — this phase does not recommend a timeline for
 that review, only that the data both would need is now available and
 type-compatible.
+
+---
+
+## Phase 8.6.5b — Replay/Validation Hardening (semantic honesty + auditability)
+
+Additive hardening of the already-implemented 8.6.5 (Evolution Candidate +
+Replay) and 8.6.6 (Validation + Regression Guard). **No production decision
+behavior changed**; nothing was added to Phase 7, qualification, pre-entry,
+thresholds, `evolutionNeed`, or the proposal engine; 8.6.7 is not
+implemented; no counterfactual engine exists.
+
+### Why
+Forensic review found the replay is — and always was — an **observational
+split-history comparison** (an older window versus a newer window of
+already-recorded outcomes; no candidate logic is applied to either window),
+but that was stated only in prose. Three problems followed: nothing in the
+data said so; `VALID` was shown in the UI as "Validated candidate", which
+reads as proof the proposal works; and `REJECT_DOMINANCE_GAP` — the
+population-level gap the whole P0/P1 correction was about — cannot be
+measured by a replay that reads executed decisions only, yet would have come
+out as `INCONCLUSIVE` (confirmed by mutation: with the applicability rule
+removed, the real REJECT_DOMINANCE_GAP proposal yields `INCONCLUSIVE`).
+
+### What changed
+- `lib/ai/evolutionCandidate/semantics.ts` (new): `VALIDATION_MODE =
+  "OBSERVATIONAL_SPLIT_HISTORY"`, `COUNTERFACTUAL_AVAILABLE = false`,
+  `COUNTERFACTUAL_MISSING_INPUTS` (5 fixed entries, each naming where the
+  absence was verified: per-cycle oracle input, per-cycle decision memory,
+  per-cycle decision-rule configuration, outcomes for WAIT/REJECT cycles,
+  and any engine that runs modified logic), and
+  `replayApplicabilityFor()` — an exhaustive `Record<GapCategory, ...>`, so
+  a new category cannot be added without deciding whether replay can
+  measure it. Only `REJECT_DOMINANCE_GAP` is not applicable.
+- Every replay slice carries `sampleAccounting`: `scopedTotal`, `eligible`
+  (rows with a persisted evaluation — exactly what the slice's metrics
+  consume, so `eligible === performance.totalEvaluated`), `excluded`, and
+  `exclusionReasons` (`OPEN_NO_OUTCOME`, `CLOSED_UNEVALUATED`; both always
+  listed, fixed order). Existing slice fields, deltas and the sufficiency
+  gate are unchanged.
+- Candidates carry `replayApplicability`. A not-applicable candidate is
+  finalized as `CANDIDATE_CREATED` with `replay: null` — the status the
+  contract already documented as "replay never ran" — **before any
+  historical read**. Scope is still checked first, so an unsafe proposal is
+  still `VALIDATION_BLOCKED` / `INVALID`.
+- Validation results carry `validationMode`, `counterfactualAvailable`
+  (typed as the literal `false`), and `missingCounterfactualInputs`; a new
+  result value `NOT_APPLICABLE` (a verdict about the method, not about the
+  proposal); two new limitations stating "observational" and "not
+  counterfactual validation"; per-window sample-accounting evidence lines.
+- UI (`SelfPerformancePanel.tsx`): "Validated candidate" removed. `VALID` now
+  reads "Observational evidence — target gap rate lower in newer window";
+  the card shows "Observed split-history result · Not counterfactual
+  validation", per-window eligible/excluded counts, regression as "Not
+  evaluated" when no replay ran, and a collapsible list of what a
+  counterfactual replay would need. `REPLAY_PASSED`/`REPLAY_FAILED` labels now
+  say "Both windows had sufficient data" / "Insufficient data in a window".
+
+### Semantics — before vs after
+| | Before | After |
+|---|---|---|
+| Mode | prose only | `validationMode: OBSERVATIONAL_SPLIT_HISTORY` on every result |
+| Counterfactual | prose only | `counterfactualAvailable: false` + fixed missing-input list |
+| Sample accounting | coverage ratio only | eligible / excluded / reasons per slice |
+| REJECT_DOMINANCE_GAP | would run executed-only replay → `INCONCLUSIVE` | `NOT_APPLICABLE`, no historical read |
+| `VALID` | UI: "Validated candidate" | same enum, UI: observational evidence only |
+| VALID / INVALID / INSUFFICIENT_EVIDENCE / INCONCLUSIVE | decision table | unchanged |
+
+### Database compatibility
+No migration. No enum value was renamed or removed. `sampleAccounting`
+lives inside the existing `replay` / `metrics_observed` jsonb columns;
+`replayApplicability`, `validationMode`, `counterfactualAvailable` and
+`missingCounterfactualInputs` are not stored — they are deterministic from
+`gap_category` or constants of the method and are re-attached on read. Rows
+persisted before 8.6.5b read back with `sampleAccounting: null` ("not
+recorded"), never reconstructed.
+**Known limitation:** the stored `evolution_validations.result` and
+`evolution_candidates.gap_category` CHECK constraints do not list
+`NOT_APPLICABLE` / `REJECT_DOMINANCE_GAP`. A not-applicable candidate or
+result is therefore computed and shown but **not persisted**:
+`persistEvolutionCandidate()` / `persistEvolutionValidation()` return
+`{ persisted: false, reason: "not_persistable" }` explicitly, before
+touching the database. Relaxing those constraints is a schema decision left
+to a future, separately-approved change. (Nothing persists automatically
+today; the route remains compute-only.)
+
+### Not done (out of scope, unchanged)
+Phase 7, decision thresholds, qualification, pre-entry, P1/P2 wiring into
+`evolutionNeed`/proposals, any counterfactual engine, code generation,
+persistence from GET routes, 8.6.7 (Human Approval Gate).
+
+### Fixtures
+`scripts/phase8/evolution-hardening-fixtures.ts` (new, 38 checks). The two
+existing suites' assertions are unchanged; only their hand-built helper
+objects gained the new fields.

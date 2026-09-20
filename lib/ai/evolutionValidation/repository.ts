@@ -9,6 +9,11 @@
 // linked by `candidate_id`, keeping the two phases' write-responsibility
 // architecturally distinct even though both live in the same database.
 //
+// NOTE (Phase 8.6.5b): validationMode / counterfactualAvailable /
+// missingCounterfactualInputs are NOT stored columns. They are constants
+// of the split-history method and are re-attached on read. A
+// NOT_APPLICABLE result is not persisted at all (see below).
+//
 // NOTE (matching every prior Phase 8 repository's own disclosure):
 // nothing calls persistEvolutionValidation() automatically. Callable
 // directly and from the read-only AI Performance route (compute-only
@@ -16,13 +21,25 @@
 // ---------------------------------------------------------------------------
 
 import { getLearningSupabase } from "@/lib/ai/learning/db";
+import { normalizePersistedReplay } from "@/lib/ai/evolutionCandidate/replay";
+import { COUNTERFACTUAL_AVAILABLE, COUNTERFACTUAL_MISSING_INPUTS, VALIDATION_MODE } from "@/lib/ai/evolutionCandidate/semantics";
 import type { DecisionSource } from "@/lib/ai/decisionOutcome/contracts";
 import type { EvolutionValidation, EvolutionValidationWithoutTimestamp } from "./contracts";
 
-export type PersistEvolutionValidationResult = { persisted: true } | { persisted: false; reason: "not_configured" | "error"; error?: string };
+export type PersistEvolutionValidationResult = { persisted: true } | { persisted: false; reason: "not_configured" | "error" | "not_persistable"; error?: string };
 
 /** Recompute-and-upsert on `candidate_id` (unique) — one validation per candidate, refreshed on re-validation, never duplicated. */
 export async function persistEvolutionValidation(validation: EvolutionValidationWithoutTimestamp): Promise<PersistEvolutionValidationResult> {
+  // Phase 8.6.5b: NOT_APPLICABLE is computed and surfaced but NOT
+  // persisted — the stored `result` CHECK constraint lists only the
+  // original four values, and the candidate row this one references is
+  // itself not persisted for a not-applicable gap category. This phase
+  // adds no schema change; refusing here is explicit and auditable
+  // rather than an opaque constraint error.
+  if (validation.result === "NOT_APPLICABLE") {
+    return { persisted: false, reason: "not_persistable", error: "NOT_APPLICABLE results are not persisted; the stored schema does not include this result value." };
+  }
+
   const learningDb = getLearningSupabase();
   if (!learningDb) return { persisted: false, reason: "not_configured" };
 
@@ -66,10 +83,16 @@ export async function listEvolutionValidations(source: DecisionSource, symbol: s
       baselineReference: row.baseline_reference,
       candidateReference: row.candidate_reference,
       replayDatasetReference: row.replay_dataset_reference,
-      metricsObserved: row.metrics_observed,
+      metricsObserved: normalizePersistedReplay(row.metrics_observed),
       regressionCheck: row.regression_check,
       invariantChecks: row.invariant_checks,
       result: row.result,
+      // Not stored columns: constants of this phase's method (see
+      // lib/ai/evolutionCandidate/semantics.ts), true of every row ever
+      // written by the split-history validation.
+      validationMode: VALIDATION_MODE,
+      counterfactualAvailable: COUNTERFACTUAL_AVAILABLE,
+      missingCounterfactualInputs: COUNTERFACTUAL_MISSING_INPUTS,
       evidence: row.evidence,
       limitations: row.limitations,
       validatedAt: row.validated_at,

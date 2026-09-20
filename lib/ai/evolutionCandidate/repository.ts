@@ -25,7 +25,8 @@ import { getDecisionMemoryJoinedExperiences } from "@/lib/ai/decisionMemory/repo
 import { getLearningSupabase } from "@/lib/ai/learning/db";
 import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
 import { checkCandidateScope, finalizeCandidate } from "./create";
-import { buildReplayComparison } from "./replay";
+import { buildReplayComparison, normalizePersistedReplay } from "./replay";
+import { replayApplicabilityFor } from "./semantics";
 import type { DecisionSource, EvolutionCandidate, EvolutionCandidateWithoutTimestamp } from "./contracts";
 
 /**
@@ -34,11 +35,18 @@ import type { DecisionSource, EvolutionCandidate, EvolutionCandidateWithoutTimes
  * attempted (matching every other repository.ts's "null = not
  * configured" convention). An out-of-scope proposal always returns a
  * `VALIDATION_BLOCKED` candidate — scope is a pure, in-memory check, so
- * it never depends on the Learning DB being configured at all.
+ * it never depends on the Learning DB being configured at all. The same
+ * holds for a gap category the executed-only replay cannot measure
+ * (Phase 8.6.5b, see semantics.ts): it is finalized as not applicable
+ * before any historical read, never forced through replay.
  */
 export async function buildEvolutionCandidate(proposal: EvolutionProposalWithoutTimestamp): Promise<EvolutionCandidateWithoutTimestamp | null> {
   const scope = checkCandidateScope(proposal.hypothesis, proposal.proposedChange);
   if (!scope.withinScope) {
+    return finalizeCandidate(proposal, scope, null);
+  }
+
+  if (!replayApplicabilityFor(proposal.gapCategory).applicable) {
     return finalizeCandidate(proposal, scope, null);
   }
 
@@ -49,7 +57,7 @@ export async function buildEvolutionCandidate(proposal: EvolutionProposalWithout
   return finalizeCandidate(proposal, scope, replay);
 }
 
-export type PersistEvolutionCandidateResult = { persisted: true } | { persisted: false; reason: "not_configured" | "error"; error?: string };
+export type PersistEvolutionCandidateResult = { persisted: true } | { persisted: false; reason: "not_configured" | "error" | "not_persistable"; error?: string };
 
 /**
  * Recompute-and-upsert on `candidate_id` (unique) — the same deterministic-
@@ -58,6 +66,15 @@ export type PersistEvolutionCandidateResult = { persisted: true } | { persisted:
  * duplicates) the existing row.
  */
 export async function persistEvolutionCandidate(candidate: EvolutionCandidateWithoutTimestamp): Promise<PersistEvolutionCandidateResult> {
+  // Phase 8.6.5b: a candidate whose gap category the replay cannot measure
+  // is computed and surfaced but NOT persisted — the stored schema's
+  // gap_category constraint does not list REJECT_DOMINANCE_GAP and this
+  // phase adds no schema change. Refusing here is explicit and auditable;
+  // the alternative is an opaque database constraint error.
+  if (!candidate.replayApplicability.applicable) {
+    return { persisted: false, reason: "not_persistable", error: "Candidate is not applicable to executed-only replay; the stored schema does not include its gap category." };
+  }
+
   const learningDb = getLearningSupabase();
   if (!learningDb) return { persisted: false, reason: "not_configured" };
 
@@ -103,8 +120,10 @@ export async function listEvolutionCandidates(source: DecisionSource, symbol: st
       baselineVersion: row.baseline_version,
       candidateVersion: row.candidate_version,
       scope: row.scope,
+      // Not a stored column: deterministic from gap_category alone.
+      replayApplicability: replayApplicabilityFor(row.gap_category),
       status: row.status,
-      replay: row.replay,
+      replay: normalizePersistedReplay(row.replay),
       createdAt: row.created_at,
     })
   );

@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
+import { replayApplicabilityFor } from "./semantics";
 import type { CandidateScopeCheck, CandidateStatus, ReplayComparison, EvolutionCandidateWithoutTimestamp } from "./contracts";
 
 /**
@@ -43,23 +44,35 @@ export function candidateIdFor(proposal: EvolutionProposalWithoutTimestamp): str
  *   - Out-of-scope -> VALIDATION_BLOCKED, `replay` forced to `null` even
  *     if one was somehow passed in (defense in depth: an out-of-scope
  *     candidate's replay is never trusted, never surfaced).
+ *   - In-scope, but the gap category is not measurable by the executed-
+ *     only replay population (Phase 8.6.5b, see semantics.ts — currently
+ *     REJECT_DOMINANCE_GAP) -> CANDIDATE_CREATED, `replay` forced to
+ *     `null` even if one was somehow passed in. Checked AFTER scope so an
+ *     unsafe proposal is still blocked outright, and BEFORE any replay
+ *     status so a not-applicable category can never read as passed or
+ *     failed.
  *   - In-scope, replay present, both slices have sufficient coverage ->
  *     REPLAY_PASSED.
  *   - In-scope, replay present, either slice has insufficient coverage ->
  *     REPLAY_FAILED.
- *   - In-scope, `replay === null` (Learning DB unconfigured — the caller
- *     never reached replay.ts) -> REPLAY_FAILED, not CANDIDATE_CREATED;
- *     see contracts.ts's header for why CANDIDATE_CREATED/REPLAYING are
- *     never a final status in this synchronous implementation.
+ *   - In-scope, applicable, `replay === null` (Learning DB unconfigured —
+ *     the caller never reached replay.ts) -> REPLAY_FAILED. See
+ *     contracts.ts's header: REPLAYING is never a final status in this
+ *     synchronous implementation, and CANDIDATE_CREATED is produced only
+ *     for the not-applicable case above.
  */
 export function finalizeCandidate(proposal: EvolutionProposalWithoutTimestamp, scope: CandidateScopeCheck, replay: ReplayComparison | null): EvolutionCandidateWithoutTimestamp {
   const candidateId = candidateIdFor(proposal);
+  const replayApplicability = replayApplicabilityFor(proposal.gapCategory);
 
   let status: CandidateStatus;
   let finalReplay: ReplayComparison | null;
 
   if (!scope.withinScope) {
     status = "VALIDATION_BLOCKED";
+    finalReplay = null;
+  } else if (!replayApplicability.applicable) {
+    status = "CANDIDATE_CREATED";
     finalReplay = null;
   } else if (replay === null) {
     status = "REPLAY_FAILED";
@@ -82,6 +95,7 @@ export function finalizeCandidate(proposal: EvolutionProposalWithoutTimestamp, s
     baselineVersion: proposal.currentSystemVersion,
     candidateVersion: `${CANDIDATE_SYSTEM_VERSION}:${candidateId}`,
     scope,
+    replayApplicability,
     status,
     replay: finalReplay,
   };

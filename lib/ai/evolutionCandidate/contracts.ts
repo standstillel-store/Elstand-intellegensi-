@@ -35,6 +35,23 @@
 //     never a random UUID or a mutable sequential counter — the SAME
 //     proposal always identifies the SAME candidate, matching
 //     evolutionProposal's own `proposalId` discipline.
+//   - PHASE 8.6.5b HARDENING (additive only — no enum was renamed and no
+//     database column was added): the replay here is, and always was, an
+//     OBSERVATIONAL split-history comparison. 8.6.5b makes that explicit
+//     in the data itself rather than only in prose:
+//       * every replay slice carries `sampleAccounting` (eligible /
+//         excluded / exclusionReasons) — see `SampleAccounting` below;
+//       * every candidate carries `replayApplicability`. A gap category
+//         whose evidence lives outside the executed-only replay
+//         population (currently `REJECT_DOMINANCE_GAP`) is never forced
+//         through that replay — see semantics.ts. Such a candidate is
+//         `CANDIDATE_CREATED` with `replay: null`, the status this file
+//         already documented as "replay never ran" — never
+//         `REPLAY_PASSED` / `REPLAY_FAILED`;
+//       * the validation mode and the inputs a true counterfactual replay
+//         would need (but this repository does not persist) are constants
+//         in semantics.ts, surfaced on every validation result
+//         (lib/ai/evolutionValidation).
 // ---------------------------------------------------------------------------
 
 import type { DecisionSource } from "@/lib/ai/decisionOutcome/contracts";
@@ -42,6 +59,59 @@ import type { GapCategory, GapSeverity } from "@/lib/ai/cognitiveGap/contracts";
 import type { EvaluationCoverageReport, SelfPerformanceAggregate } from "@/lib/ai/selfPerformance/contracts";
 
 export type { DecisionSource, GapCategory, GapSeverity, EvaluationCoverageReport, SelfPerformanceAggregate };
+
+/**
+ * The only validation mode this repository can honestly run: an older
+ * versus a newer window of ALREADY-RECORDED outcomes compared side by
+ * side. No candidate logic is applied to either window. Closed to this
+ * single value on purpose — a true counterfactual mode would need inputs
+ * this repository does not persist (see `MissingCounterfactualInput`) and
+ * belongs to a separately-approved phase, not to this union.
+ */
+export type ValidationMode = "OBSERVATIONAL_SPLIT_HISTORY";
+
+/** Closed set of reasons a true counterfactual replay cannot run today — each names a real, checkable absence, never a generic "unknown". */
+export type MissingCounterfactualInputCode =
+  | "PER_CYCLE_ORACLE_INPUT_NOT_PERSISTED"
+  | "PER_CYCLE_DECISION_MEMORY_NOT_PERSISTED"
+  | "PER_CYCLE_DECISION_RULE_CONFIGURATION_NOT_PERSISTED"
+  | "NON_EXECUTED_DECISION_OUTCOMES_NOT_TRACKED"
+  | "NO_ENGINE_FOR_MODIFIED_DECISION_LOGIC";
+
+export interface MissingCounterfactualInput {
+  readonly code: MissingCounterfactualInputCode;
+  /** Plain, deterministic description of what is absent and where that was verified. Never a causal claim. */
+  readonly description: string;
+}
+
+/** Whether replay can meaningfully measure a proposal's gap category with the population it reads. See semantics.ts. */
+export type ReplayApplicability = { readonly applicable: true; readonly reason: null } | { readonly applicable: false; readonly reason: string };
+
+/** Why a scoped row is NOT counted toward a slice's metrics. Every scoped row is either eligible or carries exactly one of these. */
+export type SampleExclusionReason = "OPEN_NO_OUTCOME" | "CLOSED_UNEVALUATED";
+
+export interface SampleExclusionReasonCount {
+  readonly reason: SampleExclusionReason;
+  readonly count: number;
+}
+
+/**
+ * Exact accounting of one replay slice's rows.
+ *   - `scopedTotal`: rows in this slice after (source, symbol) scoping.
+ *   - `eligible`: rows carrying a persisted evaluation — precisely the
+ *     rows `aggregatePerformance()` and `detectCognitiveGaps()` consume,
+ *     so `eligible === performance.totalEvaluated` always.
+ *   - `excluded`: `scopedTotal - eligible`.
+ *   - `exclusionReasons`: ALWAYS both reasons, in the fixed order of
+ *     `SAMPLE_EXCLUSION_REASONS` (zero counts included) so the shape is
+ *     deterministic; their counts sum to `excluded`.
+ */
+export interface SampleAccounting {
+  readonly scopedTotal: number;
+  readonly eligible: number;
+  readonly excluded: number;
+  readonly exclusionReasons: readonly SampleExclusionReasonCount[];
+}
 
 /** See this file's header — `REPLAYING` is never actually reachable in this synchronous implementation. */
 export type CandidateStatus = "CANDIDATE_CREATED" | "REPLAYING" | "REPLAY_PASSED" | "REPLAY_FAILED" | "VALIDATION_BLOCKED";
@@ -69,6 +139,8 @@ export interface ReplaySlice {
   readonly targetGapRate: number;
   /** Count of OTHER (non-targeted) gap categories active in this slice alone — the input to the regression check in evolutionValidation. */
   readonly otherActiveGapCount: number;
+  /** Phase 8.6.5b. Always non-null when produced by `buildReplayComparison()`. `null` ONLY when reading a row persisted before 8.6.5b — accounting that was never recorded is reported as not recorded, never reconstructed. */
+  readonly sampleAccounting: SampleAccounting | null;
 }
 
 export interface ReplayComparison {
@@ -93,8 +165,10 @@ export interface EvolutionCandidateWithoutTimestamp {
   readonly baselineVersion: string;
   readonly candidateVersion: string;
   readonly scope: CandidateScopeCheck;
+  /** Phase 8.6.5b — deterministic from `gapCategory` alone (see semantics.ts). When `applicable` is `false`, replay was never attempted. */
+  readonly replayApplicability: ReplayApplicability;
   readonly status: CandidateStatus;
-  /** `null` exactly when `status` is `CANDIDATE_CREATED` or `VALIDATION_BLOCKED` — replay never ran (or was blocked before running). */
+  /** `null` whenever replay produced no comparison: `VALIDATION_BLOCKED` (blocked before running), `CANDIDATE_CREATED` (replay not applicable to this gap category), or `REPLAY_FAILED` with no historical population available. */
   readonly replay: ReplayComparison | null;
 }
 

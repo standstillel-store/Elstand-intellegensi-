@@ -7,7 +7,7 @@ import type { NoveltyClassification, NoveltyAssessment } from "@/lib/ai/noveltyD
 import type { GapCategory, GapSeverity, CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
 import type { EvolutionNeed, EvolutionNeedAssessment } from "@/lib/ai/evolutionNeed/contracts";
 import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
-import type { EvolutionCandidateWithoutTimestamp, CandidateStatus } from "@/lib/ai/evolutionCandidate/contracts";
+import type { EvolutionCandidateWithoutTimestamp, CandidateStatus, ValidationMode, ReplaySlice } from "@/lib/ai/evolutionCandidate/contracts";
 import type { EvolutionValidationWithoutTimestamp, ValidationResult } from "@/lib/ai/evolutionValidation/contracts";
 
 // ---------------------------------------------------------------------------
@@ -42,12 +42,17 @@ import type { EvolutionValidationWithoutTimestamp, ValidationResult } from "@/li
 // Phase 8.6.5-8.6.6 addition: also renders `evolution[].candidates`
 // (0-or-more `{candidate, validation}` pairs per symbol). A candidate is
 // a split-history replication check, never executable code — see
-// lib/ai/evolutionCandidate/contracts.ts's own header. Language here is
-// deliberately "Validated candidate — awaiting human approval" /
-// "Blocked" / "Insufficient evidence" / "Inconclusive" — never "AI
-// EVOLVED", "SELF-IMPROVED", or "SUPER AI". Nothing on this page can
-// move a candidate past DRAFT/REPLAY_PASSED/VALID; there is no control
-// here that applies, approves, or promotes anything.
+// lib/ai/evolutionCandidate/contracts.ts's own header.
+// Phase 8.6.5b wording rule: a result here is OBSERVATIONAL evidence — an
+// older window compared with a newer window of recorded outcomes — and is
+// never presented as counterfactual validation or as evidence that a
+// proposed change works. Language is deliberately "Observational
+// evidence" / "Observed split-history result" / "Not counterfactual
+// validation" / "Blocked" / "Insufficient evidence" / "Inconclusive" /
+// "Not applicable" — never "Validated candidate", "AI EVOLVED",
+// "SELF-IMPROVED", or "SUPER AI". Nothing on this page can move a
+// candidate past DRAFT/REPLAY_PASSED/VALID; there is no control here that
+// applies, approves, or promotes anything.
 // ---------------------------------------------------------------------------
 
 interface CognitiveGapEntry {
@@ -153,25 +158,41 @@ const EVOLUTION_NEED_COLOR: Record<EvolutionNeed, string> = {
   EVOLUTION_WARRANTED: "text-cyan",
 };
 
+// Phase 8.6.5b: REPLAY_PASSED / REPLAY_FAILED only ever meant "both
+// windows had enough recorded data" / "a window did not" — the labels now
+// say exactly that instead of implying a pass/fail verdict on the proposal.
 const CANDIDATE_STATUS_LABEL: Record<CandidateStatus, string> = {
-  CANDIDATE_CREATED: "Candidate created",
+  CANDIDATE_CREATED: "Candidate created (replay not run)",
   REPLAYING: "Replaying",
-  REPLAY_PASSED: "Replay passed",
-  REPLAY_FAILED: "Replay failed",
+  REPLAY_PASSED: "Both windows had sufficient data",
+  REPLAY_FAILED: "Insufficient data in a window",
   VALIDATION_BLOCKED: "Blocked (out of scope)",
 };
 
+const VALIDATION_MODE_LABEL: Record<ValidationMode, string> = {
+  OBSERVATIONAL_SPLIT_HISTORY: "Observed split-history result",
+};
+
+function describeSlice(label: string, slice: ReplaySlice): string {
+  const accounting = slice.sampleAccounting;
+  if (accounting === null) return `${label}: accounting not recorded`;
+  return `${label}: ${accounting.eligible} eligible / ${accounting.excluded} excluded of ${accounting.scopedTotal}`;
+}
+
 /**
  * Deliberately NOT "AI EVOLVED" / "SELF-IMPROVED" / "SUPER AI" anywhere
- * — see this file's header. VALID reads as "Validated candidate —
- * awaiting human approval", matching the Phase 8.6.6 brief's required
- * vocabulary exactly; nothing here implies the candidate was applied.
+ * — see this file's header. Phase 8.6.5b: VALID (the enum value is
+ * unchanged) reads as observational evidence only — the targeted gap's
+ * rate was lower in the newer window than in the older one. It does not
+ * say the candidate was validated, and nothing here implies it was
+ * applied or that it would work.
  */
 const VALIDATION_RESULT_LABEL: Record<ValidationResult, string> = {
-  VALID: "Validated candidate — awaiting human approval",
+  VALID: "Observational evidence — target gap rate lower in newer window",
   INVALID: "Invalid",
   INSUFFICIENT_EVIDENCE: "Insufficient evidence",
   INCONCLUSIVE: "Inconclusive",
+  NOT_APPLICABLE: "Not applicable — outside executed-only replay",
 };
 
 const VALIDATION_RESULT_COLOR: Record<ValidationResult, string> = {
@@ -179,6 +200,7 @@ const VALIDATION_RESULT_COLOR: Record<ValidationResult, string> = {
   INVALID: "text-down",
   INSUFFICIENT_EVIDENCE: "text-ink-faint",
   INCONCLUSIVE: "text-amber",
+  NOT_APPLICABLE: "text-ink-faint",
 };
 
 export function SelfPerformancePanel() {
@@ -307,7 +329,7 @@ export function SelfPerformancePanel() {
       {evolution.some((e) => e.candidates.length > 0) && (
         <div className="mt-3 border-t border-line pt-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Evolution Candidates</p>
-          <p className="text-[10px] text-ink-faint">Split-history replication check only — never execution of modified logic. Human approval has not occurred; nothing below has been applied.</p>
+          <p className="text-[10px] text-ink-faint">Observed split-history results only — not counterfactual validation, and nothing below shows what a proposed change would do. Human approval has not occurred; nothing below has been applied.</p>
           <ul className="mt-1.5 space-y-3">
             {evolution.map(({ symbol, candidates }) =>
               candidates.map(({ candidate, validation }) => (
@@ -325,11 +347,31 @@ export function SelfPerformancePanel() {
                   <p className="mt-0.5 text-ink-faint">
                     Baseline: {candidate.baselineVersion} · Candidate: {candidate.candidateVersion}
                   </p>
-                  <p className="mt-0.5 text-ink-muted">
-                    Replay: <span className={candidate.status === "REPLAY_PASSED" ? "text-up" : "text-down"}>{CANDIDATE_STATUS_LABEL[candidate.status]}</span> · Regression:{" "}
-                    <span className={validation.regressionCheck.regressionDetected ? "text-down" : "text-up"}>{validation.regressionCheck.regressionDetected ? "Detected" : "None"}</span>
+                  <p className="mt-0.5 text-ink-faint">
+                    {VALIDATION_MODE_LABEL[validation.validationMode]} · {validation.counterfactualAvailable ? "Counterfactual available" : "Not counterfactual validation"}
                   </p>
+                  <p className="mt-0.5 text-ink-muted">
+                    Data: <span className={candidate.status === "REPLAY_PASSED" ? "text-up" : "text-ink-faint"}>{candidate.replayApplicability.applicable ? CANDIDATE_STATUS_LABEL[candidate.status] : "Replay not applicable to this gap"}</span> · Regression:{" "}
+                    {candidate.replay === null ? (
+                      <span className="text-ink-faint">Not evaluated</span>
+                    ) : (
+                      <span className={validation.regressionCheck.regressionDetected ? "text-down" : "text-up"}>{validation.regressionCheck.regressionDetected ? "Detected" : "None"}</span>
+                    )}
+                  </p>
+                  {candidate.replay !== null && (
+                    <p className="mt-0.5 text-ink-faint">
+                      Samples — {describeSlice("older window", candidate.replay.baseline)} · {describeSlice("newer window", candidate.replay.candidate)}
+                    </p>
+                  )}
                   {validation.evidence.length > 0 && <p className="mt-0.5 text-ink-faint">Evidence: {validation.evidence.join(" ")}</p>}
+                  <details className="mt-0.5 text-ink-faint">
+                    <summary className="cursor-pointer">Missing for counterfactual replay ({validation.missingCounterfactualInputs.length})</summary>
+                    <ul className="ml-3 list-disc">
+                      {validation.missingCounterfactualInputs.map((input) => (
+                        <li key={input.code}>{input.description}</li>
+                      ))}
+                    </ul>
+                  </details>
                 </li>
               ))
             )}

@@ -60,6 +60,8 @@ function slice(windowLabel: ReplaySlice["windowLabel"], targetGapRate: number, o
     targetGapOccurrenceCount: Math.round(targetGapRate * totalEvaluated),
     targetGapRate,
     otherActiveGapCount,
+    // Phase 8.6.5b: the hand-built slice is all-eligible, matching performance(totalEvaluated).
+    sampleAccounting: { scopedTotal: totalEvaluated, eligible: totalEvaluated, excluded: 0, exclusionReasons: [{ reason: "OPEN_NO_OUTCOME", count: 0 }, { reason: "CLOSED_UNEVALUATED", count: 0 }] },
   };
 }
 
@@ -82,6 +84,7 @@ function candidate(overrides: { status?: CandidateStatus; replay?: ReplayCompari
     baselineVersion: "phase-8.6.4",
     candidateVersion: "phase-8.6.5:candidate:x",
     scope: { withinScope: (overrides.violatingKeywords ?? []).length === 0, domainsChecked: ["risk", "execution"], violatingKeywords: overrides.violatingKeywords ?? [] },
+    replayApplicability: { applicable: true, reason: null },
     status: overrides.status ?? "REPLAY_PASSED",
     replay: overrides.replay === undefined ? comparison(0.5, 0.1, 0, 0) : overrides.replay,
   };
