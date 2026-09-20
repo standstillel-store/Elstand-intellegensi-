@@ -50,6 +50,24 @@ export const COUNTERFACTUAL_MISSING_INPUTS: readonly MissingCounterfactualInput[
   },
 ];
 
+/**
+ * Row count at which the historical read is treated as possibly truncated.
+ * The read (`getDecisionMemoryJoinedExperiences`) has no explicit limit or
+ * count, so a hosted project's default maximum rows per request (1000 on
+ * Supabase unless reconfigured) would cut the population without any
+ * signal. A truncated population would silently corrupt every replay
+ * number and the sample accounting, so replay fails closed at or above
+ * this count. Conservative by design: a population of exactly this size is
+ * also refused. Lifting this needs a paginated, ordered read — a separate,
+ * separately-approved change (the shared reader is also used by the live
+ * qualification memory query and is not touched here).
+ */
+export const POPULATION_TRUNCATION_GUARD_ROW_COUNT = 1000;
+
+export function isPopulationPossiblyTruncated(rowCount: number): boolean {
+  return rowCount >= POPULATION_TRUNCATION_GUARD_ROW_COUNT;
+}
+
 /** Fixed order used by every `SampleAccounting.exclusionReasons`. */
 export const SAMPLE_EXCLUSION_REASONS: readonly SampleExclusionReason[] = ["OPEN_NO_OUTCOME", "CLOSED_UNEVALUATED"];
 

@@ -1304,7 +1304,11 @@ lives inside the existing `replay` / `metrics_observed` jsonb columns;
 `gap_category` or constants of the method and are re-attached on read. Rows
 persisted before 8.6.5b read back with `sampleAccounting: null` ("not
 recorded"), never reconstructed.
-**Known limitation:** the stored `evolution_validations.result` and
+**Superseded for persistence by Phase 8.6.6b:** `NOT_APPLICABLE` results and
+`REJECT_DOMINANCE_GAP` are now persistable in the new append-only
+`evolution_validation_records` table (no legacy constraint was changed). The
+legacy tables still refuse them, as described next.
+**Known limitation (legacy tables):** the stored `evolution_validations.result` and
 `evolution_candidates.gap_category` CHECK constraints do not list
 `NOT_APPLICABLE` / `REJECT_DOMINANCE_GAP`. A not-applicable candidate or
 result is therefore computed and shown but **not persisted**:
@@ -1323,3 +1327,142 @@ persistence from GET routes, 8.6.7 (Human Approval Gate).
 `scripts/phase8/evolution-hardening-fixtures.ts` (new, 38 checks). The two
 existing suites' assertions are unchanged; only their hand-built helper
 objects gained the new fields.
+
+---
+
+## Phase 8.6.6b — Validation gates, deterministic replay, append-only validation records
+
+Audit-driven hardening of 8.6.6, approved item by item (D1–D6 plus the
+append-only record migration). **No production decision behavior changed.**
+Phase 7, qualification, pre-entry, decision thresholds, `evolutionNeed`,
+`evolutionProposal`, the AI Performance route and the shared decision-memory
+reader (`decisionMemory/repository.ts`, which the live qualification memory
+query also uses) are untouched; P1/P2 are still not wired into
+`evolutionNeed`; 8.6.7 is not implemented; nothing calls the new persistence.
+
+### Why (each verified by a probe before any code changed)
+1. **Replay was not deterministic.** With tied timestamps, the same rows in a
+   different input order gave `VALID` in one order and `INCONCLUSIVE` in the
+   other (the read has no `ORDER BY`).
+2. **A detection-threshold cliff.** The target rate was 0 whenever the raw
+   count was below `MIN_OCCURRENCE_COUNT`: 5 -> 4 occurrences read as
+   0.50 -> 0.00 (`VALID`), while 9 -> 8 read as -0.10.
+3. **The regression axis was a count.** One gap category leaving while a
+   different one arrived gave a delta of 0: `regression=false`, `VALID`.
+4. **`VALID` was reachable by any decrease**, with no minimum sample size or
+   effect size.
+5. **Validation records were mutable and unpinned.** Upsert overwrote them,
+   `validated_at` stayed at the first-insert time, and nothing identified
+   what content a record described — so an approval could not refer to what
+   was reviewed.
+6. **`regressionDetected: false` was ambiguous** ("none found" vs "not
+   evaluated"); a read that may have been silently truncated at the hosted
+   row cap would have corrupted every count without a signal.
+
+### What VALID means now (engineering gates, not statistics)
+`VALID` requires ALL of: >= 20 eligible samples in EACH window; the raw target
+gap rate actually falls; by >= 5 percentage points; by >= 20% of the older
+window's rate; no newly active gap category; the regression check actually
+evaluated; no detected regression. The comparisons use exact integer
+cross-multiplication (floating-point subtraction gets the exact boundary case
+5/20 -> 4/20 wrong: `0.25 - 0.2 = 0.04999999999999999`).
+
+`VALID` means: **"the proposal met every validation gate on the observational
+evidence available."** It does **not** mean the change is demonstrated, that
+profit rose, that a counterfactual was shown, that anything is safe for
+production, or that anything may be promoted. The gates are engineering
+thresholds, not statistical significance. Every result's `limitations` says so.
+
+Decision table (first match wins): blocked -> `INVALID`; not applicable ->
+`NOT_APPLICABLE`; replay failed / possibly truncated / regression identity not
+recorded -> `INSUFFICIENT_EVIDENCE`; regression detected (count or newly active
+category) -> `INVALID`; either window < 20 eligible -> `INSUFFICIENT_EVIDENCE`;
+all gates pass -> `VALID`; otherwise `INCONCLUSIVE`. A regression is checked
+BEFORE the sample gate so it is never hidden behind "not enough samples".
+
+### What changed
+- **D1** `replay.ts`: rows ordered by `compareReplayRows` (timestamp, then
+  `sourceSignalId`, then experience id) — input order can no longer change the
+  result.
+- **D2** `cognitiveGap/detect.ts`: exports `countRawGapOccurrences` (a pure
+  refactor — `detectCognitiveGaps` now calls it; 19/19 unchanged). Each slice
+  carries `targetRawOccurrenceCount` / `targetRawGapRate`; the thresholded
+  `targetGapRate` is kept unchanged.
+- **D3** each slice lists `otherActiveGapCategories`; the comparison lists
+  `newlyActiveGapCategories`. **Behavior change, stated plainly:** a swap that
+  used to read `VALID`/`INCONCLUSIVE` is now `INVALID`.
+- **D4** `RegressionCheck.evaluated` and `newlyActiveGapCategories`; the
+  stored-row type `EvolutionValidation.result` is narrowed to the four values
+  the legacy table accepts.
+- **D5** `evolutionCandidate/repository.ts` fails closed when the read reaches
+  `POPULATION_TRUNCATION_GUARD_ROW_COUNT` (1000): `replayLimitation:
+  "POPULATION_POSSIBLY_TRUNCATED"`, `REPLAY_FAILED`, `INSUFFICIENT_EVIDENCE`.
+  Lifting it needs a paginated ordered read, deliberately not done here.
+- **D6** `evolutionValidation/record.ts`: canonical JSON + sha256
+  `recordHash`. `buildEvolutionValidationRecord(proposal, candidate)` derives
+  the validation itself and returns `null` unless the candidate follows from
+  the proposal; `verifyEvolutionValidationRecord` re-checks a stored record.
+- **Gates** `evolutionValidation/gates.ts`; every validation records
+  `gateThresholds` and all 7 `gates`.
+- **Append-only record** `evolutionValidation/recordRepository.ts`:
+  `appendEvolutionValidationRecord()` is a plain insert (no update / upsert /
+  delete; a duplicate hash is `already_recorded`); `getEvolutionValidationRecordByHash()`
+  is read-only and verifies what it reads.
+- **UI**: `VALID` reads "Observational evidence — met every validation gate";
+  shows "Validation gates passed: X of 7 · engineering thresholds, not
+  statistical significance"; regression shows "Not evaluated" when it was not.
+
+### Migration — `supabase/learning/schema.sql` (appended; run once, idempotent)
+Adds `evolution_validation_records` (result CHECK: all 5 values; gap_category
+CHECK: all 7; `record_hash` UNIQUE with a 64-hex CHECK; `validation_mode`
+pinned to `OBSERVATIONAL_SPLIT_HISTORY`; `counterfactual_available` pinned to
+`false`; RLS on, no policies), the function
+`evolution_validation_records_reject_mutation()`, and triggers rejecting
+UPDATE and DELETE per row and TRUNCATE per statement (they fire for every
+role, including the service role). **No legacy table, column or CHECK was
+altered.** Stated plainly: a schema owner can still drop the trigger; the
+guarantee is that the application and ordinary roles cannot rewrite a record.
+
+**The migration was NOT executed in the development sandbox** (no Postgres, no
+network). It was checked statically against the TypeScript unions and by
+mutation-tested fixtures. Run it in the Supabase SQL editor, then verify:
+```sql
+begin;
+insert into evolution_validation_records
+  (record_hash, record_schema_version, proposal_id, candidate_id, source, symbol,
+   gap_category, result, validation_mode, counterfactual_available, snapshot)
+values (repeat('a', 64), 1, 'p', 'c', 'ELVOID_PRO_ORACLE', 'BTCUSDT',
+        'REJECT_DOMINANCE_GAP', 'NOT_APPLICABLE', 'OBSERVATIONAL_SPLIT_HISTORY', false, '{}');
+update evolution_validation_records set symbol = 'X';   -- must raise: append-only
+rollback;
+begin;
+delete from evolution_validation_records;               -- must raise: append-only
+rollback;
+```
+The insert must succeed (proving NOT_APPLICABLE + REJECT_DOMINANCE_GAP are
+accepted) and the update and delete must each fail with
+`evolution_validation_records is append-only`.
+
+### Requirement for Phase 8.6.7 (not implemented)
+An approval MUST store the `recordHash` of the record it approves and must not
+reference a proposal, candidate or validation by id alone. `VALID` is not, by
+itself, grounds to approve anything.
+
+### Still true / not solved
+- Still an observational split-history comparison: `counterfactualAvailable`
+  is `false`. The windows can straddle deployed logic changes (for example P0)
+  and rows carry no code version, so a drop between windows cannot be
+  separated from such a change.
+- The regression axis is still only "which other gap categories are active".
+- The guard makes replay unavailable once the population reaches 1000 rows
+  until a paginated ordered read exists.
+- The legacy `evolution_*` tables are unchanged and now superseded for
+  downstream use; nothing calls any persistence function automatically.
+
+### Fixtures
+`evolution-validation-gates-fixtures.ts` (33), `evolution-validation-record-fixtures.ts`
+(38). Existing suites keep their check counts (candidate 17, validation 15,
+hardening 38); only their hand-built helper objects gained the new fields, and
+the hardening fixtures' VALID inputs were raised to 20 eligible samples per
+window and one legacy-schema check was narrowed to the legacy tables' own
+definitions (the new table is appended after them).

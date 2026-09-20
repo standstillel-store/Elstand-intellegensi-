@@ -76,7 +76,8 @@ function row(overrides: { kind?: RowKind; source?: DecisionSource; symbol?: stri
 }
 
 function ts(day: number): string {
-  return `2026-08-${String(day).padStart(2, "0")}T00:00:00.000Z`;
+  // Day offsets beyond 31 roll into the next month — populations below can exceed a calendar month.
+  return new Date(Date.UTC(2026, 7, day)).toISOString();
 }
 
 function proposal(gapCategory: GapCategory = "CONTRADICTION_GAP", overrides: { hypothesis?: string; proposedChange?: string } = {}): EvolutionProposalWithoutTimestamp {
@@ -143,7 +144,8 @@ const controlledRows: DecisionMemoryJoinedRow[] = [...controlledInScope, ...outO
 // 1-3. Explicit mode, counterfactualAvailable, missing inputs — on EVERY result branch
 // ---------------------------------------------------------------------------
 
-const sufficientRows: DecisionMemoryJoinedRow[] = Array.from({ length: MIN_OCCURRENCE_COUNT * 2 }, (_, i) => row({ decisionTimestamp: ts(1 + i) }));
+// Phase 8.6.6b: 40 evaluated rows -> 20 per window, the minimum eligible samples the VALID gate requires.
+const sufficientRows: DecisionMemoryJoinedRow[] = Array.from({ length: MIN_OCCURRENCE_COUNT * 8 }, (_, i) => row({ decisionTimestamp: ts(1 + i) }));
 
 const branches: { name: string; validation: EvolutionValidationWithoutTimestamp }[] = [
   { name: "replay ran (VALID/INCONCLUSIVE/INVALID family)", validation: pipeline(proposal(), sufficientRows).validation },
@@ -259,11 +261,28 @@ function handBuilt(replay: ReplayComparison | null, status: EvolutionCandidateWi
   return { ...base, status, replay };
 }
 
+const OTHER_CATEGORIES: readonly GapCategory[] = ["CONTEXT_GAP", "EVIDENCE_GAP", "REASONING_CONSISTENCY_GAP", "CONFIDENCE_ALIGNMENT_GAP"];
+
 function withRates(baselineRate: number, candidateRate: number, baselineOther: number, candidateOther: number): ReplayComparison {
   const base = buildReplayComparison("ELVOID_PRO_ORACLE", "BTCUSDT", "CONTRADICTION_GAP", sufficientRows);
-  const baseline = { ...base.baseline, targetGapRate: baselineRate, otherActiveGapCount: baselineOther };
-  const candidate = { ...base.candidate, targetGapRate: candidateRate, otherActiveGapCount: candidateOther };
-  return { baseline, candidate, targetGapRateDelta: candidateRate - baselineRate, otherActiveGapCountDelta: candidateOther - baselineOther };
+  const baseline = {
+    ...base.baseline,
+    targetGapRate: baselineRate,
+    otherActiveGapCount: baselineOther,
+    targetRawOccurrenceCount: Math.round(baselineRate * base.baseline.performance.totalEvaluated),
+    targetRawGapRate: baselineRate,
+    otherActiveGapCategories: OTHER_CATEGORIES.slice(0, baselineOther),
+  };
+  const candidate = {
+    ...base.candidate,
+    targetGapRate: candidateRate,
+    otherActiveGapCount: candidateOther,
+    targetRawOccurrenceCount: Math.round(candidateRate * base.candidate.performance.totalEvaluated),
+    targetRawGapRate: candidateRate,
+    otherActiveGapCategories: OTHER_CATEGORIES.slice(0, candidateOther),
+  };
+  const newlyActiveGapCategories = candidate.otherActiveGapCategories.filter((c) => !baseline.otherActiveGapCategories.includes(c)).sort();
+  return { baseline, candidate, targetGapRateDelta: candidateRate - baselineRate, otherActiveGapCountDelta: candidateOther - baselineOther, newlyActiveGapCategories };
 }
 
 {
@@ -296,7 +315,8 @@ function withRates(baselineRate: number, candidateRate: number, baselineOther: n
   const schema = readFileSync(new URL("../../supabase/learning/schema.sql", import.meta.url), "utf8");
   const resultCheckOriginal = schema.includes("result in ('VALID', 'INVALID', 'INSUFFICIENT_EVIDENCE', 'INCONCLUSIVE')");
   const candidateStatusOriginal = schema.includes("'CANDIDATE_CREATED','REPLAYING','REPLAY_PASSED','REPLAY_FAILED','VALIDATION_BLOCKED'");
-  const validationsTable = schema.slice(schema.indexOf("create table if not exists evolution_validations"));
+  // Phase 8.6.6b appended a NEW table after this one; the check concerns the LEGACY table's own definition only.
+  const validationsTable = schema.slice(schema.indexOf("create table if not exists evolution_validations "), schema.indexOf("create index if not exists evolution_validations_source_symbol_idx"));
   const candidatesTable = schema.slice(schema.indexOf("create table if not exists evolution_candidates"), schema.indexOf("create table if not exists evolution_validations"));
   check(
     "8a. supabase/learning/schema.sql still holds the ORIGINAL result and status CHECK lists; neither evolution table mentions NOT_APPLICABLE or REJECT_DOMINANCE_GAP (no speculative migration)",

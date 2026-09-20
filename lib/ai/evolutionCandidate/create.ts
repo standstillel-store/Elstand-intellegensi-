@@ -12,7 +12,7 @@
 
 import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
 import { replayApplicabilityFor } from "./semantics";
-import type { CandidateScopeCheck, CandidateStatus, ReplayComparison, EvolutionCandidateWithoutTimestamp } from "./contracts";
+import type { CandidateScopeCheck, CandidateStatus, ReplayComparison, ReplayLimitation, EvolutionCandidateWithoutTimestamp } from "./contracts";
 
 /**
  * Fixed, defensive keyword list — checked against `hypothesis` +
@@ -51,6 +51,10 @@ export function candidateIdFor(proposal: EvolutionProposalWithoutTimestamp): str
  *     unsafe proposal is still blocked outright, and BEFORE any replay
  *     status so a not-applicable category can never read as passed or
  *     failed.
+ *   - In-scope, applicable, `replayLimitation` non-null (Phase 8.6.6b: the
+ *     historical read may have been truncated) -> REPLAY_FAILED, `replay`
+ *     forced to `null` even if one was somehow passed in — a comparison
+ *     over a possibly partial population is never trusted or surfaced.
  *   - In-scope, replay present, both slices have sufficient coverage ->
  *     REPLAY_PASSED.
  *   - In-scope, replay present, either slice has insufficient coverage ->
@@ -61,7 +65,12 @@ export function candidateIdFor(proposal: EvolutionProposalWithoutTimestamp): str
  *     synchronous implementation, and CANDIDATE_CREATED is produced only
  *     for the not-applicable case above.
  */
-export function finalizeCandidate(proposal: EvolutionProposalWithoutTimestamp, scope: CandidateScopeCheck, replay: ReplayComparison | null): EvolutionCandidateWithoutTimestamp {
+export function finalizeCandidate(
+  proposal: EvolutionProposalWithoutTimestamp,
+  scope: CandidateScopeCheck,
+  replay: ReplayComparison | null,
+  replayLimitation: ReplayLimitation | null = null
+): EvolutionCandidateWithoutTimestamp {
   const candidateId = candidateIdFor(proposal);
   const replayApplicability = replayApplicabilityFor(proposal.gapCategory);
 
@@ -73,6 +82,9 @@ export function finalizeCandidate(proposal: EvolutionProposalWithoutTimestamp, s
     finalReplay = null;
   } else if (!replayApplicability.applicable) {
     status = "CANDIDATE_CREATED";
+    finalReplay = null;
+  } else if (replayLimitation !== null) {
+    status = "REPLAY_FAILED";
     finalReplay = null;
   } else if (replay === null) {
     status = "REPLAY_FAILED";
@@ -96,6 +108,7 @@ export function finalizeCandidate(proposal: EvolutionProposalWithoutTimestamp, s
     candidateVersion: `${CANDIDATE_SYSTEM_VERSION}:${candidateId}`,
     scope,
     replayApplicability,
+    replayLimitation: status === "REPLAY_FAILED" ? replayLimitation : null,
     status,
     replay: finalReplay,
   };

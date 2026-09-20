@@ -62,6 +62,31 @@ function isInScope(row: DecisionMemoryJoinedRow, source: DecisionSource, symbol:
   return row.experience.source === source && row.experience.symbol === symbol;
 }
 
+/**
+ * The RAW number of evaluated decisions carrying `category`'s evidence,
+ * BEFORE the `MIN_OCCURRENCE_COUNT` detection threshold is applied —
+ * exactly the count `detectCognitiveGaps()` compares to that threshold
+ * (Phase 8.6.6b: exported so evolutionCandidate's replay can measure a
+ * window's rate without the detection threshold turning "4 occurrences"
+ * into a rate of 0 while "5" reads as 0.5). Pure; never mutates its input.
+ *
+ * `evaluations` must already be scoped to one (source, symbol) pair and
+ * contain evaluated decisions only. Returns `null` for a category this
+ * evaluation-based count cannot express: `REJECT_DOMINANCE_GAP` is defined
+ * over the full decision population (runtime_events), not over
+ * `decision_evaluations`. For `PATTERN_GAP` this is the negative-evaluation-
+ * class count only — the failure-pattern and constraint-validation
+ * sub-signals are all-time aggregates with no per-window granularity, which
+ * is the same narrowing replay.ts already discloses.
+ */
+export function countRawGapOccurrences(evaluations: readonly DecisionEvaluation[], category: GapCategory): number | null {
+  if (category === "CONFIDENCE_ALIGNMENT_GAP") return evaluations.filter((e) => e.confidenceAlignment === "MISALIGNED").length;
+  if (category === "PATTERN_GAP") return evaluations.filter((e) => (NEGATIVE_EVALUATION_CLASSES as readonly string[]).includes(e.evaluationClass)).length;
+  const rule = TAG_RULES.find((r) => r.category === category);
+  if (rule === undefined) return null;
+  return evaluations.filter((e) => e.evidence.some((tag) => rule.tags.includes(tag))).length;
+}
+
 function severityFor(occurrenceCount: number, otherActiveCategoryCount: number): GapSeverity {
   if (occurrenceCount >= CONFIDENCE_SAMPLE_CAP || otherActiveCategoryCount >= 2) return "HIGH";
   if (otherActiveCategoryCount >= 1) return "MEDIUM";
@@ -84,7 +109,7 @@ export function detectCognitiveGaps(input: DetectCognitiveGapsInput): readonly C
   const raw: RawSignal[] = [];
 
   for (const rule of TAG_RULES) {
-    const occurrenceCount = evaluations.filter((e) => e.evidence.some((tag) => rule.tags.includes(tag))).length;
+    const occurrenceCount = countRawGapOccurrences(evaluations, rule.category) ?? 0;
     if (occurrenceCount >= MIN_OCCURRENCE_COUNT) {
       raw.push({
         category: rule.category,
@@ -95,7 +120,7 @@ export function detectCognitiveGaps(input: DetectCognitiveGapsInput): readonly C
     }
   }
 
-  const misalignedCount = evaluations.filter((e) => e.confidenceAlignment === "MISALIGNED").length;
+  const misalignedCount = countRawGapOccurrences(evaluations, "CONFIDENCE_ALIGNMENT_GAP") ?? 0;
   if (misalignedCount >= MIN_OCCURRENCE_COUNT) {
     raw.push({
       category: "CONFIDENCE_ALIGNMENT_GAP",
@@ -108,7 +133,7 @@ export function detectCognitiveGaps(input: DetectCognitiveGapsInput): readonly C
   // PATTERN_GAP — three independent sub-signals, any one is sufficient.
   // occurrenceCount takes the strongest of whichever fired; `reasons`
   // lists every sub-signal that actually fired, never just the first.
-  const negativeCount = evaluations.filter((e) => (NEGATIVE_EVALUATION_CLASSES as readonly string[]).includes(e.evaluationClass)).length;
+  const negativeCount = countRawGapOccurrences(evaluations, "PATTERN_GAP") ?? 0;
   const nonValidValidationCount = constraintValidations.filter((v) => v.status !== "VALID").length;
   const patternReasons: string[] = [];
   let patternOccurrenceCount = 0;

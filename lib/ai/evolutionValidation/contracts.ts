@@ -54,17 +54,66 @@
 //         the original four values and this phase adds no schema change,
 //         so a `NOT_APPLICABLE` result is computed and surfaced but not
 //         persisted — see repository.ts.
+//   - PHASE 8.6.6b (audit-driven, additive):
+//       * `VALID` now requires every ENGINEERING VALIDATION GATE in
+//         gates.ts (minimum eligible samples per window, a real and
+//         sufficiently large reduction in the raw target gap rate, no newly
+//         active gap category, a regression check that actually ran, no
+//         detected regression). The gates are engineering thresholds for an
+//         observational replay — NOT statistical significance and NOT
+//         evidence that the proposed change caused anything. `VALID` means
+//         only "every gate was met on the observational evidence
+//         available". It does NOT mean the change is demonstrated, that
+//         profit rose, that a counterfactual was shown, that anything is
+//         safe for production, or that anything may be promoted.
+//       * `RegressionCheck.evaluated` separates "no regression found" from
+//         "regression was not evaluated".
+//       * The stored-row type narrows `result` to `PersistedValidationResult`
+//         (the four values the legacy table's CHECK constraint accepts);
+//         `NOT_APPLICABLE` lives only in the append-only record
+//         (record.ts / repository.ts).
 // ---------------------------------------------------------------------------
 
 import type { DecisionSource } from "@/lib/ai/decisionOutcome/contracts";
-import type { CandidateStatus, ReplayComparison, ValidationMode, MissingCounterfactualInput } from "@/lib/ai/evolutionCandidate/contracts";
+import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
+import type { EvolutionCandidateWithoutTimestamp, CandidateStatus, GapCategory, ReplayComparison, ValidationMode, MissingCounterfactualInput } from "@/lib/ai/evolutionCandidate/contracts";
 
-export type { DecisionSource, CandidateStatus, ReplayComparison, ValidationMode, MissingCounterfactualInput };
+export type { DecisionSource, CandidateStatus, GapCategory, ReplayComparison, ValidationMode, MissingCounterfactualInput };
 
 export type ValidationResult = "VALID" | "INVALID" | "INSUFFICIENT_EVIDENCE" | "INCONCLUSIVE" | "NOT_APPLICABLE";
 
+/** The four values the legacy `evolution_validations.result` CHECK constraint accepts. */
+export type PersistedValidationResult = Exclude<ValidationResult, "NOT_APPLICABLE">;
+
+/** The fixed engineering thresholds behind `VALID` — see gates.ts. Recorded on every validation so a record states which thresholds it was judged against. `null` only on a legacy row that predates gates. */
+export interface ValidationGateThresholds {
+  readonly minEligibleSamplesPerWindow: number;
+  readonly minAbsoluteReductionPercentagePoints: number;
+  readonly minRelativeReductionPercent: number;
+}
+
+export type ValidationGateName =
+  | "MIN_ELIGIBLE_SAMPLES_BOTH_WINDOWS"
+  | "TARGET_RATE_DECREASED"
+  | "MIN_ABSOLUTE_REDUCTION"
+  | "MIN_RELATIVE_REDUCTION"
+  | "NO_NEWLY_ACTIVE_GAP_CATEGORIES"
+  | "REGRESSION_CHECK_EVALUATED"
+  | "NO_DETECTED_REGRESSION";
+
+export interface ValidationGateOutcome {
+  readonly gate: ValidationGateName;
+  readonly passed: boolean;
+  /** Plain, deterministic, count-based description of what was observed for this gate — never a causal claim. */
+  readonly observed: string;
+}
+
 export interface RegressionCheck {
+  /** Phase 8.6.6b. `true` only when a replay ran and its regression identity (which other categories were active) was recorded. `false` means the regression axis was NOT evaluated — `regressionDetected: false` then says nothing about regression. */
+  readonly evaluated: boolean;
   readonly regressionDetected: boolean;
+  /** Phase 8.6.6b. Categories active in the newer window but not the older one, sorted alphabetically; empty when none or when not evaluated (see `evaluated`). */
+  readonly newlyActiveGapCategories: readonly GapCategory[];
   /** Carried verbatim from `ReplayComparison.otherActiveGapCountDelta` — positive means regression. `0` when no replay ran (VALIDATION_BLOCKED/REPLAY_FAILED candidates). */
   readonly otherActiveGapCountDelta: number;
   readonly reasons: readonly string[];
@@ -101,11 +150,67 @@ export interface EvolutionValidationWithoutTimestamp {
   readonly counterfactualAvailable: false;
   /** Phase 8.6.5b — fixed list from evolutionCandidate/semantics.ts; the same on every result. */
   readonly missingCounterfactualInputs: readonly MissingCounterfactualInput[];
+  /** Phase 8.6.6b — the thresholds `VALID` was judged against; `null` only when reading a legacy row. */
+  readonly gateThresholds: ValidationGateThresholds | null;
+  /** Phase 8.6.6b — every gate, in the fixed order of `ValidationGateName`, when a replay was evaluated; empty when no replay was evaluated (blocked, not applicable, insufficient data) or when reading a legacy row. */
+  readonly gates: readonly ValidationGateOutcome[];
   /** Plain, deterministic, count-based statements only — never LLM-generated, never a causal claim. */
   readonly evidence: readonly string[];
   readonly limitations: readonly string[];
 }
 
 export interface EvolutionValidation extends EvolutionValidationWithoutTimestamp {
+  /** Narrowed: the legacy table can never return `NOT_APPLICABLE`. */
+  readonly result: PersistedValidationResult;
   readonly validatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Append-only validation record (Phase 8.6.6b)
+//
+// The immutable, self-pinning unit a future approval step must reference.
+// `recordHash` is the sha256 of the canonical serialization of `snapshot`
+// (see record.ts): any change to the proposal text, the replay evidence, the
+// validation result, the thresholds or the gates produces a different hash.
+// The record carries the WHOLE snapshot — proposal, candidate (with its
+// replay windows and sample accounting) and validation (with gates and
+// thresholds) — so what was reviewed can be shown exactly as it was, later.
+//
+// REQUIREMENT FOR PHASE 8.6.7 (not implemented here): an approval MUST store
+// the `recordHash` of the record it approves, and MUST NOT reference a
+// proposal, candidate or validation by id alone — ids are stable while the
+// content behind them is not. `VALID` in a record means only that every
+// validation gate was met on observational evidence; it is not, by itself,
+// grounds to approve anything.
+//
+// The record table (evolution_validation_records) is append-only: UPDATE,
+// DELETE and TRUNCATE are rejected by a database trigger, and the only write
+// path (recordRepository.ts) is a plain insert.
+// ---------------------------------------------------------------------------
+
+export interface EvolutionValidationRecordSnapshot {
+  readonly proposal: EvolutionProposalWithoutTimestamp;
+  readonly candidate: EvolutionCandidateWithoutTimestamp;
+  readonly validation: EvolutionValidationWithoutTimestamp;
+}
+
+export interface EvolutionValidationRecordWithoutTimestamp {
+  /** Lowercase hex sha256 of the canonical serialization of `snapshot` — see record.ts. UNIQUE in the table. */
+  readonly recordHash: string;
+  readonly recordSchemaVersion: 1;
+  /** The columns below are copies of values inside `snapshot`, kept as columns so the table can be queried and constrained; `verifyEvolutionValidationRecord()` checks they agree with the snapshot. */
+  readonly proposalId: string;
+  readonly candidateId: string;
+  readonly source: DecisionSource;
+  readonly symbol: string;
+  readonly gapCategory: GapCategory;
+  readonly result: ValidationResult;
+  readonly validationMode: ValidationMode;
+  readonly counterfactualAvailable: false;
+  readonly snapshot: EvolutionValidationRecordSnapshot;
+}
+
+export interface EvolutionValidationRecord extends EvolutionValidationRecordWithoutTimestamp {
+  /** Database `now()` at insert — deliberately excluded from `recordHash`. */
+  readonly recordedAt: string;
 }

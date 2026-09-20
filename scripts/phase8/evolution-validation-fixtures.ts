@@ -49,6 +49,9 @@ function performance(totalEvaluated: number): SelfPerformanceAggregate {
   };
 }
 
+// Phase 8.6.6b: which other categories a hand-built slice reports as active — the first N of this fixed list, so a larger N is a strict superset.
+const OTHER_CATEGORIES: readonly GapCategory[] = ["CONTEXT_GAP", "EVIDENCE_GAP", "REASONING_CONSISTENCY_GAP", "CONFIDENCE_ALIGNMENT_GAP"];
+
 function slice(windowLabel: ReplaySlice["windowLabel"], targetGapRate: number, otherActiveGapCount: number, sufficientData = true): ReplaySlice {
   const totalEvaluated = 20;
   return {
@@ -62,13 +65,19 @@ function slice(windowLabel: ReplaySlice["windowLabel"], targetGapRate: number, o
     otherActiveGapCount,
     // Phase 8.6.5b: the hand-built slice is all-eligible, matching performance(totalEvaluated).
     sampleAccounting: { scopedTotal: totalEvaluated, eligible: totalEvaluated, excluded: 0, exclusionReasons: [{ reason: "OPEN_NO_OUTCOME", count: 0 }, { reason: "CLOSED_UNEVALUATED", count: 0 }] },
+    // Phase 8.6.6b: the raw figures equal the hand-built rate; identity lists the first N categories.
+    targetRawOccurrenceCount: Math.round(targetGapRate * totalEvaluated),
+    targetRawGapRate: targetGapRate,
+    otherActiveGapCategories: OTHER_CATEGORIES.slice(0, otherActiveGapCount),
   };
 }
 
 function comparison(baselineRate: number, candidateRate: number, baselineOther: number, candidateOther: number, sufficientData = true): ReplayComparison {
   const baseline = slice("BASELINE", baselineRate, baselineOther, sufficientData);
   const candidate = slice("CANDIDATE", candidateRate, candidateOther, sufficientData);
-  return { baseline, candidate, targetGapRateDelta: candidate.targetGapRate - baseline.targetGapRate, otherActiveGapCountDelta: candidate.otherActiveGapCount - baseline.otherActiveGapCount };
+  const baselineOthers = baseline.otherActiveGapCategories ?? [];
+  const newlyActiveGapCategories = (candidate.otherActiveGapCategories ?? []).filter((c) => !baselineOthers.includes(c)).sort();
+  return { baseline, candidate, targetGapRateDelta: candidate.targetGapRate - baseline.targetGapRate, otherActiveGapCountDelta: candidate.otherActiveGapCount - baseline.otherActiveGapCount, newlyActiveGapCategories };
 }
 
 function candidate(overrides: { status?: CandidateStatus; replay?: ReplayComparison | null; violatingKeywords?: readonly string[] } = {}): EvolutionCandidateWithoutTimestamp {
@@ -85,6 +94,7 @@ function candidate(overrides: { status?: CandidateStatus; replay?: ReplayCompari
     candidateVersion: "phase-8.6.5:candidate:x",
     scope: { withinScope: (overrides.violatingKeywords ?? []).length === 0, domainsChecked: ["risk", "execution"], violatingKeywords: overrides.violatingKeywords ?? [] },
     replayApplicability: { applicable: true, reason: null },
+    replayLimitation: null,
     status: overrides.status ?? "REPLAY_PASSED",
     replay: overrides.replay === undefined ? comparison(0.5, 0.1, 0, 0) : overrides.replay,
   };

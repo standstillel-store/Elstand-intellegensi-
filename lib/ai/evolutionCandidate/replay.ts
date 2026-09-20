@@ -39,11 +39,31 @@
 // `SampleAccounting` in contracts.ts. This adds numbers about rows that
 // were ALREADY being counted or skipped; it changes none of the existing
 // slice fields, none of the comparison deltas, and no sufficiency gate.
+//
+// DETERMINISM (Phase 8.6.6b): rows are ordered by `compareReplayRows` —
+// decisionTimestamp, then sourceSignalId, then experience id — before the
+// midpoint split. The database read that feeds this function has no ORDER
+// BY, so before 8.6.6b two rows with the same timestamp could land in
+// either half depending on the order the database happened to return them
+// (probed: the same rows and timestamps gave VALID in one order and
+// INCONCLUSIVE in the other). Now the same SET of rows always produces the
+// byte-identical comparison, in any input order.
+//
+// RAW RATE (Phase 8.6.6b): `targetGapOccurrenceCount`/`targetGapRate` are
+// the THRESHOLDED figures (0 whenever the count is below the detection
+// threshold), kept unchanged. `targetRawOccurrenceCount`/`targetRawGapRate`
+// are the same measurement before that threshold — the figures the
+// validation gates use, so 5 -> 4 occurrences reads as a change of one
+// row, not as 0.5 -> 0.0.
+//
+// REGRESSION IDENTITY (Phase 8.6.6b): each slice lists WHICH other gap
+// categories were active; the comparison lists the newly active ones.
 // ---------------------------------------------------------------------------
 
 import { computeEvaluationCoverage, aggregatePerformance } from "@/lib/ai/selfPerformance/aggregate";
-import { detectCognitiveGaps } from "@/lib/ai/cognitiveGap/detect";
+import { detectCognitiveGaps, countRawGapOccurrences } from "@/lib/ai/cognitiveGap/detect";
 import type { DecisionMemoryJoinedRow } from "@/lib/ai/decisionMemory/contracts";
+import type { DecisionEvaluation } from "@/lib/ai/decisionEvaluation/contracts";
 import { SAMPLE_EXCLUSION_REASONS } from "./semantics";
 import type { DecisionSource, GapCategory, ReplaySlice, ReplayComparison, SampleAccounting, SampleExclusionReason } from "./contracts";
 
@@ -83,11 +103,36 @@ export function buildSampleAccounting(halfRows: readonly DecisionMemoryJoinedRow
  */
 export function normalizePersistedReplay(raw: ReplayComparison | null): ReplayComparison | null {
   if (raw === null || raw === undefined) return null;
+  const normalizeSlice = (slice: ReplaySlice): ReplaySlice => ({
+    ...slice,
+    sampleAccounting: slice.sampleAccounting ?? null,
+    targetRawOccurrenceCount: slice.targetRawOccurrenceCount ?? null,
+    targetRawGapRate: slice.targetRawGapRate ?? null,
+    otherActiveGapCategories: slice.otherActiveGapCategories ?? null,
+  });
   return {
     ...raw,
-    baseline: { ...raw.baseline, sampleAccounting: raw.baseline.sampleAccounting ?? null },
-    candidate: { ...raw.candidate, sampleAccounting: raw.candidate.sampleAccounting ?? null },
+    baseline: normalizeSlice(raw.baseline),
+    candidate: normalizeSlice(raw.candidate),
+    newlyActiveGapCategories: raw.newlyActiveGapCategories ?? null,
   };
+}
+
+/**
+ * Total, deterministic row order: decisionTimestamp, then sourceSignalId,
+ * then experience id (string comparison, ascending). Pure.
+ */
+export function compareReplayRows(a: DecisionMemoryJoinedRow, b: DecisionMemoryJoinedRow): number {
+  const keys: readonly (readonly [string, string])[] = [
+    [a.experience.decisionTimestamp, b.experience.decisionTimestamp],
+    [a.experience.sourceSignalId, b.experience.sourceSignalId],
+    [a.experience.id, b.experience.id],
+  ];
+  for (const [left, right] of keys) {
+    if (left < right) return -1;
+    if (left > right) return 1;
+  }
+  return 0;
 }
 
 function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSource, symbol: string, halfRows: readonly DecisionMemoryJoinedRow[], gapCategory: GapCategory): ReplaySlice {
@@ -98,7 +143,15 @@ function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSou
   const targetGap = gaps.find((g) => g.category === gapCategory);
   const targetGapOccurrenceCount = targetGap?.evidence.occurrenceCount ?? 0;
   const targetGapRate = performance.totalEvaluated === 0 ? 0 : targetGapOccurrenceCount / performance.totalEvaluated;
-  const otherActiveGapCount = gaps.filter((g) => g.category !== gapCategory).length;
+  const otherActiveGapCategories = gaps
+    .filter((g) => g.category !== gapCategory)
+    .map((g) => g.category)
+    .sort();
+  const otherActiveGapCount = otherActiveGapCategories.length;
+
+  const evaluations: readonly DecisionEvaluation[] = halfRows.filter((r) => r.evaluation !== null).map((r) => r.evaluation as DecisionEvaluation);
+  const targetRawOccurrenceCount = countRawGapOccurrences(evaluations, gapCategory);
+  const targetRawGapRate = targetRawOccurrenceCount === null ? null : performance.totalEvaluated === 0 ? 0 : targetRawOccurrenceCount / performance.totalEvaluated;
 
   const timestamps = halfRows.map((r) => r.experience.decisionTimestamp).sort();
 
@@ -112,6 +165,9 @@ function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSou
     targetGapRate,
     otherActiveGapCount,
     sampleAccounting: buildSampleAccounting(halfRows),
+    targetRawOccurrenceCount,
+    targetRawGapRate,
+    otherActiveGapCategories,
   };
 }
 
@@ -125,7 +181,7 @@ function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSou
  */
 export function buildReplayComparison(source: DecisionSource, symbol: string, gapCategory: GapCategory, rows: readonly DecisionMemoryJoinedRow[]): ReplayComparison {
   const scoped = rows.filter((row) => isInScope(row, source, symbol));
-  const sorted = [...scoped].sort((a, b) => (a.experience.decisionTimestamp < b.experience.decisionTimestamp ? -1 : a.experience.decisionTimestamp > b.experience.decisionTimestamp ? 1 : 0));
+  const sorted = [...scoped].sort(compareReplayRows);
   const mid = Math.floor(sorted.length / 2);
   const olderHalf = sorted.slice(0, mid);
   const newerHalf = sorted.slice(mid);
@@ -133,10 +189,14 @@ export function buildReplayComparison(source: DecisionSource, symbol: string, ga
   const baseline = buildSlice("BASELINE", source, symbol, olderHalf, gapCategory);
   const candidate = buildSlice("CANDIDATE", source, symbol, newerHalf, gapCategory);
 
+  const baselineOthers = baseline.otherActiveGapCategories ?? [];
+  const newlyActiveGapCategories = (candidate.otherActiveGapCategories ?? []).filter((category) => !baselineOthers.includes(category)).sort();
+
   return {
     baseline,
     candidate,
     targetGapRateDelta: candidate.targetGapRate - baseline.targetGapRate,
     otherActiveGapCountDelta: candidate.otherActiveGapCount - baseline.otherActiveGapCount,
+    newlyActiveGapCategories,
   };
 }

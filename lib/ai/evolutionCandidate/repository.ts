@@ -26,7 +26,7 @@ import { getLearningSupabase } from "@/lib/ai/learning/db";
 import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
 import { checkCandidateScope, finalizeCandidate } from "./create";
 import { buildReplayComparison, normalizePersistedReplay } from "./replay";
-import { replayApplicabilityFor } from "./semantics";
+import { replayApplicabilityFor, isPopulationPossiblyTruncated } from "./semantics";
 import type { DecisionSource, EvolutionCandidate, EvolutionCandidateWithoutTimestamp } from "./contracts";
 
 /**
@@ -52,6 +52,13 @@ export async function buildEvolutionCandidate(proposal: EvolutionProposalWithout
 
   const rows = await getDecisionMemoryJoinedExperiences();
   if (rows === null) return null;
+
+  // Phase 8.6.6b: the read has no limit/count/order, so a population at the
+  // hosted default row cap may have been silently cut. Fail closed rather
+  // than replay a possibly partial set (see semantics.ts).
+  if (isPopulationPossiblyTruncated(rows.length)) {
+    return finalizeCandidate(proposal, scope, null, "POPULATION_POSSIBLY_TRUNCATED");
+  }
 
   const replay = buildReplayComparison(proposal.source, proposal.symbol, proposal.gapCategory, rows);
   return finalizeCandidate(proposal, scope, replay);
@@ -122,6 +129,8 @@ export async function listEvolutionCandidates(source: DecisionSource, symbol: st
       scope: row.scope,
       // Not a stored column: deterministic from gap_category alone.
       replayApplicability: replayApplicabilityFor(row.gap_category),
+      // Not a stored column (Phase 8.6.6b) — see contracts.ts. The append-only record carries it.
+      replayLimitation: null,
       status: row.status,
       replay: normalizePersistedReplay(row.replay),
       createdAt: row.created_at,

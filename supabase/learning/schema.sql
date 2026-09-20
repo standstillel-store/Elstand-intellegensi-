@@ -958,3 +958,79 @@ create index if not exists evolution_validations_source_symbol_idx on evolution_
 alter table evolution_validations enable row level security;
 -- No policies defined — same service-role-only convention as every other
 -- table in this schema. Zero public/anon access.
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.6.6b — Append-only validation records (evolution_validation_records)
+--
+-- ADDITIVE MIGRATION: one new table, one function, three triggers, two
+-- indexes. No existing table, column or CHECK constraint is altered — the
+-- three legacy evolution_* tables keep their original constraints exactly as
+-- above. Idempotent: safe to run more than once.
+--
+-- WHY A NEW TABLE: evolution_proposals / evolution_candidates /
+-- evolution_validations are overwritten by upsert on their natural key, keep
+-- their first-insert timestamps, carry no content identity, and cannot hold
+-- NOT_APPLICABLE or REJECT_DOMINANCE_GAP. A future approval step needs an
+-- immutable, self-describing thing to point at.
+--
+-- ONE ROW = one frozen (proposal, candidate, validation) snapshot, named by
+-- `record_hash`: the lowercase-hex sha256 of the canonical serialization of
+-- the snapshot (lib/ai/evolutionValidation/record.ts). UNIQUE, so identical
+-- content can exist once. Any change to the content is a different hash and
+-- therefore a different row — history accumulates, it is never rewritten.
+--
+-- SUPPORTS what the legacy tables cannot: all 5 validation results
+-- (including NOT_APPLICABLE) and all 7 gap categories (including
+-- REJECT_DOMINANCE_GAP).
+--
+-- APPEND-ONLY, ENFORCED BY THE DATABASE: UPDATE and DELETE are rejected per
+-- row, TRUNCATE per statement, for every role including the service role
+-- (triggers fire regardless of row-level security). `recorded_at` is the
+-- database's own insert time and is deliberately not part of the hash.
+-- Caveat stated plainly: a database owner can still drop the trigger or the
+-- table. The guarantee is "the application and any ordinary role cannot
+-- rewrite a record", not "nobody with schema ownership can".
+--
+-- 8.6.7 REQUIREMENT: an approval must store `record_hash`, never an id alone.
+-- ---------------------------------------------------------------------------
+create table if not exists evolution_validation_records (
+  id uuid primary key default gen_random_uuid(),
+  record_hash text not null unique check (record_hash ~ '^[0-9a-f]{64}$'),
+  record_schema_version integer not null check (record_schema_version = 1),
+  proposal_id text not null,
+  candidate_id text not null,
+  source text not null check (source in ('AI_SIGNAL', 'ELVOID_PRO_ORACLE')),
+  symbol text not null,
+  gap_category text not null check (gap_category in ('CONTRADICTION_GAP', 'CONTEXT_GAP', 'REASONING_CONSISTENCY_GAP', 'CONFIDENCE_ALIGNMENT_GAP', 'EVIDENCE_GAP', 'PATTERN_GAP', 'REJECT_DOMINANCE_GAP')),
+  result text not null check (result in ('VALID', 'INVALID', 'INSUFFICIENT_EVIDENCE', 'INCONCLUSIVE', 'NOT_APPLICABLE')),
+  validation_mode text not null check (validation_mode = 'OBSERVATIONAL_SPLIT_HISTORY'),
+  counterfactual_available boolean not null check (counterfactual_available = false),
+  snapshot jsonb not null,
+  recorded_at timestamptz not null default now()
+);
+
+create index if not exists evolution_validation_records_candidate_idx on evolution_validation_records (candidate_id, recorded_at desc);
+create index if not exists evolution_validation_records_source_symbol_idx on evolution_validation_records (source, symbol, recorded_at desc);
+
+alter table evolution_validation_records enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
+
+create or replace function evolution_validation_records_reject_mutation() returns trigger
+language plpgsql
+as $fn$
+begin
+  raise exception 'evolution_validation_records is append-only: % is not permitted', tg_op
+    using errcode = 'restrict_violation';
+end;
+$fn$;
+
+drop trigger if exists evolution_validation_records_no_update_delete on evolution_validation_records;
+create trigger evolution_validation_records_no_update_delete
+  before update or delete on evolution_validation_records
+  for each row execute function evolution_validation_records_reject_mutation();
+
+drop trigger if exists evolution_validation_records_no_truncate on evolution_validation_records;
+create trigger evolution_validation_records_no_truncate
+  before truncate on evolution_validation_records
+  for each statement execute function evolution_validation_records_reject_mutation();

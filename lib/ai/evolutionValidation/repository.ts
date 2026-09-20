@@ -9,6 +9,14 @@
 // linked by `candidate_id`, keeping the two phases' write-responsibility
 // architecturally distinct even though both live in the same database.
 //
+// NOTE (Phase 8.6.6b — SUPERSEDED FOR ANY DOWNSTREAM USE): this file writes
+// the legacy `evolution_validations` table, which is overwritten by upsert,
+// keeps its first-insert timestamp, has no content identity, cannot hold
+// NOT_APPLICABLE, and does not store the validation gates. It is kept
+// unchanged in behavior for compatibility and is NOT what Phase 8.6.7 may
+// consume. The immutable record is recordRepository.ts
+// (evolution_validation_records, append-only, identified by `recordHash`).
+//
 // NOTE (Phase 8.6.5b): validationMode / counterfactualAvailable /
 // missingCounterfactualInputs are NOT stored columns. They are constants
 // of the split-history method and are re-attached on read. A
@@ -84,7 +92,8 @@ export async function listEvolutionValidations(source: DecisionSource, symbol: s
       candidateReference: row.candidate_reference,
       replayDatasetReference: row.replay_dataset_reference,
       metricsObserved: normalizePersistedReplay(row.metrics_observed),
-      regressionCheck: row.regression_check,
+      // A legacy row predates `evaluated`/`newlyActiveGapCategories` (Phase 8.6.6b): it reads as NOT evaluated under the current gates — never as "evaluated, none found".
+      regressionCheck: { ...row.regression_check, evaluated: row.regression_check?.evaluated ?? false, newlyActiveGapCategories: row.regression_check?.newlyActiveGapCategories ?? [] },
       invariantChecks: row.invariant_checks,
       result: row.result,
       // Not stored columns: constants of this phase's method (see
@@ -93,6 +102,9 @@ export async function listEvolutionValidations(source: DecisionSource, symbol: s
       validationMode: VALIDATION_MODE,
       counterfactualAvailable: COUNTERFACTUAL_AVAILABLE,
       missingCounterfactualInputs: COUNTERFACTUAL_MISSING_INPUTS,
+      // Legacy rows predate the gates (Phase 8.6.6b): thresholds are not recorded, gates are empty.
+      gateThresholds: null,
+      gates: [],
       evidence: row.evidence,
       limitations: row.limitations,
       validatedAt: row.validated_at,

@@ -52,6 +52,23 @@
 //         would need (but this repository does not persist) are constants
 //         in semantics.ts, surfaced on every validation result
 //         (lib/ai/evolutionValidation).
+//   - PHASE 8.6.6b (audit-driven, additive): replay is now deterministic
+//     and its regression axis carries identity, not just a count.
+//       * rows are ordered by decisionTimestamp, THEN sourceSignalId, THEN
+//         experience id — input order (an unordered database read) can no
+//         longer change which half a tied row lands in;
+//       * each slice carries the RAW target-gap occurrence count and rate
+//         (before the detection threshold) — `targetGapRate` above is the
+//         thresholded figure and is kept unchanged for compatibility;
+//       * each slice lists WHICH other gap categories were active, and the
+//         comparison lists the `newlyActiveGapCategories` — a category
+//         that leaves while a different one arrives is no longer masked by
+//         an equal count;
+//       * a historical population large enough that the database read may
+//         have been silently truncated makes replay fail closed
+//         (`replayLimitation`), never proceed on a possibly partial set.
+//     Every new field that a row persisted before 8.6.6b cannot carry is
+//     `| null` ("not recorded") — never reconstructed.
 // ---------------------------------------------------------------------------
 
 import type { DecisionSource } from "@/lib/ai/decisionOutcome/contracts";
@@ -141,6 +158,12 @@ export interface ReplaySlice {
   readonly otherActiveGapCount: number;
   /** Phase 8.6.5b. Always non-null when produced by `buildReplayComparison()`. `null` ONLY when reading a row persisted before 8.6.5b — accounting that was never recorded is reported as not recorded, never reconstructed. */
   readonly sampleAccounting: SampleAccounting | null;
+  /** Phase 8.6.6b. Evaluated decisions in this slice carrying the target gap's evidence, BEFORE the detection threshold — `targetGapOccurrenceCount` above is 0 whenever this is below MIN_OCCURRENCE_COUNT. `null` only for a row persisted before 8.6.6b. */
+  readonly targetRawOccurrenceCount: number | null;
+  /** `targetRawOccurrenceCount / performance.totalEvaluated` (0 when nothing is evaluated — never NaN); `null` exactly when `targetRawOccurrenceCount` is. */
+  readonly targetRawGapRate: number | null;
+  /** Phase 8.6.6b. WHICH other (non-targeted) gap categories are active in this slice, sorted alphabetically; `otherActiveGapCount` above is its length. `null` only for a row persisted before 8.6.6b. */
+  readonly otherActiveGapCategories: readonly GapCategory[] | null;
 }
 
 export interface ReplayComparison {
@@ -150,7 +173,12 @@ export interface ReplayComparison {
   readonly targetGapRateDelta: number;
   /** candidate.otherActiveGapCount - baseline.otherActiveGapCount. Positive means MORE other gap categories became active in the more recent window — the regression signal evolutionValidation checks. */
   readonly otherActiveGapCountDelta: number;
+  /** Phase 8.6.6b. Categories active in the newer window that were NOT active in the older one, sorted alphabetically. Non-empty is a regression signal even when `otherActiveGapCountDelta` is 0 (one category left while a different one arrived). `null` only for a row persisted before 8.6.6b. */
+  readonly newlyActiveGapCategories: readonly GapCategory[] | null;
 }
+
+/** Why replay was deliberately NOT run for an otherwise applicable candidate. Closed to what is actually checked today. */
+export type ReplayLimitation = "POPULATION_POSSIBLY_TRUNCATED";
 
 export interface EvolutionCandidateWithoutTimestamp {
   readonly candidateId: string;
@@ -167,6 +195,8 @@ export interface EvolutionCandidateWithoutTimestamp {
   readonly scope: CandidateScopeCheck;
   /** Phase 8.6.5b — deterministic from `gapCategory` alone (see semantics.ts). When `applicable` is `false`, replay was never attempted. */
   readonly replayApplicability: ReplayApplicability;
+  /** Phase 8.6.6b. Non-null only when replay was skipped because the historical read may have been truncated (see semantics.ts `isPopulationPossiblyTruncated`); `null` otherwise. Not a stored column — the append-only validation record carries it inside its snapshot. */
+  readonly replayLimitation: ReplayLimitation | null;
   readonly status: CandidateStatus;
   /** `null` whenever replay produced no comparison: `VALIDATION_BLOCKED` (blocked before running), `CANDIDATE_CREATED` (replay not applicable to this gap category), or `REPLAY_FAILED` with no historical population available. */
   readonly replay: ReplayComparison | null;

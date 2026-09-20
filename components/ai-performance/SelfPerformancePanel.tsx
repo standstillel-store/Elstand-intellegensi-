@@ -181,14 +181,15 @@ function describeSlice(label: string, slice: ReplaySlice): string {
 
 /**
  * Deliberately NOT "AI EVOLVED" / "SELF-IMPROVED" / "SUPER AI" anywhere
- * — see this file's header. Phase 8.6.5b: VALID (the enum value is
- * unchanged) reads as observational evidence only — the targeted gap's
- * rate was lower in the newer window than in the older one. It does not
- * say the candidate was validated, and nothing here implies it was
- * applied or that it would work.
+ * — see this file's header. VALID (the enum value is unchanged) reads as
+ * observational evidence only: every validation gate — engineering
+ * thresholds, not statistical significance — was met when an older window
+ * was compared with a newer one (Phase 8.6.6b). It does not say the
+ * candidate was validated, and nothing here implies it was applied, that it
+ * would work, or that it may be promoted.
  */
 const VALIDATION_RESULT_LABEL: Record<ValidationResult, string> = {
-  VALID: "Observational evidence — target gap rate lower in newer window",
+  VALID: "Observational evidence — met every validation gate",
   INVALID: "Invalid",
   INSUFFICIENT_EVIDENCE: "Insufficient evidence",
   INCONCLUSIVE: "Inconclusive",
@@ -352,12 +353,17 @@ export function SelfPerformancePanel() {
                   </p>
                   <p className="mt-0.5 text-ink-muted">
                     Data: <span className={candidate.status === "REPLAY_PASSED" ? "text-up" : "text-ink-faint"}>{candidate.replayApplicability.applicable ? CANDIDATE_STATUS_LABEL[candidate.status] : "Replay not applicable to this gap"}</span> · Regression:{" "}
-                    {candidate.replay === null ? (
+                    {!validation.regressionCheck.evaluated ? (
                       <span className="text-ink-faint">Not evaluated</span>
                     ) : (
                       <span className={validation.regressionCheck.regressionDetected ? "text-down" : "text-up"}>{validation.regressionCheck.regressionDetected ? "Detected" : "None"}</span>
                     )}
                   </p>
+                  {validation.gates.length > 0 && (
+                    <p className="mt-0.5 text-ink-faint">
+                      Validation gates passed: {validation.gates.filter((g) => g.passed).length} of {validation.gates.length} · engineering thresholds, not statistical significance
+                    </p>
+                  )}
                   {candidate.replay !== null && (
                     <p className="mt-0.5 text-ink-faint">
                       Samples — {describeSlice("older window", candidate.replay.baseline)} · {describeSlice("newer window", candidate.replay.candidate)}
