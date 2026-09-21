@@ -281,19 +281,21 @@ function walk(dir: string, out: string[] = []): string[] {
   const callers: string[] = [];
   for (const dir of ["app", "lib", "components", "scripts"]) {
     for (const file of walk(`${root}/${dir}`)) {
-      if (file.endsWith("lib/ai/evolutionValidation/recordRepository.ts") || file.endsWith("scripts/phase8/evolution-validation-record-fixtures.ts")) continue;
+      if (file.endsWith("lib/ai/evolutionValidation/recordRepository.ts") || file.includes("scripts/phase8/")) continue;
       const source = strip(readFileSync(file, "utf8"));
       if (source.includes("appendEvolutionValidationRecord")) callers.push(file.slice(root.length + 1));
     }
   }
-  check("P4. nothing in app/, lib/, components/ or scripts/ references appendEvolutionValidationRecord — no route, tick, cron or module calls it", callers.length === 0, `referenced by: ${callers.join(", ")}`);
+  // Phase 8.6.7: the ONE legitimate reference is the approval adapter's createRequestDeps(), which only the admin-authenticated POST request route uses (asserted by the 8.6.7 fixtures). No route, tick, cron or GET reaches it.
+  check("P4. only lib/ai/evolutionApproval/repository.ts references appendEvolutionValidationRecord — no route, tick, cron or other module calls it directly", JSON.stringify(callers) === JSON.stringify(["lib/ai/evolutionApproval/repository.ts"]), `referenced by: ${callers.join(", ")}`);
 }
 
 {
   // Code only — the route's own header comments legitimately NAME the persist functions to say it never calls them.
   const route = strip(read("app/api/ai-performance/cognitive/route.ts"));
-  const found = ["recordRepository", "appendEvolutionValidationRecord", "evolutionValidation/record", "persistEvolutionCandidate", "persistEvolutionValidation", "persistEvolutionProposals"].filter((t) => route.includes(t));
-  check("P5. the AI Performance GET route imports no record module and no persistence function — it stays compute-only", found.length === 0, `route references: ${found.join(", ")}`);
+  // Phase 8.6.7: the route imports the PURE record builder (to compute a recordHash) and the read-only approval view; it must import no record REPOSITORY and no write path.
+  const found = ["recordRepository", "appendEvolutionValidationRecord", "appendApproval", "createApprovalStore", "createRequestDeps", "persistEvolutionCandidate", "persistEvolutionValidation", "persistEvolutionProposals"].filter((t) => route.includes(t));
+  check("P5. the AI Performance GET route imports no record repository and no persistence/append function — it stays compute-only", found.length === 0, `route references: ${found.join(", ")}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +304,9 @@ function walk(dir: string, out: string[] = []): string[] {
 
 const schema = read("supabase/learning/schema.sql");
 const recordsStart = schema.indexOf("create table if not exists evolution_validation_records");
-const recordsSql = recordsStart === -1 ? "" : schema.slice(recordsStart);
+// Phase 8.6.7 appended its own table AFTER this one; this block is the record table's definition only.
+const approvalsStart = schema.indexOf("create table if not exists evolution_approvals");
+const recordsSql = recordsStart === -1 ? "" : schema.slice(recordsStart, approvalsStart === -1 ? undefined : approvalsStart);
 
 function unionValues(source: string, typeName: string): string[] {
   const match = source.match(new RegExp(`export type ${typeName} =([^;]+);`));
@@ -350,9 +354,10 @@ function sqlInList(sql: string, column: string): string[] {
   const offenders: string[] = [];
   for (const file of walk(`${root}/lib`).concat(walk(`${root}/app`))) {
     const source = strip(readFileSync(file, "utf8"));
-    if (/\b(approveEvolution\w*|EvolutionApproval\w*|promoteEvolution\w*|applyEvolution\w*)\b/.test(source)) offenders.push(file.slice(root.length + 1));
+    if (/\b(promoteEvolution\w*|applyEvolution\w*|deployEvolution\w*|activateEvolution\w*)\b/.test(source)) offenders.push(file.slice(root.length + 1));
   }
-  check("B2. no approval, promotion or apply function exists anywhere in lib/ or app/ — 8.6.7 is not implemented", offenders.length === 0, `found in: ${offenders.join(", ")}`);
+  // Phase 8.6.7 implemented the human approval gate (a RECORDED DECISION only); the boundary that remains is that nothing promotes, applies, deploys or activates.
+  check("B2. no promotion, apply, deploy or activate function exists anywhere in lib/ or app/", offenders.length === 0, `found in: ${offenders.join(", ")}`);
 }
 
 // ---------------------------------------------------------------------------

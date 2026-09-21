@@ -19,12 +19,9 @@ import { fetchConfluenceAttributionReport } from "@/lib/ai/confluenceAttribution
 import type { ConfluenceAttributionReport } from "@/lib/ai/confluenceAttribution/contracts";
 import { buildCognitiveGapReport } from "@/lib/ai/cognitiveGap/repository";
 import type { CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
-import { deriveReasoningGapObservations } from "@/lib/ai/reasoningGap/derive";
-import { evaluateEvolutionNeed } from "@/lib/ai/evolutionNeed/evaluate";
-import { buildSelfEvaluationSummary } from "@/lib/ai/selfEvaluation/build";
-import { draftEvolutionProposals } from "@/lib/ai/evolutionProposal/propose";
-import { buildEvolutionCandidate } from "@/lib/ai/evolutionCandidate/repository";
-import { validateEvolutionCandidate } from "@/lib/ai/evolutionValidation/validate";
+import { deriveSymbolEvolution } from "@/lib/ai/evolutionApproval/derive";
+import { getApprovalView } from "@/lib/ai/evolutionApproval/repository";
+import { buildEvolutionValidationRecord } from "@/lib/ai/evolutionValidation/record";
 
 // ---------------------------------------------------------------------------
 // GET /api/ai-performance/cognitive
@@ -238,30 +235,38 @@ export async function GET() {
   // and lib/ai/evolutionValidation/repository.ts's own headers for why
   // persistEvolutionCandidate()/persistEvolutionValidation() are never
   // called from this GET route.
+  const evolutionDerived = await Promise.all(
+    cognitiveGapEntries.map(async ([symbol, gapReport]) =>
+      deriveSymbolEvolution({
+        symbol,
+        gapReport,
+        performanceReport: selfPerformanceBySymbol.get(symbol) ?? null,
+        hasValidConstraint: (validationsBySymbol.get(symbol) ?? []).some((v) => v.status === "VALID"),
+      })
+    )
+  );
+
+  // Phase 8.6.7 — READ-ONLY approval status per validation. The recordHash is
+  // computed purely from the candidate just derived (no write); the status is
+  // read from evolution_approvals. Nothing here approves, requests, persists
+  // or sends anything, and no approver identity is exposed on this
+  // membership-gated route. A validation that is not VALID is INELIGIBLE
+  // without any database read.
   const evolution = await Promise.all(
-    cognitiveGapEntries.map(async ([symbol, gapReport]) => {
-      const performanceReport = selfPerformanceBySymbol.get(symbol) ?? null;
-      if (gapReport === null || performanceReport === null) {
-        return { symbol, reasoningGaps: [], evolutionNeed: null, selfEvaluation: null, proposals: [], candidates: [] };
-      }
-      const hasValidConstraint = (validationsBySymbol.get(symbol) ?? []).some((v) => v.status === "VALID");
-      const reasoningGaps = deriveReasoningGapObservations(gapReport.gaps);
-      const evolutionNeed = evaluateEvolutionNeed("ELVOID_PRO_ORACLE", symbol, performanceReport.coverage, gapReport.gaps, hasValidConstraint);
-      const selfEvaluation = buildSelfEvaluationSummary("ELVOID_PRO_ORACLE", symbol, performanceReport.performance, performanceReport.coverage, gapReport.familiarityEvidence, gapReport.gaps, reasoningGaps, evolutionNeed);
-      const proposals = draftEvolutionProposals(evolutionNeed);
-
-      const candidateEntries = await Promise.all(
-        proposals.map(async (proposal) => {
-          const candidate = await buildEvolutionCandidate(proposal);
-          if (candidate === null) return null;
-          const validation = validateEvolutionCandidate(candidate);
-          return { candidate, validation };
+    evolutionDerived.map(async (entry) => ({
+      symbol: entry.symbol,
+      reasoningGaps: entry.reasoningGaps,
+      evolutionNeed: entry.evolutionNeed,
+      selfEvaluation: entry.selfEvaluation,
+      proposals: entry.proposals,
+      candidates: await Promise.all(
+        entry.candidates.map(async ({ proposal, candidate, validation }) => {
+          const recordHash = buildEvolutionValidationRecord(proposal, candidate)?.recordHash ?? null;
+          const approval = await getApprovalView({ validationResult: validation.result, recordHash });
+          return { candidate, validation, approval };
         })
-      );
-      const candidates = candidateEntries.filter((entry) => entry !== null);
-
-      return { symbol, reasoningGaps, evolutionNeed, selfEvaluation, proposals, candidates };
-    })
+      ),
+    }))
   );
 
   return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), decisionPopulation, confluenceAttribution, cognitiveGaps, evolution });

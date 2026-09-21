@@ -9,6 +9,9 @@ import type { EvolutionNeed, EvolutionNeedAssessment } from "@/lib/ai/evolutionN
 import type { EvolutionProposalWithoutTimestamp } from "@/lib/ai/evolutionProposal/contracts";
 import type { EvolutionCandidateWithoutTimestamp, CandidateStatus, ValidationMode, ReplaySlice } from "@/lib/ai/evolutionCandidate/contracts";
 import type { EvolutionValidationWithoutTimestamp, ValidationResult } from "@/lib/ai/evolutionValidation/contracts";
+import { APPROVAL_MEANING, APPROVAL_STATUS_LABEL, OBSERVATIONAL_EVIDENCE_ONLY, OBSERVATIONAL_VALIDATION_PASSED, VALID_MEANING } from "@/lib/ai/evolutionApproval/wording";
+import type { ApprovalStatus } from "@/lib/ai/evolutionApproval/wording";
+import type { EvolutionApprovalView } from "@/lib/ai/evolutionApproval/contracts";
 
 // ---------------------------------------------------------------------------
 // Phase 8.6.1 Part 7+8 — Self Performance + Novelty observation panel.
@@ -53,6 +56,11 @@ import type { EvolutionValidationWithoutTimestamp, ValidationResult } from "@/li
 // "SELF-IMPROVED", or "SUPER AI". Nothing on this page can move a
 // candidate past DRAFT/REPLAY_PASSED/VALID; there is no control here that
 // applies, approves, or promotes anything.
+// Phase 8.6.7: the ONE control is "Send approval request to approver", which
+// asks the human approver to decide, in Telegram. It decides nothing itself.
+// Approval status is a RECORDED HUMAN DECISION ONLY (see
+// lib/ai/evolutionApproval/wording.ts) and never means deployed, active, or
+// production.
 // ---------------------------------------------------------------------------
 
 interface CognitiveGapEntry {
@@ -62,6 +70,8 @@ interface CognitiveGapEntry {
 
 interface EvolutionCandidateEntry {
   readonly candidate: EvolutionCandidateWithoutTimestamp;
+  /** Phase 8.6.7 — read-only approval status; absent on a payload from before 8.6.7. Never carries an approver id. */
+  readonly approval?: EvolutionApprovalView;
   readonly validation: EvolutionValidationWithoutTimestamp;
 }
 
@@ -204,6 +214,87 @@ const VALIDATION_RESULT_COLOR: Record<ValidationResult, string> = {
   NOT_APPLICABLE: "text-ink-faint",
 };
 
+// Phase 8.6.7 — human approval status. The wording comes from ONE shared
+// module (lib/ai/evolutionApproval/wording.ts) so this panel and the Telegram
+// message can never say different things. Approval is a RECORDED HUMAN
+// DECISION ONLY: nothing on this page deploys, activates or promotes
+// anything, and the decision itself is made only by the approver, in
+// Telegram — the single button here just asks the approver to decide.
+const APPROVAL_STATUS_COLOR: Record<ApprovalStatus, string> = {
+  AWAITING_HUMAN_APPROVAL: "text-amber",
+  HUMAN_APPROVED: "text-cyan",
+  HUMAN_REJECTED: "text-down",
+  INELIGIBLE: "text-ink-faint",
+};
+
+const REQUEST_OUTCOME_MESSAGE: Record<string, string> = {
+  REQUEST_SENT: "Approval request sent to the approver on Telegram.",
+  ALREADY_DECIDED: "A decision already exists for this record.",
+  INELIGIBLE: "This record is not eligible for approval.",
+  RECORD_STORE_UNAVAILABLE: "The record store is unavailable. Nothing was sent.",
+  TELEGRAM_UNAVAILABLE: "Telegram could not be reached. Nothing was decided.",
+};
+
+function ApprovalBlock({ symbol, candidate, validation, approval }: { symbol: string; candidate: EvolutionCandidateWithoutTimestamp; validation: EvolutionValidationWithoutTimestamp; approval: EvolutionApprovalView | undefined }) {
+  const [sending, setSending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  if (approval === undefined) return null;
+
+  async function requestApproval() {
+    setSending(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/ai-performance/approvals/request", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ symbol, proposalId: candidate.proposalId }),
+      });
+      const json: { outcome?: string; error?: string } = await res.json().catch(() => ({}));
+      if (res.status === 401) setMessage("Only the admin can send approval requests.");
+      else if (json.error === "not_configured") setMessage("Telegram approval is not configured.");
+      else setMessage((json.outcome && REQUEST_OUTCOME_MESSAGE[json.outcome]) || "The request could not be sent.");
+    } catch {
+      setMessage("The request could not be sent.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const canRequest = validation.result === "VALID" && approval.status === "AWAITING_HUMAN_APPROVAL";
+  return (
+    <div className="mt-1 rounded border border-line/60 bg-black/10 p-1.5">
+      <p className="text-ink-muted">
+        Approval: <span className={APPROVAL_STATUS_COLOR[approval.status]}>{APPROVAL_STATUS_LABEL[approval.status]}</span>
+        {approval.decidedAt !== null && <span className="text-ink-faint"> · {approval.decidedAt}</span>}
+      </p>
+      {validation.result === "VALID" && (
+        <p className="mt-0.5 text-ink-faint">
+          {OBSERVATIONAL_VALIDATION_PASSED}. {OBSERVATIONAL_EVIDENCE_ONLY}
+        </p>
+      )}
+      {approval.failure !== null && <p className="mt-0.5 text-ink-faint">Not eligible: {approval.failure}</p>}
+      {approval.recordHash !== null && (
+        <details className="mt-0.5 text-ink-faint">
+          <summary className="cursor-pointer">Record hash {approval.recordHash.slice(0, 16)}…</summary>
+          <p className="break-all font-mono">{approval.recordHash}</p>
+        </details>
+      )}
+      <details className="mt-0.5 text-ink-faint">
+        <summary className="cursor-pointer">What this means</summary>
+        <p>{VALID_MEANING}</p>
+        <p className="mt-0.5">{APPROVAL_MEANING}</p>
+      </details>
+      <p className="mt-0.5 text-ink-faint">Decisions are made only by the approver, in Telegram.</p>
+      {canRequest && (
+        <button type="button" disabled={sending} onClick={requestApproval} className="mt-1 rounded border border-line/60 px-2 py-0.5 text-ink-muted disabled:opacity-50">
+          {sending ? "Sending…" : "Send approval request to approver"}
+        </button>
+      )}
+      {message !== null && <p className="mt-0.5 text-ink-muted">{message}</p>}
+    </div>
+  );
+}
+
 export function SelfPerformancePanel() {
   const [data, setData] = useState<CognitiveRoutePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -333,7 +424,7 @@ export function SelfPerformancePanel() {
           <p className="text-[10px] text-ink-faint">Observed split-history results only — not counterfactual validation, and nothing below shows what a proposed change would do. Human approval has not occurred; nothing below has been applied.</p>
           <ul className="mt-1.5 space-y-3">
             {evolution.map(({ symbol, candidates }) =>
-              candidates.map(({ candidate, validation }) => (
+              candidates.map(({ candidate, validation, approval }) => (
                 <li key={candidate.candidateId} className="rounded border border-line/60 p-2 text-[11px]">
                   <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
                     <span className="font-medium text-ink">
@@ -378,6 +469,7 @@ export function SelfPerformancePanel() {
                       ))}
                     </ul>
                   </details>
+                  <ApprovalBlock symbol={symbol} candidate={candidate} validation={validation} approval={approval} />
                 </li>
               ))
             )}

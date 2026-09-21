@@ -1466,3 +1466,109 @@ hardening 38); only their hand-built helper objects gained the new fields, and
 the hardening fixtures' VALID inputs were raised to 20 eligible samples per
 window and one legacy-schema check was narrowed to the legacy tables' own
 definitions (the new table is appended after them).
+
+---
+
+## Phase 8.6.7 — Human Approval Gate
+
+**A human approval boundary, not a self-modification engine.** ELVOID still
+only OBSERVES → DETECTS GAPS → EVALUATES → PROPOSES → REPLAYS → VALIDATES →
+REGRESSION-CHECKS. This phase adds the one thing that may come after that: a
+recorded decision by ONE human, on Telegram, about ONE immutable validation
+record. **APPROVE is not deploy, not activate, not production.** Nothing in the
+repository reads an approval to change how anything behaves, and there is no
+auto-approve, auto-promote, auto-deploy or auto-activate path.
+
+Phase 7, qualification, pre-entry, decide, execute, the autonomous runtime,
+paper trading, decision thresholds and `evolutionNeed` are untouched (asserted
+by static fixtures). No secret value was read, printed or written at any point.
+
+### Audit before coding (existing 8.6.6b, as requested)
+Available and reused unchanged: `evolutionProposal`, `evolutionCandidate`,
+`evolutionValidation` (+ `gates`, `record`, `recordRepository`), `recordHash`,
+`getEvolutionValidationRecordByHash()`, the five `ValidationResult` values, the
+seven `GapCategory` values. **Not present** (nothing to stop for — 8.6.7 was not
+partially implemented): any approval concept, any Telegram bot / webhook / env
+usage (the only "Telegram" mentions were community-source metadata and a
+contact link), any `evolution_approvals` table. Dependency chain actually in
+use: proposal → candidate → validation → record (`recordHash`) → approval.
+Nothing called `appendEvolutionValidationRecord` until this phase.
+
+### Approval state machine (explicit, fail-closed — one decision per record, ever)
+    (no decision, record eligible) --APPROVE--> HUMAN_APPROVED   (terminal)
+                                   \--REJECT---> HUMAN_REJECTED   (terminal)
+- Same decision again -> `ALREADY_APPROVED` / `ALREADY_REJECTED` (idempotent, no second row).
+- Opposite decision on a terminal state -> `INVALID_TRANSITION` — never a silent
+  overwrite; a REJECTED record is never flipped. Reconsidering needs new
+  evidence = a new record with a new `recordHash`, decided on its own.
+- `INELIGIBLE` is not stored: it is how a record that is not `VALID` (or fails
+  integrity) is reported; it can never be decided.
+- Display states: `AWAITING_HUMAN_APPROVAL`, `HUMAN_APPROVED`, `HUMAN_REJECTED`, `INELIGIBLE`.
+
+### What is eligible
+Only `VALID`. `INVALID`, `INSUFFICIENT_EVIDENCE`, `INCONCLUSIVE`, `NOT_APPLICABLE`
+are never eligible. `VALID` still means only "every observational validation
+gate was met" — not proven improvement, profitability, causal or counterfactual
+proof, or production safety. The UI and the Telegram message use the SAME
+wording constants (`lib/ai/evolutionApproval/wording.ts`).
+
+### recordHash integrity flow (`service.ts`; every step fails closed)
+approver (numeric Telegram id, checked FIRST, before any store access) →
+reference shape (`a:`/`r:` + 32 hex; Telegram limits callback data to 64 bytes
+so a button carries the first 128 bits of the hash as a lookup key only) →
+resolve to EXACTLY ONE stored record (zero or several matches are rejected) →
+fetch by the full hash via `getEvolutionValidationRecordByHash()` from the
+append-only `evolution_validation_records` table (never the legacy
+`evolution_validations`) → the record returned must be the exact one asked for →
+eligibility re-verifies canonical integrity itself (the store's own flag is not
+trusted), `result === VALID` in the column AND the snapshot, identity, mode
+`OBSERVATIONAL_SPLIT_HISTORY`, `counterfactualAvailable=false`, every gate
+passed → existing decision (its own integrity re-verified) → transition →
+one insert. Approvals persist the FULL 64-hex `recordHash`, never a prefix or a
+proposalId.
+
+### Telegram webhook flow (`POST /api/ai-performance/approvals/telegram`)
+1. all three env values present and well-formed, else `503 not_configured` (the whole feature is off — no partial mode);
+2. `X-Telegram-Bot-Api-Secret-Token` matches `TELEGRAM_WEBHOOK_SECRET` (constant time), else `401` — before the body is parsed;
+3. body size-capped, valid JSON, valid update shape, else `400`; a non-button update is `200 IGNORED`;
+4. numeric `from.id === TELEGRAM_APPROVER_ID` AND the button was pressed in that user's own private chat, else `403 UNAUTHORIZED` (never a username);
+5. callback data valid, else `400`;
+6. `decideApproval()`; 7. a fixed, secret-free answer to the button press, and the buttons are removed once a decision is settled.
+HTTP: `200` for every business outcome (Telegram does not retry them); `503` only when the store is unavailable, so Telegram redelivers and the idempotent decision is made later. Nothing is ever logged.
+
+### Security checks
+Numeric-id-only approver; private-chat requirement; constant-time secret check; fail-closed config; the bot token is used only in the outbound Telegram URL and every client method swallows all errors (`{ ok: false }` — an upstream error containing the token can never propagate); no `console.*` anywhere in the approval layer or routes; the secret env values are read only by the two routes that need them; answer texts are fixed strings.
+
+### Other endpoints
+- `GET /api/ai-performance/approvals?recordHash=` — read-only, membership-gated, no approver identity, no persistence.
+- `POST /api/ai-performance/approvals/request` `{ symbol, proposalId }` — admin-authenticated (existing signed session cookie, sameSite=strict, plus a same-origin check). An explicit human-initiated action, never a GET/cron/tick. The client only NAMES a proposal; the proposal, candidate, validation and record are recomputed server-side. It appends the immutable validation record (idempotent) and sends the approver the full `recordHash` with Approve / Reject buttons. It decides nothing.
+- `GET /api/ai-performance/cognitive` now attaches a read-only `approval` view per validation (recordHash computed purely; status read from `evolution_approvals`; INELIGIBLE without a DB read when not VALID). Its per-symbol derivation moved verbatim into `lib/ai/evolutionApproval/derive.ts` so the route and the request action can never disagree (same calls, same order, same output shape).
+
+### Migration — `supabase/learning/schema.sql` (appended; run AFTER the 8.6.6b migration; idempotent)
+Adds `evolution_approvals`: `record_hash` UNIQUE and referencing `evolution_validation_records` (the idempotency key — a record can be decided exactly once); `validation_result` pinned to `VALID`, mode pinned to `OBSERVATIONAL_SPLIT_HISTORY`, `counterfactual_available` pinned to `false`; `approver_telegram_user_id bigint > 0`; `channel = TELEGRAM`; decision/status consistency (`HUMAN_APPROVED` / `HUMAN_REJECTED` only — no deployed/active status exists); `approval_hash` UNIQUE with a 64-hex CHECK; `REJECT_DOMINANCE_GAP` excluded from `gap_category`. A BEFORE INSERT trigger requires the referenced record to exist, be `VALID` and match proposal/candidate/gap; UPDATE and DELETE are rejected per row and TRUNCATE per statement for every role. **No existing table or constraint was changed.** A schema owner can still drop the trigger.
+**This migration was NOT executed in the development sandbox** (no Postgres); it is checked statically and mutation-tested. After running it, verify (each rejected statement must raise):
+```sql
+begin;
+-- needs one VALID row in evolution_validation_records: use a real one, or insert a fixture row first inside this transaction
+insert into evolution_approvals (approval_version, record_hash, proposal_id, candidate_id, gap_category, validation_result, validation_mode, counterfactual_available, decision, resulting_status, approver_telegram_user_id, channel, approval_hash)
+values (1, repeat('b', 64), 'p', 'c', 'CONTRADICTION_GAP', 'VALID', 'OBSERVATIONAL_SPLIT_HISTORY', false, 'APPROVE', 'HUMAN_APPROVED', 1, 'TELEGRAM', repeat('c', 64));  -- must FAIL: no such record
+rollback;
+```
+Then approve one real record through Telegram and confirm `update evolution_approvals set decision = 'REJECT'`, `delete from evolution_approvals` and a second insert for the same `record_hash` each fail.
+
+### Setup (no secret is ever pasted into chat, code or logs)
+Set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_APPROVER_ID` (numeric user id) and `TELEGRAM_WEBHOOK_SECRET` (1-256 chars of `A-Za-z0-9_-`) in the deployment environment (`.env.example` lists the NAMES only). Register the webhook once from your own shell:
+`curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" --data-urlencode "url=https://<your-domain>/api/ai-performance/approvals/telegram" --data-urlencode "secret_token=${TELEGRAM_WEBHOOK_SECRET}" --data-urlencode 'allowed_updates=["callback_query"]'`
+The approver must have started a chat with the bot first (Telegram bots cannot message a user who has not).
+
+### Tests
+`evolution-approval-fixtures.ts` (73): all 20 required cases plus race, integrity-of-stored-approval, service-level authorization, request flow, wording, route wiring, secrets, isolation, migration inspection. `evolution-approval-mutation-fixtures.ts` (35 mutations + baseline + restore): bypass approver id (3 ways), bypass recordHash/integrity (4), approve non-VALID (2), bypass the webhook secret / fail open (4), overwrite an approval (5), auto-promotion / production coupling (4), secret leaks (3), GET-route persistence / admin gate (4), weakened migration (5) — every mutant must make the fixtures FAIL. Writing them found two real issues, both fixed: a stored approval's id/timestamp/metadata leaked into the hash input (making every stored approval fail verification), and a gap in the static import scan (a bare `import "x"` was not seen).
+Four assertions in `evolution-validation-record-fixtures.ts` were re-scoped because 8.6.7 legitimately changed what they described (the caller allow-list for `appendEvolutionValidationRecord`, what the GET route may import, the record table's SQL slice, and "8.6.7 is not implemented" -> "nothing promotes/applies/deploys/activates"); the count stays 38.
+
+### Known limitations
+- Not yet exercised against live Supabase or live Telegram: the store adapter, the routes and the outbound client are covered offline (in-memory store, fake fetch) and by static inspection only; the SQL is not executed.
+- The approval `reason` column exists but a button press carries none, so it is `null`.
+- An approval cannot be revoked (append-only by design); a future phase must handle revocation as a new, explicit record.
+- Approval requests do not expire; a stale button can be pressed later. The decision binds to the immutable record, so it applies to exactly that evidence.
+- The request endpoint has no rate limit (admin-only).
+- Approvals are consumed by nothing. A future promotion phase must be separately specified and approved, and must re-verify `recordHash` and the approval's own integrity.

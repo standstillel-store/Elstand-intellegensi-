@@ -1034,3 +1034,111 @@ drop trigger if exists evolution_validation_records_no_truncate on evolution_val
 create trigger evolution_validation_records_no_truncate
   before truncate on evolution_validation_records
   for each statement execute function evolution_validation_records_reject_mutation();
+
+-- ---------------------------------------------------------------------------
+-- Phase 8.6.7 — Human approval decisions (evolution_approvals)
+--
+-- ADDITIVE MIGRATION: one new table, two functions, four triggers. No existing
+-- table, column or CHECK constraint is altered (evolution_validation_records
+-- and the legacy evolution_* tables are untouched). Idempotent: safe to run
+-- more than once. Requires the Phase 8.6.6b migration above to have been run
+-- (it references evolution_validation_records).
+--
+-- ONE ROW = ONE human decision about ONE immutable validation record. The
+-- record is named by `record_hash` — UNIQUE here, so a record can be decided
+-- exactly once, ever. That is the idempotency key: a resent Telegram callback
+-- cannot create a second approval, and a REJECTED record can never be flipped
+-- to APPROVED (or the reverse) — reconsidering needs new evidence, i.e. a new
+-- record with a new hash.
+--
+-- APPROVE IS NOT DEPLOY. The only statuses that exist are HUMAN_APPROVED and
+-- HUMAN_REJECTED. Nothing reads this table to change how anything behaves.
+--
+-- ENFORCED BY THE DATABASE, not only by the application:
+--   * only a VALID observational validation can be decided (validation_result,
+--     validation_mode and counterfactual_available are pinned by CHECK);
+--   * REJECT_DOMINANCE_GAP is not in the gap_category list — it can never be
+--     approved through replay;
+--   * a BEFORE INSERT trigger requires the referenced record to exist, to be
+--     VALID, and to carry the same proposal_id / candidate_id / gap_category;
+--   * UPDATE and DELETE are rejected per row, TRUNCATE per statement, for
+--     every role including the service role (triggers fire regardless of
+--     row-level security).
+-- Caveat stated plainly: a schema owner can still drop the trigger or table.
+--
+-- `approver_telegram_user_id` is the NUMERIC Telegram user id (never a
+-- username). `approval_hash` is the sha256 content identity of the decision
+-- (lib/ai/evolutionApproval/approvalRecord.ts). `decided_at` is the database's
+-- own insert time and is not part of that hash.
+-- ---------------------------------------------------------------------------
+create table if not exists evolution_approvals (
+  approval_id uuid primary key default gen_random_uuid(),
+  approval_version integer not null check (approval_version = 1),
+  record_hash text not null unique references evolution_validation_records (record_hash),
+  proposal_id text not null,
+  candidate_id text not null,
+  gap_category text not null check (gap_category in ('CONTRADICTION_GAP', 'CONTEXT_GAP', 'REASONING_CONSISTENCY_GAP', 'CONFIDENCE_ALIGNMENT_GAP', 'EVIDENCE_GAP', 'PATTERN_GAP')),
+  validation_result text not null check (validation_result = 'VALID'),
+  validation_mode text not null check (validation_mode = 'OBSERVATIONAL_SPLIT_HISTORY'),
+  counterfactual_available boolean not null check (counterfactual_available = false),
+  decision text not null check (decision in ('APPROVE', 'REJECT')),
+  resulting_status text not null check (resulting_status in ('HUMAN_APPROVED', 'HUMAN_REJECTED')),
+  approver_telegram_user_id bigint not null check (approver_telegram_user_id > 0),
+  channel text not null check (channel = 'TELEGRAM'),
+  reason text check (reason is null or char_length(reason) between 1 and 500),
+  approval_hash text not null unique check (approval_hash ~ '^[0-9a-f]{64}$'),
+  telegram_update_id bigint,
+  telegram_callback_query_id text,
+  decided_at timestamptz not null default now(),
+  check ((decision = 'APPROVE' and resulting_status = 'HUMAN_APPROVED') or (decision = 'REJECT' and resulting_status = 'HUMAN_REJECTED'))
+);
+
+create index if not exists evolution_approvals_proposal_idx on evolution_approvals (proposal_id, decided_at desc);
+
+alter table evolution_approvals enable row level security;
+-- No policies defined — same service-role-only convention as every other
+-- table in this schema. Zero public/anon access.
+
+create or replace function evolution_approvals_reject_mutation() returns trigger
+language plpgsql
+as $fn$
+begin
+  raise exception 'evolution_approvals is append-only: % is not permitted', tg_op
+    using errcode = 'restrict_violation';
+end;
+$fn$;
+
+create or replace function evolution_approvals_require_valid_record() returns trigger
+language plpgsql
+as $fn$
+begin
+  if not exists (
+    select 1
+    from evolution_validation_records r
+    where r.record_hash = new.record_hash
+      and r.result = 'VALID'
+      and r.proposal_id = new.proposal_id
+      and r.candidate_id = new.candidate_id
+      and r.gap_category = new.gap_category
+  ) then
+    raise exception 'evolution_approvals: the record is missing, is not VALID, or does not match this proposal/candidate'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$fn$;
+
+drop trigger if exists evolution_approvals_guard_insert on evolution_approvals;
+create trigger evolution_approvals_guard_insert
+  before insert on evolution_approvals
+  for each row execute function evolution_approvals_require_valid_record();
+
+drop trigger if exists evolution_approvals_no_update_delete on evolution_approvals;
+create trigger evolution_approvals_no_update_delete
+  before update or delete on evolution_approvals
+  for each row execute function evolution_approvals_reject_mutation();
+
+drop trigger if exists evolution_approvals_no_truncate on evolution_approvals;
+create trigger evolution_approvals_no_truncate
+  before truncate on evolution_approvals
+  for each statement execute function evolution_approvals_reject_mutation();
