@@ -1572,3 +1572,27 @@ Four assertions in `evolution-validation-record-fixtures.ts` were re-scoped beca
 - Approval requests do not expire; a stale button can be pressed later. The decision binds to the immutable record, so it applies to exactly that evidence.
 - The request endpoint has no rate limit (admin-only).
 - Approvals are consumed by nothing. A future promotion phase must be separately specified and approved, and must re-verify `recordHash` and the approval's own integrity.
+
+### 8.6.7 follow-up — operator diagnostics (from the first production log)
+The first production log export showed nine `POST /api/ai-performance/approvals/telegram`
+responses of `503` in 4-25 ms, in a doubling-interval pattern (Telegram's retry
+backoff), with NOTHING in the log to say why: the handler had been made
+deliberately silent. A 503 that fast, with no callback press possible (the
+approval-request route was never called in that window), can only be the
+first step — `not_configured` (one or more of the three `TELEGRAM_*` values is
+missing or malformed in the Production runtime). The code could not say which,
+which was a design flaw, so it now can — without ever writing a value:
+- `diagnostics.ts` (new): a CLOSED vocabulary — fixed event names, the env
+  variable NAMES, the two words `missing` / `malformed`, and outcome codes.
+  Example line: `[approvals] webhook_not_configured: TELEGRAM_APPROVER_ID=malformed`.
+  The formatter allow-lists every part, so even a wrong event object cannot put a
+  value in a line. It is the only approval file that calls `console`.
+- `security.ts`: `diagnoseTelegramConfig(env)` — which variable is wrong and how;
+  `readTelegramConfig(env) === null` exactly when it is non-empty.
+- `webhook.ts` reports through an injected `diagnose` hook (a throwing sink is
+  ignored); the handler still never calls `console`. Both routes wire it to
+  `emitApprovalDiagnostic`. Events: not_configured, secret_mismatch, malformed,
+  unauthorized_user, and the outcome code (including `UNAVAILABLE`).
+Fixtures: 73 -> 80 (D1-D7, incl. quoted / newline-suffixed values and a secret
+with characters Telegram rejects); mutation harness: 35 -> 41 mutations, all
+detected. No behavior change to decisions, statuses, HTTP codes or persistence.

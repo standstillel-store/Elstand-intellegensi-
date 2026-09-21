@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin/auth";
-import { readTelegramConfig } from "@/lib/ai/evolutionApproval/security";
+import { diagnoseTelegramConfig, readTelegramConfig } from "@/lib/ai/evolutionApproval/security";
+import { emitApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
 import { requestApproval } from "@/lib/ai/evolutionApproval/request";
 import { createRequestDeps } from "@/lib/ai/evolutionApproval/repository";
 import { createTelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
@@ -45,12 +46,16 @@ export async function POST(request: Request) {
     if (!sameOrigin) return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
   }
 
-  const config = readTelegramConfig({
+  const telegramEnv = {
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_APPROVER_ID: process.env.TELEGRAM_APPROVER_ID,
     TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
-  });
-  if (config === null) return NextResponse.json({ ok: false, error: "not_configured" }, { status: 503 });
+  };
+  const config = readTelegramConfig(telegramEnv);
+  if (config === null) {
+    emitApprovalDiagnostic({ kind: "REQUEST_NOT_CONFIGURED", problems: diagnoseTelegramConfig(telegramEnv) });
+    return NextResponse.json({ ok: false, error: "not_configured" }, { status: 503 });
+  }
 
   let body: { symbol?: unknown; proposalId?: unknown };
   try {
@@ -70,5 +75,6 @@ export async function POST(request: Request) {
   if (record === null) return NextResponse.json({ ok: false, error: "record_unavailable" }, { status: 422 });
 
   const outcome = await requestApproval(createRequestDeps(createTelegramClient(config), config.approverId), record);
+  emitApprovalDiagnostic({ kind: "REQUEST_OUTCOME", code: outcome.code });
   return NextResponse.json({ ok: outcome.code === "REQUEST_SENT" || outcome.code === "ALREADY_DECIDED", outcome: outcome.code, status: outcome.status, recordHash: outcome.recordHash, failure: outcome.failure }, { status: STATUS_FOR_CODE[outcome.code] });
 }

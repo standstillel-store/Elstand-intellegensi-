@@ -26,17 +26,22 @@
 // Telegram redelivers and the (idempotent) decision is made later.
 //
 // NOTHING HERE MUTATES PRODUCTION. It records a human decision and answers
-// Telegram. It never logs — not the body, not the headers, not an error.
+// Telegram. It never calls `console` — not for the body, not for the headers,
+// not for an error. Operators get ONE narrow signal instead: an injected
+// `diagnose` hook that receives only a closed vocabulary of event names, env
+// variable NAMES and outcome codes (diagnostics.ts) — so a 503 is explainable
+// from the server log without a single value ever being written.
 // ---------------------------------------------------------------------------
 
 import { decodeCallbackData, isPrivateChatWithUser, parseTelegramUpdate } from "./telegramPayload";
-import { isAuthorizedApprover, readTelegramConfig, verifyWebhookSecret } from "./security";
+import { diagnoseTelegramConfig, isAuthorizedApprover, readTelegramConfig, verifyWebhookSecret } from "./security";
 import { decideApproval } from "./service";
 import { OUTCOME_ANSWER_TEXT } from "./wording";
 import type { ApprovalStore } from "./service";
 import type { TelegramClient } from "./telegramClient";
 import type { TelegramConfig, TelegramEnvInput } from "./security";
 import type { ApprovalOutcomeCode, ApprovalStatus } from "./contracts";
+import type { ApprovalDiagnosticEvent } from "./diagnostics";
 
 export const MAX_WEBHOOK_BODY_BYTES = 16_384;
 
@@ -49,6 +54,20 @@ export interface WebhookInput {
 export interface WebhookDeps {
   readonly store: ApprovalStore;
   readonly createTelegram: (config: TelegramConfig) => TelegramClient;
+  /**
+   * Optional operator-diagnostics sink (see diagnostics.ts). Receives ONLY the
+   * closed event vocabulary — never a body, header, id, token or secret. The
+   * handler never calls `console` itself; a throwing sink is ignored.
+   */
+  readonly diagnose?: (event: ApprovalDiagnosticEvent) => void;
+}
+
+function note(deps: WebhookDeps, event: ApprovalDiagnosticEvent): void {
+  try {
+    deps.diagnose?.(event);
+  } catch {
+    // diagnostics must never change a response
+  }
 }
 
 export interface WebhookResponse {
@@ -65,29 +84,41 @@ export interface WebhookResponse {
 export async function handleTelegramWebhook(input: WebhookInput, deps: WebhookDeps): Promise<WebhookResponse> {
   // 1. Config — fail closed, no detail about which value is wrong.
   const config = readTelegramConfig(input.env);
-  if (config === null) return { status: 503, body: { ok: false, error: "not_configured" } };
+  if (config === null) {
+    note(deps, { kind: "WEBHOOK_NOT_CONFIGURED", problems: diagnoseTelegramConfig(input.env) });
+    return { status: 503, body: { ok: false, error: "not_configured" } };
+  }
 
   // 2. Webhook secret — before the body is looked at.
-  if (!verifyWebhookSecret(input.secretHeader, config.webhookSecret)) return { status: 401, body: { ok: false, error: "unauthorized" } };
+  if (!verifyWebhookSecret(input.secretHeader, config.webhookSecret)) {
+    note(deps, { kind: "WEBHOOK_SECRET_MISMATCH" });
+    return { status: 401, body: { ok: false, error: "unauthorized" } };
+  }
 
   // 3. Body.
   if (typeof input.bodyText !== "string" || input.bodyText.length === 0 || Buffer.byteLength(input.bodyText, "utf8") > MAX_WEBHOOK_BODY_BYTES) {
+    note(deps, { kind: "WEBHOOK_MALFORMED" });
     return { status: 400, body: { ok: false, error: "malformed" } };
   }
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(input.bodyText);
   } catch {
+    note(deps, { kind: "WEBHOOK_MALFORMED" });
     return { status: 400, body: { ok: false, error: "malformed" } };
   }
   const parsed = parseTelegramUpdate(parsedJson);
-  if (parsed.kind === "MALFORMED") return { status: 400, body: { ok: false, error: "malformed" } };
+  if (parsed.kind === "MALFORMED") {
+    note(deps, { kind: "WEBHOOK_MALFORMED" });
+    return { status: 400, body: { ok: false, error: "malformed" } };
+  }
   if (parsed.kind === "IGNORED") return { status: 200, body: { ok: true, outcome: "IGNORED" } };
   const update = parsed.update;
   const telegram = deps.createTelegram(config);
 
   // 4. Approver — numeric id, and the press must be in their own private chat.
   if (!isAuthorizedApprover(update.fromId, config.approverId) || !isPrivateChatWithUser(update)) {
+    note(deps, { kind: "WEBHOOK_UNAUTHORIZED_USER" });
     await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT.UNAUTHORIZED);
     return { status: 403, body: { ok: false, outcome: "UNAUTHORIZED", error: "unauthorized_user" } };
   }
@@ -95,6 +126,7 @@ export async function handleTelegramWebhook(input: WebhookInput, deps: WebhookDe
   // 5. Callback data.
   const decoded = decodeCallbackData(update.data);
   if (decoded === null) {
+    note(deps, { kind: "WEBHOOK_MALFORMED" });
     await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT.INVALID_APPROVAL_REQUEST);
     return { status: 400, body: { ok: false, error: "malformed" } };
   }
@@ -108,6 +140,8 @@ export async function handleTelegramWebhook(input: WebhookInput, deps: WebhookDe
     reason: null,
     meta: { updateId: update.updateId, callbackQueryId: update.callbackQueryId },
   });
+
+  note(deps, { kind: "WEBHOOK_OUTCOME", code: result.code });
 
   // 7. Reply — fixed text only; remove the buttons once a decision is settled.
   await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT[result.code]);

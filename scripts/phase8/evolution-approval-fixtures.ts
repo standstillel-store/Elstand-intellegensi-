@@ -28,7 +28,9 @@ import { requestApproval } from "@/lib/ai/evolutionApproval/request";
 import { handleTelegramWebhook, MAX_WEBHOOK_BODY_BYTES } from "@/lib/ai/evolutionApproval/webhook";
 import { createTelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
 import { decodeCallbackData, encodeCallbackData, formatApprovalRequestMessage, parseTelegramUpdate } from "@/lib/ai/evolutionApproval/telegramPayload";
-import { isAuthorizedApprover, readTelegramConfig, redactSecrets, verifyWebhookSecret } from "@/lib/ai/evolutionApproval/security";
+import { diagnoseTelegramConfig, isAuthorizedApprover, readTelegramConfig, redactSecrets, verifyWebhookSecret } from "@/lib/ai/evolutionApproval/security";
+import { formatApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
+import type { ApprovalDiagnosticEvent } from "@/lib/ai/evolutionApproval/diagnostics";
 import { APPROVAL_MEANING, APPROVAL_STATUS_LABEL, OBSERVATIONAL_EVIDENCE_ONLY, OBSERVATIONAL_VALIDATION_PASSED, OUTCOME_ANSWER_TEXT, VALID_MEANING } from "@/lib/ai/evolutionApproval/wording";
 import type { ApprovalStore, AppendApprovalResult, GetApprovalResult, GetRecordResult, ResolveResult } from "@/lib/ai/evolutionApproval/service";
 import type { TelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
@@ -537,6 +539,63 @@ async function main() {
   }
 
   // =========================================================================
+  // D  Operator diagnostics — a 503 must be explainable from the log, without a value
+  // =========================================================================
+  {
+    const variants: [string, Record<string, string | undefined>, string][] = [
+      ["missing bot token", { ...ENV, TELEGRAM_BOT_TOKEN: undefined }, "TELEGRAM_BOT_TOKEN=missing"],
+      ["empty bot token", { ...ENV, TELEGRAM_BOT_TOKEN: "" }, "TELEGRAM_BOT_TOKEN=missing"],
+      ["bot token with a trailing newline", { ...ENV, TELEGRAM_BOT_TOKEN: FAKE_TOKEN + "\n" }, "TELEGRAM_BOT_TOKEN=malformed"],
+      ["missing approver id", { ...ENV, TELEGRAM_APPROVER_ID: undefined }, "TELEGRAM_APPROVER_ID=missing"],
+      ["approver id with quotes", { ...ENV, TELEGRAM_APPROVER_ID: '"424242"' }, "TELEGRAM_APPROVER_ID=malformed"],
+      ["approver id with a trailing newline", { ...ENV, TELEGRAM_APPROVER_ID: "424242\n" }, "TELEGRAM_APPROVER_ID=malformed"],
+      ["missing webhook secret", { ...ENV, TELEGRAM_WEBHOOK_SECRET: undefined }, "TELEGRAM_WEBHOOK_SECRET=missing"],
+      ["webhook secret with illegal characters", { ...ENV, TELEGRAM_WEBHOOK_SECRET: "abc+def/ghi=" }, "TELEGRAM_WEBHOOK_SECRET=malformed"],
+      ["nothing set", {}, "TELEGRAM_BOT_TOKEN=missing, TELEGRAM_APPROVER_ID=missing, TELEGRAM_WEBHOOK_SECRET=missing"],
+    ];
+    const lines: string[] = [];
+    const wrong: string[] = [];
+    for (const [label, env, expected] of variants) {
+      const events: ApprovalDiagnosticEvent[] = [];
+      const h = harness();
+      const out = await handleTelegramWebhook({ secretHeader: FAKE_SECRET, bodyText: callbackBody({ data: approveData(validRecord) }), env }, { store: h.store, createTelegram: () => h.telegram, diagnose: (e) => events.push(e) });
+      const line = events[0] ? formatApprovalDiagnostic(events[0]) : "";
+      lines.push(line);
+      if (out.status !== 503 || events.length !== 1 || events[0].kind !== "WEBHOOK_NOT_CONFIGURED" || line !== `[approvals] webhook_not_configured: ${expected}` || (readTelegramConfig(env) === null) !== (diagnoseTelegramConfig(env).length > 0)) wrong.push(`${label}: ${line}`);
+    }
+    check("D1. a 503 not_configured names EXACTLY which variable is missing or malformed (names + 'missing'/'malformed' only), and the config is unusable exactly when the diagnosis is non-empty", wrong.length === 0, wrong.join(" | "));
+    check("D2. none of those log lines contains a token, a secret, a value or a length — only allow-listed names and the two fixed words", lines.every((l) => /^\[approvals\] webhook_not_configured: (TELEGRAM_(BOT_TOKEN|APPROVER_ID|WEBHOOK_SECRET)=(missing|malformed)(, )?)+$/.test(l)) && !lines.join("\n").includes("SENTINEL") && !lines.join("\n").includes("424242"), lines.join(" | "));
+  }
+  {
+    const events: ApprovalDiagnosticEvent[] = [];
+    const h = harness();
+    const call = (input: Parameters<Harness["call"]>[0]) => handleTelegramWebhook({ secretHeader: input.secret === undefined ? FAKE_SECRET : input.secret, bodyText: input.body, env: input.env ?? ENV }, { store: h.store, createTelegram: () => h.telegram, diagnose: (e) => events.push(e) });
+    await call({ body: callbackBody({ data: approveData(validRecord) }), secret: "wrong" });
+    await call({ body: "garbage" });
+    await call({ body: callbackBody({ fromId: OTHER_ID, data: approveData(validRecord) }) });
+    await call({ body: callbackBody({ data: approveData(validRecord) }) });
+    h.store.unavailable = true;
+    await call({ body: callbackBody({ data: rejectData(validRecord), updateId: 2, cbId: "cb-2" }) });
+    const kinds = events.map((e) => (e.kind === "WEBHOOK_OUTCOME" ? `${e.kind}:${e.code}` : e.kind));
+    check("D3. each failure mode leaves ONE distinct, explainable log event: secret mismatch, malformed body, unauthorized user, a recorded outcome, and a store outage (UNAVAILABLE)", JSON.stringify(kinds) === JSON.stringify(["WEBHOOK_SECRET_MISMATCH", "WEBHOOK_MALFORMED", "WEBHOOK_UNAUTHORIZED_USER", "WEBHOOK_OUTCOME:APPROVED", "WEBHOOK_OUTCOME:UNAVAILABLE"]), JSON.stringify(kinds));
+    const text = events.map(formatApprovalDiagnostic).join("\n");
+    check("D4. the diagnostic lines for those events carry no user id, no record hash, no header value, no body and no secret", !text.includes(String(OTHER_ID)) && !text.includes(String(APPROVER_ID)) && !text.includes(validRecord.recordHash.slice(0, 16)) && !text.includes("garbage") && !text.includes("wrong") && !text.includes("SENTINEL") && text.split("\n").every((l) => /^\[approvals\] [a-z_]+(: [A-Z_]+)?$/.test(l)), text);
+  }
+  {
+    const h = harness();
+    const out = await handleTelegramWebhook({ secretHeader: FAKE_SECRET, bodyText: callbackBody({ data: approveData(validRecord) }), env: ENV }, { store: h.store, createTelegram: () => h.telegram, diagnose: () => { throw new Error("sink exploded"); } });
+    check("D5. a throwing diagnostics sink never changes the response or blocks the decision", out.status === 200 && (out.body as { outcome?: string }).outcome === "APPROVED" && h.store.approvals.size === 1, JSON.stringify(out));
+    const tricky = formatApprovalDiagnostic({ kind: "WEBHOOK_NOT_CONFIGURED", problems: [{ name: FAKE_TOKEN as never, problem: FAKE_SECRET as never }] }) + formatApprovalDiagnostic({ kind: "WEBHOOK_OUTCOME", code: FAKE_SECRET as never });
+    check("D6. even a WRONG event object (a secret smuggled in as a name, a word or an outcome) cannot put a value in the log line — the formatter allow-lists everything", !tricky.includes("SENTINEL") && tricky.includes("unspecified") && tricky.includes("unknown"), tricky);
+  }
+  {
+    const diagnostics = strip(read("lib/ai/evolutionApproval/diagnostics.ts"));
+    const telegramRoute = strip(read("app/api/ai-performance/approvals/telegram/route.ts"));
+    const requestRoute = strip(read("app/api/ai-performance/approvals/request/route.ts"));
+    check("D7. diagnostics.ts never reads the environment or holds a secret (no process.env, botToken, webhookSecret or header access), and both routes feed it the closed events only", !/process\.env|botToken|webhookSecret|headers\.get|bodyText/.test(diagnostics) && /diagnose: emitApprovalDiagnostic/.test(telegramRoute) && /emitApprovalDiagnostic\(\{ kind: "REQUEST_NOT_CONFIGURED", problems: diagnoseTelegramConfig\(telegramEnv\) \}\)/.test(requestRoute) && /emitApprovalDiagnostic\(\{ kind: "REQUEST_OUTCOME", code: outcome\.code \}\)/.test(requestRoute), "diagnostics wiring or purity wrong");
+  }
+
+  // =========================================================================
   // Store unavailable -> nothing recorded, redelivery requested
   // =========================================================================
   {
@@ -584,7 +643,7 @@ async function main() {
     const consoleUsers = APPROVAL_SOURCES.filter((s) => /\bconsole\s*\./.test(s.code)).map((s) => s.file);
     const routeSources = ["app/api/ai-performance/approvals/route.ts", "app/api/ai-performance/approvals/telegram/route.ts", "app/api/ai-performance/approvals/request/route.ts"].map((f) => ({ file: f, code: strip(read(f)) }));
     const routeConsole = routeSources.filter((s) => /\bconsole\s*\./.test(s.code)).map((s) => s.file);
-    check("15e. no console.* call exists in any approval module or approval route", consoleUsers.length === 0 && routeConsole.length === 0, JSON.stringify([...consoleUsers, ...routeConsole]));
+    check("15e. console.* is used in exactly ONE approval file — diagnostics.ts, the fixed-vocabulary operator log — and in no other approval module and no approval route", JSON.stringify(consoleUsers) === JSON.stringify(["lib/ai/evolutionApproval/diagnostics.ts"]) && routeConsole.length === 0, JSON.stringify([...consoleUsers, ...routeConsole]));
 
     const literalSecretPattern = /\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/;
     const hardcoded = [...APPROVAL_SOURCES, ...routeSources].filter((s) => literalSecretPattern.test(s.code)).map((s) => s.file);

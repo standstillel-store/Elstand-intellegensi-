@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handleTelegramWebhook, MAX_WEBHOOK_BODY_BYTES } from "@/lib/ai/evolutionApproval/webhook";
 import { createApprovalStore } from "@/lib/ai/evolutionApproval/repository";
 import { createTelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
+import { emitApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,7 +18,9 @@ export const runtime = "nodejs";
 //
 // It records a HUMAN DECISION and answers Telegram. It deploys nothing,
 // activates nothing, promotes nothing, and never logs the request, headers or
-// any secret. Only POST is exported (any other method is answered 405 by the
+// any secret. Its only log output is one fixed line per event from
+// diagnostics.ts (event name, env variable NAMES, outcome codes) — enough to
+// explain a 503 without writing a value. Only POST is exported (any other method is answered 405 by the
 // framework); there is no GET that could cause persistence.
 //
 // Register the webhook once, from your own shell, so no secret is ever pasted
@@ -45,7 +48,7 @@ export async function POST(request: Request) {
         TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
       },
     },
-    { store: createApprovalStore(), createTelegram: (config) => createTelegramClient(config) }
+    { store: createApprovalStore(), createTelegram: (config) => createTelegramClient(config), diagnose: emitApprovalDiagnostic }
   );
   return NextResponse.json(result.body, { status: result.status });
 }

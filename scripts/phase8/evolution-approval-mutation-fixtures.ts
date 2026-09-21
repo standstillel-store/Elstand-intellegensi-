@@ -54,8 +54,8 @@ const MUTATIONS: readonly Mutation[] = [
 
   // --- bypass webhook secret / fail open ------------------------------------
   { id: "secret-compare", what: "webhook secret comparison always succeeds", file: `${A}/security.ts`, find: "return timingSafeEqual(digest(headerValue), digest(secret));", replace: "return true;" },
-  { id: "secret-step", what: "skip the webhook secret check in the handler", file: `${A}/webhook.ts`, find: 'if (!verifyWebhookSecret(input.secretHeader, config.webhookSecret)) return { status: 401, body: { ok: false, error: "unauthorized" } };', replace: 'if (false) return { status: 401, body: { ok: false, error: "unauthorized" } };' },
-  { id: "config-fail-open", what: "continue when Telegram config is missing (fail open)", file: `${A}/webhook.ts`, find: 'if (config === null) return { status: 503, body: { ok: false, error: "not_configured" } };', replace: 'if (false) return { status: 503, body: { ok: false, error: "not_configured" } };' },
+  { id: "secret-step", what: "skip the webhook secret check in the handler", file: `${A}/webhook.ts`, find: "if (!verifyWebhookSecret(input.secretHeader, config.webhookSecret)) {", replace: "if (false) {" },
+  { id: "config-fail-open", what: "continue when Telegram config is missing (fail open)", file: `${A}/webhook.ts`, find: "if (config === null) {", replace: "if (false) {" },
   { id: "config-secret-validation", what: "accept a malformed webhook secret in config", file: `${A}/security.ts`, find: 'if (typeof webhookSecret !== "string" || !WEBHOOK_SECRET_PATTERN.test(webhookSecret)) return null;', replace: "if (false) return null;" },
 
   // --- overwrite approval / idempotency -------------------------------------
@@ -75,6 +75,14 @@ const MUTATIONS: readonly Mutation[] = [
   { id: "leak-response", what: "the webhook response includes the bot token", file: `${A}/webhook.ts`, find: 'return { status: 401, body: { ok: false, error: "unauthorized" } };', replace: 'return { status: 401, body: { ok: false, error: "unauthorized", debug: config.botToken } as never };' },
   { id: "leak-log", what: "the webhook logs the raw request body", file: `${A}/webhook.ts`, find: "const parsed = parseTelegramUpdate(parsedJson);", replace: "const parsed = parseTelegramUpdate(parsedJson); console.log(input.bodyText);" },
   { id: "leak-upstream-error", what: "the Telegram client propagates an upstream error (which carries the token in its URL)", file: `${A}/telegramClient.ts`, find: "} catch {\n      return { ok: false };\n    } finally {", replace: "} catch (error) {\n      throw error;\n    } finally {" },
+
+  // --- operator diagnostics (a 503 must be explainable without writing a value) ---
+  { id: "diag-leak-value", what: "the not_configured log line prints the environment VALUE next to the variable name", file: `${A}/diagnostics.ts`, find: "`${p.name}=${p.problem}`", replace: "`${p.name}=${process.env[p.name]}`" },
+  { id: "diag-allowlist", what: "the diagnostics formatter stops allow-listing names and words", file: `${A}/diagnostics.ts`, find: "problems.filter((p) => ALLOWED_NAMES.has(p.name) && ALLOWED_PROBLEMS.has(p.problem))", replace: "problems.filter(() => true)" },
+  { id: "diag-outcome-allowlist", what: "an outcome code is printed without the allow-list", file: `${A}/diagnostics.ts`, find: '`[approvals] webhook_outcome: ${ALLOWED_OUTCOMES.has(event.code) ? event.code : "unknown"}`', replace: "`[approvals] webhook_outcome: ${event.code}`" },
+  { id: "diag-wrong-diagnosis", what: "the config diagnosis stops flagging a malformed approver id (quotes / newline)", file: `${A}/security.ts`, find: "else if (!APPROVER_ID_PATTERN.test(approver) || !Number.isSafeInteger(Number(approver)))", replace: "else if (false)" },
+  { id: "diag-silent-503", what: "the handler no longer reports why a 503 not_configured happened", file: `${A}/webhook.ts`, find: 'note(deps, { kind: "WEBHOOK_NOT_CONFIGURED", problems: diagnoseTelegramConfig(input.env) });', replace: "" },
+  { id: "diag-console-in-handler", what: "the webhook handler calls console directly with the raw body", file: `${A}/webhook.ts`, find: 'note(deps, { kind: "WEBHOOK_SECRET_MISMATCH" });', replace: 'console.error(input.bodyText);' },
 
   // --- routes ----------------------------------------------------------------
   { id: "route-get-persist", what: "the read-only GET route imports the approval store (a path to persistence)", file: "app/api/ai-performance/approvals/route.ts", find: 'import { getApprovalViewByRecordHash } from "@/lib/ai/evolutionApproval/repository";', replace: 'import { getApprovalViewByRecordHash, createApprovalStore } from "@/lib/ai/evolutionApproval/repository";' },

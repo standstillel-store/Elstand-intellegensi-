@@ -30,6 +30,14 @@ export interface TelegramEnvInput {
   readonly TELEGRAM_WEBHOOK_SECRET?: string | undefined;
 }
 
+export type TelegramEnvName = "TELEGRAM_BOT_TOKEN" | "TELEGRAM_APPROVER_ID" | "TELEGRAM_WEBHOOK_SECRET";
+
+/** Which variable is wrong and in what way — NAMES and two fixed words only, never a value or a length. */
+export interface TelegramConfigProblem {
+  readonly name: TelegramEnvName;
+  readonly problem: "missing" | "malformed";
+}
+
 export interface TelegramConfig {
   readonly botToken: string;
   readonly approverId: number;
@@ -52,6 +60,28 @@ export function readTelegramConfig(env: TelegramEnvInput): TelegramConfig | null
   const approverId = Number(approverRaw);
   if (!Number.isSafeInteger(approverId) || approverId <= 0) return null;
   return { botToken, approverId, webhookSecret };
+}
+
+/**
+ * WHY the config is not usable, for the operator's server log: each wrong
+ * variable by NAME with `missing` (unset or empty) or `malformed` (present but
+ * not accepted). Fixed order. `readTelegramConfig(env) === null` exactly when
+ * this list is non-empty. Never returns, echoes or measures a value.
+ */
+export function diagnoseTelegramConfig(env: TelegramEnvInput): readonly TelegramConfigProblem[] {
+  const problems: TelegramConfigProblem[] = [];
+  const botToken = env.TELEGRAM_BOT_TOKEN;
+  if (typeof botToken !== "string" || botToken.length === 0) problems.push({ name: "TELEGRAM_BOT_TOKEN", problem: "missing" });
+  else if (/\s/.test(botToken)) problems.push({ name: "TELEGRAM_BOT_TOKEN", problem: "malformed" });
+
+  const approver = env.TELEGRAM_APPROVER_ID;
+  if (typeof approver !== "string" || approver.length === 0) problems.push({ name: "TELEGRAM_APPROVER_ID", problem: "missing" });
+  else if (!APPROVER_ID_PATTERN.test(approver) || !Number.isSafeInteger(Number(approver))) problems.push({ name: "TELEGRAM_APPROVER_ID", problem: "malformed" });
+
+  const secret = env.TELEGRAM_WEBHOOK_SECRET;
+  if (typeof secret !== "string" || secret.length === 0) problems.push({ name: "TELEGRAM_WEBHOOK_SECRET", problem: "missing" });
+  else if (!WEBHOOK_SECRET_PATTERN.test(secret)) problems.push({ name: "TELEGRAM_WEBHOOK_SECRET", problem: "malformed" });
+  return problems;
 }
 
 /** Booleans only — safe to log or return. Never the values, never their lengths. */
