@@ -31,8 +31,9 @@ import { decodeCallbackData, encodeCallbackData, formatApprovalRequestMessage, p
 import { diagnoseTelegramConfig, isAuthorizedApprover, readTelegramConfig, redactSecrets, verifyWebhookSecret } from "@/lib/ai/evolutionApproval/security";
 import { formatApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
 import type { ApprovalDiagnosticEvent } from "@/lib/ai/evolutionApproval/diagnostics";
-import { APPROVAL_MEANING, APPROVAL_STATUS_LABEL, OBSERVATIONAL_EVIDENCE_ONLY, OBSERVATIONAL_VALIDATION_PASSED, OUTCOME_ANSWER_TEXT, VALID_MEANING } from "@/lib/ai/evolutionApproval/wording";
+import { APPROVAL_MEANING, APPROVAL_MEANING_ID, APPROVAL_STATUS_LABEL, OBSERVATIONAL_EVIDENCE_ONLY, OBSERVATIONAL_EVIDENCE_ONLY_ID, OBSERVATIONAL_VALIDATION_PASSED, OBSERVATIONAL_VALIDATION_PASSED_ID, OUTCOME_ANSWER_TEXT, OUTCOME_ANSWER_TEXT_ID, VALID_MEANING, VALID_MEANING_ID } from "@/lib/ai/evolutionApproval/wording";
 import type { ApprovalStore, AppendApprovalResult, GetApprovalResult, GetRecordResult, ResolveResult } from "@/lib/ai/evolutionApproval/service";
+import type { PreviousApprovalDecision } from "@/lib/ai/evolutionApproval/contracts";
 import type { TelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
 import type { ApprovalOutcomeCode, ApprovalTelegramMeta, EvolutionApproval, EvolutionApprovalWithoutTimestamp } from "@/lib/ai/evolutionApproval/contracts";
 import type { EvolutionValidationRecordWithoutTimestamp } from "@/lib/ai/evolutionValidation/contracts";
@@ -387,7 +388,7 @@ async function main() {
   {
     const h = harness();
     const wrongUser = await post(h, { body: callbackBody({ fromId: OTHER_ID, data: approveData(validRecord) }) });
-    check("8a. a different numeric user id -> 403 UNAUTHORIZED, ZERO store calls, nothing recorded, the presser is told 'Unauthorized.'", wrongUser.status === 403 && (wrongUser.body as { outcome?: string }).outcome === "UNAUTHORIZED" && h.store.total() === 0 && h.store.approvals.size === 0 && h.telegram.answers.at(-1)?.text === OUTCOME_ANSWER_TEXT.UNAUTHORIZED, JSON.stringify({ wrongUser, calls: h.store.calls }));
+    check("8a. a different numeric user id -> 403 UNAUTHORIZED, ZERO store calls, nothing recorded, the presser is told (in Indonesian) 'Tidak diotorisasi.'", wrongUser.status === 403 && (wrongUser.body as { outcome?: string }).outcome === "UNAUTHORIZED" && h.store.total() === 0 && h.store.approvals.size === 0 && h.telegram.answers.at(-1)?.text === OUTCOME_ANSWER_TEXT_ID.UNAUTHORIZED, JSON.stringify({ wrongUser, calls: h.store.calls }));
 
     const group = await post(h, { body: callbackBody({ chatId: -100123, chatType: "supergroup", data: approveData(validRecord) }) });
     const foreignChat = await post(h, { body: callbackBody({ chatId: OTHER_ID, chatType: "private", data: approveData(validRecord) }) });
@@ -417,7 +418,7 @@ async function main() {
     const stored = h9.store.approvals.get(validRecord.recordHash);
     check(
       "9. the valid approver + VALID record -> APPROVED: exactly one row, status HUMAN_APPROVED, numeric approver id, exact full recordHash, verifiable approvalHash, decidedAt set, Telegram delivery metadata kept",
-      out.status === 200 && (out.body as { outcome?: string }).outcome === "APPROVED" && (out.body as { status?: string }).status === "HUMAN_APPROVED" && h9.store.approvals.size === 1 && stored !== undefined && stored.decision === "APPROVE" && stored.resultingStatus === "HUMAN_APPROVED" && stored.approverTelegramUserId === APPROVER_ID && stored.recordHash === validRecord.recordHash && stored.recordHash.length === 64 && stored.channel === "TELEGRAM" && stored.validationResult === "VALID" && stored.counterfactualAvailable === false && verifyApproval(stored, validRecord).valid && typeof stored.decidedAt === "string" && stored.telegramUpdateId === 11 && stored.telegramCallbackQueryId === "cb-approve" && h9.telegram.answers.at(-1)?.text === OUTCOME_ANSWER_TEXT.APPROVED && h9.telegram.cleared.length === 1,
+      out.status === 200 && (out.body as { outcome?: string }).outcome === "APPROVED" && (out.body as { status?: string }).status === "HUMAN_APPROVED" && h9.store.approvals.size === 1 && stored !== undefined && stored.decision === "APPROVE" && stored.resultingStatus === "HUMAN_APPROVED" && stored.approverTelegramUserId === APPROVER_ID && stored.recordHash === validRecord.recordHash && stored.recordHash.length === 64 && stored.channel === "TELEGRAM" && stored.validationResult === "VALID" && stored.counterfactualAvailable === false && verifyApproval(stored, validRecord).valid && typeof stored.decidedAt === "string" && stored.telegramUpdateId === 11 && stored.telegramCallbackQueryId === "cb-approve" && h9.telegram.answers.at(-1)?.text === OUTCOME_ANSWER_TEXT_ID.APPROVED && h9.telegram.cleared.length === 1,
       JSON.stringify({ out, stored })
     );
   }
@@ -741,10 +742,12 @@ async function main() {
   {
     const store = new MemoryStore().add(validRecord);
     const telegram = new FakeTelegram();
+    const onePreviousDecision: readonly PreviousApprovalDecision[] = [{ decision: "REJECT", resultingStatus: "HUMAN_REJECTED", decidedAt: "2026-09-10T00:00:00.000Z", reason: "fixture: sample too small last time" }];
     const deps = {
       telegram,
       approverChatId: APPROVER_ID,
       getApproval: (h: string) => store.getApproval(h),
+      listPreviousDecisions: async () => [] as readonly PreviousApprovalDecision[],
       appendRecord: async (r: EvolutionValidationRecordWithoutTimestamp) => {
         store.add(r);
         return { status: "APPENDED" as const };
@@ -754,9 +757,16 @@ async function main() {
     const message = telegram.sent[0];
     const keyboard = JSON.stringify(message?.keyboard);
     check(
-      "R1. requesting approval for a VALID record sends ONE message to the approver's chat with the FULL recordHash, identity, mode, counterfactual flag, sample accounting, regression status and both buttons (32-hex callback data)",
-      sent.code === "REQUEST_SENT" && sent.status === "AWAITING_HUMAN_APPROVAL" && telegram.sent.length === 1 && message.chatId === APPROVER_ID && message.text.includes(validRecord.recordHash) && message.text.includes(validRecord.proposalId) && message.text.includes(validRecord.candidateId) && message.text.includes("OBSERVATIONAL_SPLIT_HISTORY") && message.text.includes("counterfactualAvailable=false") && /older window: 20 eligible \/ 0 excluded/.test(message.text) && /Regression: evaluated, none detected/.test(message.text) && keyboard.includes(`a:${validRecord.recordHash.slice(0, 32)}`) && keyboard.includes(`r:${validRecord.recordHash.slice(0, 32)}`) && message.text.length < 4096,
+      "R1. requesting approval for a VALID record sends ONE message to the approver's chat with the FULL recordHash, identity, mode, counterfactual flag, sample accounting, regression status, risk note, a 'no previous decision' line, and both buttons (32-hex callback data) — IN BAHASA INDONESIA",
+      sent.code === "REQUEST_SENT" && sent.status === "AWAITING_HUMAN_APPROVAL" && telegram.sent.length === 1 && message.chatId === APPROVER_ID && message.text.includes(validRecord.recordHash) && message.text.includes(validRecord.proposalId) && message.text.includes(validRecord.candidateId) && message.text.includes("OBSERVATIONAL_SPLIT_HISTORY") && message.text.includes("counterfactualAvailable=false") && /jendela lama: 20 memenuhi syarat \/ 0 dikecualikan/.test(message.text) && /Regresi: dievaluasi, tidak ada regresi/.test(message.text) && /Risiko: Ukuran sampel cukup memadai/.test(message.text) && message.text.includes("Belum ada keputusan sebelumnya") && keyboard.includes(`a:${validRecord.recordHash.slice(0, 32)}`) && keyboard.includes(`r:${validRecord.recordHash.slice(0, 32)}`) && message.text.length < 4096,
       JSON.stringify({ sent, text: message?.text })
+    );
+    const t6 = new FakeTelegram();
+    await requestApproval({ ...deps, telegram: t6, listPreviousDecisions: async () => onePreviousDecision }, validRecord);
+    check(
+      "R6. a non-empty previousDecisions history is rendered into the message (count, resulting status IN INDONESIAN, decidedAt and the reason) and never affects eligibility of the CURRENT record",
+      t6.sent[0]?.text.includes("1 keputusan sebelumnya") && t6.sent[0]?.text.includes("DITOLAK") && t6.sent[0]?.text.includes("2026-09-10T00:00:00.000Z") && t6.sent[0]?.text.includes("sample too small last time"),
+      t6.sent[0]?.text
     );
     const decided = new MemoryStore().add(validRecord);
     const t2 = new FakeTelegram();
@@ -777,22 +787,27 @@ async function main() {
     check("R5. a record that fails integrity is never sent to the approver", refused.code === "INELIGIBLE" && refused.failure === "INTEGRITY_CHECK_FAILED" && t5.sent.length === 0, JSON.stringify(refused));
   }
   {
-    const message = formatApprovalRequestMessage(summaryOf(validRecord));
+    const message = formatApprovalRequestMessage(summaryOf(validRecord), []);
     const ui = read("components/ai-performance/SelfPerformancePanel.tsx");
     const wordingSource = read("lib/ai/evolutionApproval/wording.ts");
     check(
-      "W1. the Telegram message and the UI use the SAME wording constants: 'Observational validation passed', the VALID + OBSERVATIONAL_SPLIT_HISTORY + counterfactualAvailable=false reading, and what VALID / APPROVE do and do not mean",
-      message.includes(OBSERVATIONAL_VALIDATION_PASSED) && message.includes(OBSERVATIONAL_EVIDENCE_ONLY) && message.includes(VALID_MEANING) && message.includes(APPROVAL_MEANING) && ui.includes('from "@/lib/ai/evolutionApproval/wording"') && /OBSERVATIONAL_VALIDATION_PASSED/.test(ui) && /OBSERVATIONAL_EVIDENCE_ONLY/.test(ui) && /VALID_MEANING/.test(ui) && /APPROVAL_MEANING/.test(ui),
+      "W1. the Telegram message (Indonesian) and the UI (English) use the SAME meaning via the shared wording.ts file: 'Observational validation passed', the VALID + OBSERVATIONAL_SPLIT_HISTORY + counterfactualAvailable=false reading, and what VALID / APPROVE do and do not mean",
+      message.includes(OBSERVATIONAL_VALIDATION_PASSED_ID) && message.includes(OBSERVATIONAL_EVIDENCE_ONLY_ID) && message.includes(VALID_MEANING_ID) && message.includes(APPROVAL_MEANING_ID) && ui.includes('from "@/lib/ai/evolutionApproval/wording"') && /OBSERVATIONAL_VALIDATION_PASSED/.test(ui) && /OBSERVATIONAL_EVIDENCE_ONLY/.test(ui) && /VALID_MEANING/.test(ui) && /APPROVAL_MEANING/.test(ui),
       message
     );
-    const positiveClaims = ["AI improvement proven", "improvement proven", "Validated candidate", "validated candidate", "profitability proven", "safe for production.", "Approved for production", "Deployed", "now active", "has been promoted"];
-    const surfaces = [message, ...Object.values(OUTCOME_ANSWER_TEXT), ...Object.values(APPROVAL_STATUS_LABEL), strip(ui)];
-    const hits = positiveClaims.filter((p) => surfaces.some((s) => s.includes(p) && !(p === "safe for production." && s.includes("not a statement that anything is safe for production."))));
-    check("W2. no positive claim of proven improvement, profitability, validation, deployment, activation or promotion appears in the Telegram message, the answer texts, the status labels or the UI code", hits.length === 0, JSON.stringify(hits));
+    const positiveClaimsEn = ["AI improvement proven", "improvement proven", "Validated candidate", "validated candidate", "profitability proven", "safe for production.", "Approved for production", "Deployed", "now active", "has been promoted"];
+    const englishSurfaces = [...Object.values(APPROVAL_STATUS_LABEL), strip(ui)];
+    const hitsEn = positiveClaimsEn.filter((p) => englishSurfaces.some((s) => s.includes(p) && !(p === "safe for production." && s.includes("not a statement that anything is safe for production."))));
+    check("W2a. no positive claim of proven improvement, profitability, validation, deployment, activation or promotion appears in the (English) status labels or the UI code", hitsEn.length === 0, JSON.stringify(hitsEn));
+    const positiveClaimsId = ["peningkatan terbukti", "kandidat tervalidasi", "profitabilitas terbukti", "aman untuk production.", "disetujui untuk production", "di-deploy", "sekarang aktif", "telah dipromosikan"];
+    const indonesianSurfaces = [message, ...Object.values(OUTCOME_ANSWER_TEXT_ID)];
+    const negatedIdExceptions: Record<string, string> = { "aman untuk production.": "bukan pernyataan bahwa sesuatu aman untuk production.", "di-deploy": "tidak ada yang di-deploy" };
+    const hitsId = positiveClaimsId.filter((p) => indonesianSurfaces.some((s) => s.toLowerCase().includes(p) && !(p in negatedIdExceptions && s.toLowerCase().includes(negatedIdExceptions[p]))));
+    check("W2b. same guarantee for the Indonesian surface: no positive claim of proven improvement, profitability, deployment, activation or promotion appears in the Telegram message or the (Indonesian) callback answer texts", hitsId.length === 0, JSON.stringify(hitsId));
     check(
-      "W3. the wording states what VALID is NOT (not proven improvement, profitability, causal/counterfactual proof, production-safe) and that APPROVE is not deploy/activate/promote and changes no trading behavior",
-      /not proven improvement/.test(wordingSource) && /not proven profitability/.test(wordingSource) && /causal or counterfactual proof/.test(wordingSource) && /safe for production/.test(wordingSource) && /does not deploy, activate or promote/.test(wordingSource) && /changes no trading behavior/.test(wordingSource),
-      "disclaimer missing"
+      "W3. wording.ts states, in BOTH languages, what VALID is NOT (not proven improvement, profitability, causal/counterfactual proof, production-safe) and that APPROVE is not deploy/activate/promote and changes no trading behavior",
+      /not proven improvement/.test(wordingSource) && /not proven profitability/.test(wordingSource) && /causal or counterfactual proof/.test(wordingSource) && /safe for production/.test(wordingSource) && /does not deploy, activate or promote/.test(wordingSource) && /changes no trading behavior/.test(wordingSource) && /BUKAN bukti peningkatan performa/.test(wordingSource) && /BUKAN pernyataan bahwa sesuatu aman untuk production/.test(wordingSource) && /TIDAK men-deploy, TIDAK mengaktifkan, TIDAK mempromosikan/.test(wordingSource) && /TIDAK mengubah perilaku trading/.test(wordingSource),
+      "disclaimer missing in one language"
     );
     check("W4. the UI shows all four statuses through one label map, the record hash, sample accounting and regression status, and its request button only asks the approver (it never decides)", ["AWAITING_HUMAN_APPROVAL", "HUMAN_APPROVED", "HUMAN_REJECTED", "INELIGIBLE"].every((s) => wordingSource.includes(s)) && /Record hash/.test(ui) && /describeSlice\(/.test(ui) && /Regression:/.test(ui) && /Send approval request to approver/.test(ui) && !/approvals\/telegram/.test(ui) && /Decisions are made only by the approver, in Telegram/.test(ui), "UI integration incomplete");
   }

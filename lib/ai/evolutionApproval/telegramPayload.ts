@@ -15,8 +15,8 @@
 // text can be interpreted as markup.
 // ---------------------------------------------------------------------------
 
-import { APPROVAL_MEANING, OBSERVATIONAL_EVIDENCE_ONLY, OBSERVATIONAL_VALIDATION_PASSED, VALID_MEANING } from "./wording";
-import type { ApprovalAction, ApprovalRequestSummary } from "./contracts";
+import { APPROVAL_MEANING_ID, OBSERVATIONAL_EVIDENCE_ONLY_ID, OBSERVATIONAL_VALIDATION_PASSED_ID, VALID_MEANING_ID } from "./wording";
+import type { ApprovalAction, ApprovalRequestSummary, PreviousApprovalDecision } from "./contracts";
 
 export interface ParsedCallbackUpdate {
   readonly updateId: number;
@@ -104,8 +104,8 @@ export function buildApprovalKeyboard(recordHash: string): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: "Approve (record decision only)", callback_data: encodeCallbackData("APPROVE", recordHash) },
-        { text: "Reject", callback_data: encodeCallbackData("REJECT", recordHash) },
+        { text: "Setujui (hanya mencatat keputusan)", callback_data: encodeCallbackData("APPROVE", recordHash) },
+        { text: "Tolak", callback_data: encodeCallbackData("REJECT", recordHash) },
       ],
     ],
   };
@@ -116,31 +116,54 @@ function clip(text: string, max: number): string {
 }
 
 function samples(label: string, window: { readonly eligible: number | null; readonly excluded: number | null }): string {
-  return window.eligible === null || window.excluded === null ? `${label}: not recorded` : `${label}: ${window.eligible} eligible / ${window.excluded} excluded`;
+  return window.eligible === null || window.excluded === null ? `${label}: tidak tercatat` : `${label}: ${window.eligible} memenuhi syarat / ${window.excluded} dikecualikan`;
 }
 
-/** Plain-text approval request. Uses the SAME wording constants as the UI. */
-export function formatApprovalRequestMessage(summary: ApprovalRequestSummary): string {
-  const regression = summary.regressionEvaluated ? (summary.regressionDetected ? "evaluated, regression detected" : "evaluated, none detected") : "not evaluated";
+const PREVIOUS_DECISION_LABEL_ID: Record<PreviousApprovalDecision["resultingStatus"], string> = {
+  HUMAN_APPROVED: "DISETUJUI",
+  HUMAN_REJECTED: "DITOLAK",
+};
+
+function describePreviousDecisions(previousDecisions: readonly PreviousApprovalDecision[]): string {
+  if (previousDecisions.length === 0) return "Belum ada keputusan sebelumnya untuk symbol + gap category ini.";
+  const lines = previousDecisions.map((d) => `  • ${PREVIOUS_DECISION_LABEL_ID[d.resultingStatus]} pada ${d.decidedAt}${d.reason ? ` — alasan: ${clip(d.reason, 150)}` : ""}`);
+  return [`${previousDecisions.length} keputusan sebelumnya untuk symbol + gap category ini (record berbeda, riwayat saja — tidak memengaruhi kelayakan record ini):`, ...lines].join("\n");
+}
+
+/**
+ * Plain-text approval request, IN BAHASA INDONESIA (ELVOID 8.6.7 continuation
+ * audit requirement — see wording.ts's "_ID" section for why the English
+ * originals in wording.ts are untouched and still serve the UI panel).
+ * `previousDecisions`: historical context only, see contracts.ts's own doc
+ * comment — never derived from `summary` itself, always passed in separately
+ * since fetching it needs a DB read that eligibility.ts is deliberately
+ * kept pure and unable to do.
+ */
+export function formatApprovalRequestMessage(summary: ApprovalRequestSummary, previousDecisions: readonly PreviousApprovalDecision[]): string {
+  const regression = summary.regressionEvaluated ? (summary.regressionDetected ? "dievaluasi, regresi terdeteksi" : "dievaluasi, tidak ada regresi") : "belum dievaluasi";
   return [
-    "ELVOID — Human approval request",
+    "ELVOID — Permintaan Persetujuan Manusia",
     "",
-    `${OBSERVATIONAL_VALIDATION_PASSED} (${summary.gatesPassed} of ${summary.gatesTotal} gates).`,
-    OBSERVATIONAL_EVIDENCE_ONLY,
+    `${OBSERVATIONAL_VALIDATION_PASSED_ID} (${summary.gatesPassed} dari ${summary.gatesTotal} gate).`,
+    OBSERVATIONAL_EVIDENCE_ONLY_ID,
     "",
     `Record hash: ${summary.recordHash}`,
     `Proposal: ${summary.proposalId}`,
     `Candidate: ${summary.candidateId}`,
-    `Source / symbol: ${summary.source} / ${summary.symbol}`,
+    `Sumber / simbol: ${summary.source} / ${summary.symbol}`,
     `Gap: ${summary.gapCategory}`,
-    `Validation: ${summary.validationResult} · mode ${summary.validationMode} · counterfactualAvailable=${summary.counterfactualAvailable}`,
-    `Regression: ${regression}`,
-    `Samples — ${samples("older window", summary.olderWindow)} · ${samples("newer window", summary.newerWindow)}`,
+    `Validasi: ${summary.validationResult} · mode ${summary.validationMode} · counterfactualAvailable=${summary.counterfactualAvailable}`,
+    `Regresi: ${regression}`,
+    `Sampel — ${samples("jendela lama", summary.olderWindow)} · ${samples("jendela baru", summary.newerWindow)}`,
     "",
-    `Hypothesis: ${clip(summary.hypothesis, 350)}`,
-    `Proposed change: ${clip(summary.proposedChange, 350)}`,
+    `Hipotesis: ${clip(summary.hypothesis, 350)}`,
+    `Perubahan yang diusulkan: ${clip(summary.proposedChange, 350)}`,
     "",
-    VALID_MEANING,
-    APPROVAL_MEANING,
+    `Risiko: ${summary.riskNote}`,
+    "",
+    describePreviousDecisions(previousDecisions),
+    "",
+    VALID_MEANING_ID,
+    APPROVAL_MEANING_ID,
   ].join("\n");
 }

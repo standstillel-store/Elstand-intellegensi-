@@ -42,3 +42,41 @@ export const OUTCOME_ANSWER_TEXT = {
   INELIGIBLE: "Ineligible: only observational validation that passed can be decided.",
   UNAVAILABLE: "Temporarily unavailable. Nothing was recorded.",
 } as const;
+
+// ---------------------------------------------------------------------------
+// Indonesian (Bahasa Indonesia) — Telegram-facing surface ONLY.
+//
+// Added for the ELVOID 8.6.7 continuation audit's requirement that Telegram
+// explanations be primarily Bahasa Indonesia. Deliberately ADDITIVE: nothing
+// above this line changed, so `APPROVAL_STATUS_LABEL` and the English
+// `OUTCOME_ANSWER_TEXT` keep serving the AI Performance UI panel exactly as
+// before — this file's own header goal ("one source, so the two surfaces
+// can't drift into saying different things") is kept in the sense that
+// matters: every _ID string below is a faithful translation of the English
+// original next to it, same meaning, same safety caveats, different
+// language for a different surface (Telegram vs. the dashboard).
+//
+// Only telegramPayload.ts (the message body) and webhook.ts (the callback
+// answer) read these. Nothing else should.
+// ---------------------------------------------------------------------------
+
+export const OBSERVATIONAL_VALIDATION_PASSED_ID = "Validasi observasional lolos";
+
+export const OBSERVATIONAL_EVIDENCE_ONLY_ID = "VALID + OBSERVATIONAL_SPLIT_HISTORY + counterfactualAvailable=false berarti ini murni bukti observasional (observational evidence only).";
+
+export const VALID_MEANING_ID =
+  "Semua gate validasi observasional terpenuhi. Ini BUKAN bukti peningkatan performa, BUKAN bukti profitabilitas, BUKAN bukti kausal atau counterfactual, dan BUKAN pernyataan bahwa sesuatu aman untuk production.";
+
+export const APPROVAL_MEANING_ID = "Approve hanya mencatat keputusan manusia. TIDAK men-deploy, TIDAK mengaktifkan, TIDAK mempromosikan apa pun, dan TIDAK mengubah perilaku trading apa pun.";
+
+export const OUTCOME_ANSWER_TEXT_ID: Record<keyof typeof OUTCOME_ANSWER_TEXT, string> = {
+  APPROVED: "Tercatat: disetujui oleh manusia. Tidak ada yang di-deploy atau diaktifkan.",
+  REJECTED: "Tercatat: ditolak oleh manusia.",
+  ALREADY_APPROVED: "Sudah disetujui sebelumnya. Tidak ada keputusan baru yang dicatat.",
+  ALREADY_REJECTED: "Sudah ditolak sebelumnya. Tidak ada keputusan baru yang dicatat.",
+  INVALID_TRANSITION: "Tidak diizinkan: keputusan untuk record ini sudah ada dan tidak dapat diubah.",
+  UNAUTHORIZED: "Tidak diotorisasi.",
+  INVALID_APPROVAL_REQUEST: "Permintaan approval tidak valid.",
+  INELIGIBLE: "Tidak memenuhi syarat: hanya validasi observasional yang lolos yang dapat diputuskan.",
+  UNAVAILABLE: "Sementara tidak tersedia. Tidak ada yang dicatat.",
+} as const;

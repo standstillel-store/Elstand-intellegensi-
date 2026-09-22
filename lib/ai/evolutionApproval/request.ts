@@ -19,9 +19,11 @@
 import { evaluateApprovalEligibility } from "./eligibility";
 import { buildApprovalKeyboard, formatApprovalRequestMessage } from "./telegramPayload";
 import type { EvolutionValidationRecordWithoutTimestamp } from "@/lib/ai/evolutionValidation/contracts";
-import type { ApprovalStatus, EligibilityFailureCode } from "./contracts";
+import type { ApprovalStatus, EligibilityFailureCode, PreviousApprovalDecision } from "./contracts";
 import type { GetApprovalResult } from "./service";
 import type { TelegramClient } from "./telegramClient";
+
+const PREVIOUS_DECISIONS_SHOWN = 3;
 
 export type RequestOutcomeCode = "REQUEST_SENT" | "ALREADY_DECIDED" | "INELIGIBLE" | "RECORD_STORE_UNAVAILABLE" | "TELEGRAM_UNAVAILABLE";
 
@@ -37,6 +39,15 @@ export type AppendRecordResult = { readonly status: "APPENDED" | "ALREADY_RECORD
 export interface RequestDeps {
   appendRecord(record: EvolutionValidationRecordWithoutTimestamp): Promise<AppendRecordResult>;
   getApproval(recordHash: string): Promise<GetApprovalResult>;
+  /**
+   * Historical context only (Section 5 gap #2 from the P0 audit: "previous
+   * decision" was missing from the message). Never affects eligibility —
+   * `evaluateApprovalEligibility` above already ran and is unaffected by
+   * this. A rejected `Promise` here is a caller bug, not an expected
+   * outcome; `listRecentApprovalDecisions` itself degrades to `[]` and never
+   * rejects, same as every other Learning DB read in this module.
+   */
+  listPreviousDecisions(symbol: string, gapCategory: string, limit: number): Promise<readonly PreviousApprovalDecision[]>;
   telegram: TelegramClient;
   approverChatId: number;
 }
@@ -53,7 +64,8 @@ export async function requestApproval(deps: RequestDeps, record: EvolutionValida
   if (existing.status === "UNAVAILABLE") return { code: "RECORD_STORE_UNAVAILABLE", recordHash, status: null, failure: null };
   if (existing.status === "FOUND") return { code: "ALREADY_DECIDED", recordHash, status: existing.approval.resultingStatus, failure: null };
 
-  const sent = await deps.telegram.sendMessage(deps.approverChatId, formatApprovalRequestMessage(eligibility.summary), buildApprovalKeyboard(recordHash));
+  const previousDecisions = await deps.listPreviousDecisions(record.symbol, record.gapCategory, PREVIOUS_DECISIONS_SHOWN);
+  const sent = await deps.telegram.sendMessage(deps.approverChatId, formatApprovalRequestMessage(eligibility.summary, previousDecisions), buildApprovalKeyboard(recordHash));
   if (!sent.ok) return { code: "TELEGRAM_UNAVAILABLE", recordHash, status: "AWAITING_HUMAN_APPROVAL", failure: null };
   return { code: "REQUEST_SENT", recordHash, status: "AWAITING_HUMAN_APPROVAL", failure: null };
 }

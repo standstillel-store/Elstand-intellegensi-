@@ -36,9 +36,38 @@ export interface ExpectedIdentity {
   readonly candidateId?: string;
 }
 
+// Below this count of eligible samples in the SMALLER of the two replay
+// windows, the risk note calls the result "directional, not conclusive"
+// rather than "adequate". Advisory framing only — this never gates
+// eligibility (that stays exactly gate #6's own GATES_NOT_ALL_PASSED check,
+// untouched); it only changes which sentence the human reads.
+const RISK_SMALL_SAMPLE_THRESHOLD = 20;
+
+// riskNote is Indonesian, not English like the rest of this object's fields
+// (hypothesis/proposedChange, which come verbatim from the English
+// evolutionProposal templates). Deliberate: today riskNote has exactly one
+// real consumer — the Bahasa Indonesia Telegram message
+// (telegramPayload.ts) — and there is no English surface rendering it
+// anywhere in this codebase (the UI panel reads a separate data path, see
+// fixture check W4). If an English consumer is ever added, translate at
+// that render site rather than re-splitting this function by language.
+function describeRisk(older: number | null, newer: number | null, regressionEvaluated: boolean): string {
+  const minEligible = older === null || newer === null ? null : Math.min(older, newer);
+  const sampleNote =
+    minEligible === null
+      ? "Ukuran sampel tidak tercatat — anggap sebagai confidence rendah."
+      : minEligible < RISK_SMALL_SAMPLE_THRESHOLD
+      ? `Sampel kecil (hanya ${minEligible} kasus eligible di salah satu jendela) — anggap sebagai indikasi arah, bukan kesimpulan final.`
+      : `Ukuran sampel cukup memadai (${minEligible}+ kasus eligible di jendela yang lebih kecil).`;
+  const regressionNote = regressionEvaluated ? "Tidak ada regresi yang terdeteksi terhadap baseline sebelumnya." : "Regresi belum dievaluasi untuk record ini.";
+  return `${sampleNote} ${regressionNote} Ini murni bukti observasional, bukan rekam jejak live-trading — approve hanya mencatat keputusan, tidak men-deploy atau mengaktifkan apa pun.`;
+}
+
 function summarize(record: EvolutionValidationRecordWithoutTimestamp): ApprovalRequestSummary {
   const { proposal, candidate, validation } = record.snapshot;
   const replay = candidate.replay;
+  const olderEligible = replay?.baseline.sampleAccounting?.eligible ?? null;
+  const newerEligible = replay?.candidate.sampleAccounting?.eligible ?? null;
   return {
     recordHash: record.recordHash,
     proposalId: record.proposalId,
@@ -55,8 +84,9 @@ function summarize(record: EvolutionValidationRecordWithoutTimestamp): ApprovalR
     gatesTotal: validation.gates.length,
     regressionEvaluated: validation.regressionCheck.evaluated,
     regressionDetected: validation.regressionCheck.regressionDetected,
-    olderWindow: { eligible: replay?.baseline.sampleAccounting?.eligible ?? null, excluded: replay?.baseline.sampleAccounting?.excluded ?? null },
-    newerWindow: { eligible: replay?.candidate.sampleAccounting?.eligible ?? null, excluded: replay?.candidate.sampleAccounting?.excluded ?? null },
+    olderWindow: { eligible: olderEligible, excluded: replay?.baseline.sampleAccounting?.excluded ?? null },
+    newerWindow: { eligible: newerEligible, excluded: replay?.candidate.sampleAccounting?.excluded ?? null },
+    riskNote: describeRisk(olderEligible, newerEligible, validation.regressionCheck.evaluated),
   };
 }
 

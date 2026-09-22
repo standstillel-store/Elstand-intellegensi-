@@ -70,9 +70,32 @@ export interface ApprovalRequestSummary {
   readonly regressionDetected: boolean;
   readonly olderWindow: { readonly eligible: number | null; readonly excluded: number | null };
   readonly newerWindow: { readonly eligible: number | null; readonly excluded: number | null };
+  /**
+   * Plain-language caution derived ONLY from fields already on this record
+   * (sample sizes, regression status) — never a fabricated score. Added for
+   * the ELVOID 8.6.7 continuation audit's "risk" requirement on the
+   * approval message. Pure/deterministic, same as every other field here.
+   */
+  readonly riskNote: string;
 }
 
 export type ApprovalEligibility = { readonly eligible: true; readonly summary: ApprovalRequestSummary } | { readonly eligible: false; readonly code: EligibilityFailureCode };
+
+/**
+ * ONE prior human decision about a DIFFERENT record that shared the same
+ * `symbol` + `gapCategory` — historical context only, never authority: it
+ * never changes eligibility or the current decision. `null` symbol/category
+ * inputs never happen (both come from an already-eligible record), so this
+ * type carries no failure state of its own — an empty array means "no prior
+ * decision found or the Learning DB could not be consulted", which the
+ * Telegram message renders as one honest line either way.
+ */
+export interface PreviousApprovalDecision {
+  readonly decision: ApprovalAction;
+  readonly resultingStatus: ResultingApprovalStatus;
+  readonly decidedAt: string;
+  readonly reason: string | null;
+}
 
 /** The content a decision is hashed over. `decidedAt` (database time) and Telegram metadata are deliberately NOT part of it. */
 export interface EvolutionApprovalContent {

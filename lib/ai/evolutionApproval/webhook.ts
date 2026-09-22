@@ -36,7 +36,7 @@
 import { decodeCallbackData, isPrivateChatWithUser, parseTelegramUpdate } from "./telegramPayload";
 import { diagnoseTelegramConfig, isAuthorizedApprover, readTelegramConfig, verifyWebhookSecret } from "./security";
 import { decideApproval } from "./service";
-import { OUTCOME_ANSWER_TEXT } from "./wording";
+import { OUTCOME_ANSWER_TEXT_ID } from "./wording";
 import type { ApprovalStore } from "./service";
 import type { TelegramClient } from "./telegramClient";
 import type { TelegramConfig, TelegramEnvInput } from "./security";
@@ -119,7 +119,7 @@ export async function handleTelegramWebhook(input: WebhookInput, deps: WebhookDe
   // 4. Approver — numeric id, and the press must be in their own private chat.
   if (!isAuthorizedApprover(update.fromId, config.approverId) || !isPrivateChatWithUser(update)) {
     note(deps, { kind: "WEBHOOK_UNAUTHORIZED_USER" });
-    await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT.UNAUTHORIZED);
+    await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT_ID.UNAUTHORIZED);
     return { status: 403, body: { ok: false, outcome: "UNAUTHORIZED", error: "unauthorized_user" } };
   }
 
@@ -127,7 +127,7 @@ export async function handleTelegramWebhook(input: WebhookInput, deps: WebhookDe
   const decoded = decodeCallbackData(update.data);
   if (decoded === null) {
     note(deps, { kind: "WEBHOOK_MALFORMED" });
-    await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT.INVALID_APPROVAL_REQUEST);
+    await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT_ID.INVALID_APPROVAL_REQUEST);
     return { status: 400, body: { ok: false, error: "malformed" } };
   }
 
@@ -144,7 +144,7 @@ export async function handleTelegramWebhook(input: WebhookInput, deps: WebhookDe
   note(deps, { kind: "WEBHOOK_OUTCOME", code: result.code });
 
   // 7. Reply — fixed text only; remove the buttons once a decision is settled.
-  await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT[result.code]);
+  await telegram.answerCallbackQuery(update.callbackQueryId, OUTCOME_ANSWER_TEXT_ID[result.code]);
   const settled = result.code === "APPROVED" || result.code === "REJECTED" || result.code === "ALREADY_APPROVED" || result.code === "ALREADY_REJECTED" || result.code === "INVALID_TRANSITION";
   if (settled && update.chatId !== null && update.messageId !== null) await telegram.clearInlineKeyboard(update.chatId, update.messageId);
 

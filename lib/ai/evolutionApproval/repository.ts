@@ -26,7 +26,7 @@ import { appendEvolutionValidationRecord, getEvolutionValidationRecordByHash } f
 import { evaluateApprovalEligibility } from "./eligibility";
 import type { ApprovalStore, AppendApprovalResult, GetApprovalResult, GetRecordResult, ResolveResult } from "./service";
 import type { AppendRecordResult, RequestDeps } from "./request";
-import type { ApprovalTelegramMeta, EvolutionApproval, EvolutionApprovalWithoutTimestamp, EvolutionApprovalView } from "./contracts";
+import type { ApprovalTelegramMeta, EvolutionApproval, EvolutionApprovalWithoutTimestamp, EvolutionApprovalView, PreviousApprovalDecision } from "./contracts";
 import type { EvolutionValidationRecordWithoutTimestamp } from "@/lib/ai/evolutionValidation/contracts";
 import type { TelegramClient } from "./telegramClient";
 
@@ -67,6 +67,51 @@ export async function getEvolutionApprovalByRecordHash(recordHash: string): Prom
   if (error) return { status: "UNAVAILABLE" };
   if (!data) return { status: "NOT_FOUND" };
   return { status: "FOUND", approval: mapApprovalRow(data as Record<string, unknown>) };
+}
+
+const PREVIOUS_DECISIONS_RECORD_SCAN_LIMIT = 50;
+
+/**
+ * Historical context for the approval message only — prior human decisions
+ * about a DIFFERENT record (different `recordHash`) that shared the same
+ * `symbol` + `gapCategory`. Two plain queries rather than one embedded/join
+ * filter, deliberately: this codebase already has a proven `.eq().order()`
+ * pattern for both tables (see getEvolutionApprovalByRecordHash and
+ * getEvolutionValidationRecordByHash above); a nested-resource PostgREST
+ * filter across the FK would work too, but this session has no way to run
+ * it against real data first, so the already-verified two-step shape wins.
+ * Degrades to `[]` on any failure — same convention as every function in
+ * this file, never throws, and the caller (request.ts) treats `[]` and
+ * "genuinely no prior decision" identically: both render as one honest line.
+ */
+export async function listRecentApprovalDecisions(symbol: string, gapCategory: string, limit: number): Promise<readonly PreviousApprovalDecision[]> {
+  const learningDb = getLearningSupabase();
+  if (!learningDb) return [];
+
+  const { data: records, error: recordsError } = await learningDb
+    .from("evolution_validation_records")
+    .select("record_hash")
+    .eq("symbol", symbol)
+    .eq("gap_category", gapCategory)
+    .order("recorded_at", { ascending: false })
+    .limit(PREVIOUS_DECISIONS_RECORD_SCAN_LIMIT);
+  if (recordsError || !records || records.length === 0) return [];
+
+  const hashes = (records as { record_hash: string }[]).map((r) => r.record_hash);
+  const { data: approvals, error: approvalsError } = await learningDb
+    .from("evolution_approvals")
+    .select("decision, resulting_status, decided_at, reason")
+    .in("record_hash", hashes)
+    .order("decided_at", { ascending: false })
+    .limit(limit);
+  if (approvalsError || !approvals) return [];
+
+  return (approvals as Record<string, unknown>[]).map((row) => ({
+    decision: row.decision as PreviousApprovalDecision["decision"],
+    resultingStatus: row.resulting_status as PreviousApprovalDecision["resultingStatus"],
+    decidedAt: row.decided_at as string,
+    reason: (row.reason as string | null) ?? null,
+  }));
 }
 
 export function createApprovalStore(): ApprovalStore {
@@ -133,6 +178,7 @@ export function createRequestDeps(telegram: TelegramClient, approverChatId: numb
     telegram,
     approverChatId,
     getApproval: (recordHash) => store.getApproval(recordHash),
+    listPreviousDecisions: listRecentApprovalDecisions,
     async appendRecord(record: EvolutionValidationRecordWithoutTimestamp): Promise<AppendRecordResult> {
       const result = await appendEvolutionValidationRecord(record);
       if (result.appended) return { status: "APPENDED" };
