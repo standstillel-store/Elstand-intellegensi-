@@ -229,7 +229,7 @@ const lifecycleSrc = stripComments(readFileSync("lib/ai/autonomousLearning/lifec
   const paperTraderSrc = readFileSync("lib/elvoid/paperTrader.ts", "utf-8");
   const oracleExecuteSrc = readFileSync("lib/ai/oracle/execute.ts", "utf-8");
 
-  const paperTraderCallsLifecycle = /completeDecisionLearningLifecycle\(signal\.id\)\.catch\(/.test(paperTraderSrc);
+  const paperTraderCallsLifecycle = /completeDecisionLearningLifecycle\(signal\.id\)\s*\n?\s*\.(then|catch)\(/.test(paperTraderSrc);
   check("14a. lib/elvoid/paperTrader.ts::writeClose() still calls completeDecisionLearningLifecycle(signal.id).catch(...) (unmodified pre-existing wiring)", paperTraderCallsLifecycle, "call not found — the discovered wiring this phase relies on is missing");
 
   const oracleExecuteCapturesExperience = /captureDecisionExperienceBestEffort\(row, learningContext\)/.test(oracleExecuteSrc);

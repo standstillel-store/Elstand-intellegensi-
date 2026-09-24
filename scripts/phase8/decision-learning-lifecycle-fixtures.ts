@@ -117,15 +117,16 @@ const lifecycleCode = codeOnly(lifecycleSource);
 
 // 7. writeClose() does not await the lifecycle call
 {
-  const notAwaited = /(?<!await\s{0,20})completeDecisionLearningLifecycle\(signal\.id\)\.catch/.test(paperTraderSource);
-  check("7. writeClose() does not `await` completeDecisionLearningLifecycle(...) — fire-and-forget from the trading lifecycle's perspective", notAwaited, "expected an un-awaited call with a .catch() handler");
+  const notAwaited = /(?<!await\s{0,20})completeDecisionLearningLifecycle\(signal\.id\)\s*\n?\s*\.(then|catch)\(/.test(paperTraderSource);
+  check("7. writeClose() does not `await` completeDecisionLearningLifecycle(...) — fire-and-forget from the trading lifecycle's perspective", notAwaited, "expected an un-awaited call chain");
 }
 
 // 8. trading lifecycle remains structurally independent from Learning DB failure
 {
-  const hasCatchHandler = /completeDecisionLearningLifecycle\(signal\.id\)\.catch\(/.test(paperTraderSource);
   const statusUpdateIdx = paperTraderSource.indexOf('.from("ai_signals").update({ status: "closed" })');
   const lifecycleCallIdx = paperTraderSource.indexOf("completeDecisionLearningLifecycle(signal.id)");
+  const catchAfterCallIdx = lifecycleCallIdx === -1 ? -1 : paperTraderSource.indexOf(".catch(", lifecycleCallIdx);
+  const hasCatchHandler = catchAfterCallIdx !== -1 && catchAfterCallIdx - lifecycleCallIdx < 600;
   check(
     "8. The lifecycle call has a .catch() handler AND the ai_signals status update is a separate, unconditional statement after it (not inside any lifecycle callback)",
     hasCatchHandler && statusUpdateIdx !== -1 && lifecycleCallIdx !== -1 && statusUpdateIdx > lifecycleCallIdx,

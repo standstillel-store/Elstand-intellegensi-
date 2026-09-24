@@ -438,8 +438,12 @@ const paperTraderSource = await readFile(new URL("../../lib/elvoid/paperTrader.t
 //     unreachable Learning DB cannot add latency to a trade close.
 // ---------------------------------------------------------------------------
 {
-  const notAwaited = /(?<!await\s{0,20})completeDecisionLearningLifecycle\(signal\.id\)\.catch/.test(paperTraderSource);
-  check("30. completeDecisionLearningLifecycle(...) is NOT awaited in writeClose() (fire-and-forget)", notAwaited, "expected an un-awaited `completeDecisionLearningLifecycle(signal.id).catch(...)` call");
+  // Phase 8.2.9 inserted a `.then(() => { ... })` between the call and its
+  // `.catch()` (to fire triggerLearningRefreshBestEffort()/
+  // triggerEvaluationBacklogBestEffort()) — allow that, but still require
+  // no `await` immediately before the call itself.
+  const notAwaited = /(?<!await\s{0,20})completeDecisionLearningLifecycle\(signal\.id\)\s*\n?\s*\.(then|catch)\(/.test(paperTraderSource);
+  check("30. completeDecisionLearningLifecycle(...) is NOT awaited in writeClose() (fire-and-forget)", notAwaited, "expected an un-awaited `completeDecisionLearningLifecycle(signal.id)` call chain");
 }
 
 // ---------------------------------------------------------------------------
@@ -457,8 +461,13 @@ const paperTraderSource = await readFile(new URL("../../lib/elvoid/paperTrader.t
 // 32. Learning DB failure is isolated (caught) and does not propagate.
 // ---------------------------------------------------------------------------
 {
-  const hasCatchHandler = /completeDecisionLearningLifecycle\(signal\.id\)\.catch\(/.test(paperTraderSource);
-  check("32. completeDecisionLearningLifecycle(...) call has a .catch() handler in writeClose() — a Learning DB failure cannot throw out of writeClose()", hasCatchHandler, "no .catch() found on the lifecycle call");
+  const lifecycleCallIdx = paperTraderSource.indexOf("completeDecisionLearningLifecycle(signal.id)");
+  const catchAfterCallIdx = lifecycleCallIdx === -1 ? -1 : paperTraderSource.indexOf(".catch(", lifecycleCallIdx);
+  // 600 chars comfortably covers an intervening `.then(() => { ...two
+  // trigger calls... })` block without matching some unrelated, distant
+  // `.catch(` elsewhere in the file.
+  const hasCatchHandler = catchAfterCallIdx !== -1 && catchAfterCallIdx - lifecycleCallIdx < 600;
+  check("32. completeDecisionLearningLifecycle(...) call has a .catch() handler in writeClose() — a Learning DB failure cannot throw out of writeClose()", hasCatchHandler, "no .catch() found within range of the lifecycle call");
 }
 
 // ---------------------------------------------------------------------------

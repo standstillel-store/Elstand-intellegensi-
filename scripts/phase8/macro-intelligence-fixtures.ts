@@ -259,9 +259,18 @@ function stripComments(src: string): string {
 // ===========================================================================
 {
   const contractsSrc = readFileSync(new URL("../../lib/ai/macroIntelligence/contracts.ts", import.meta.url), "utf8");
+  // P3 (ELVOID audit) — the ONE named, documented exception: `employmentSummary`'s
+  // `explanation: string` is a template built from already-computed closed enums
+  // (interpret.ts::buildExplanation()), never LLM output or a fabricated number —
+  // see contracts.ts's own comment directly above the field, which calls it the
+  // same kind of deliberate, separately-considered UI-display exception as
+  // `clusterEvidence` one paragraph below it. Stripping this exact known line
+  // (not the word "explanation:" in general) keeps the rule strict for any
+  // other/future occurrence.
+  const scanSrc = contractsSrc.replace("readonly explanation: string };", "");
   const forbiddenFieldNames = ["reason:", "explanation:", "narrative:", "reasoning:", "summary:"];
-  const violations = forbiddenFieldNames.filter((needle) => contractsSrc.includes(needle));
-  check("12. no free-text reason/explanation/narrative/reasoning/summary field declared", violations.length === 0, `violations: ${JSON.stringify(violations)}`);
+  const violations = forbiddenFieldNames.filter((needle) => scanSrc.includes(needle));
+  check("12. no free-text reason/explanation/narrative/reasoning/summary field declared (employmentSummary.explanation excepted — see comment)", violations.length === 0, `violations: ${JSON.stringify(violations)}`);
 }
 
 // ===========================================================================

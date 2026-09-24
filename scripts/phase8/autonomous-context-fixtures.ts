@@ -333,21 +333,45 @@ async function walk(dir: string, out: string[] = []): Promise<string[]> {
 }
 
 // ===========================================================================
-// 20. Repo-wide scan — lib/ai/autonomous/* has zero external call sites (UNWIRED)
+// 20. Repo-wide scan — lib/ai/autonomous/* has exactly the Phase 8.2.9-approved
+//     external call sites, no unapproved/unexpected sprawl
 // ===========================================================================
 {
+  // P3 (ELVOID audit): this file's own header comment says "UNWIRED... wiring
+  // a consumer is a separately-approved future phase." Git history shows
+  // that phase already happened: commit 8a8c8b6 "Phase 8.2.9 Autonomous
+  // Runtime" (2026-09-02) wired `buildAutonomousDecisionContext` into
+  // orchestrator.ts — one day before this file's own last edit — so the
+  // header comment and this check were simply never updated afterward.
+  // Rather than re-assert a "zero callers" premise that's no longer true of
+  // the real, approved, production wiring, this now pins the exact expected
+  // caller set so any OTHER/future caller still fails loudly.
   const repoRoot = new URL("../../", import.meta.url).pathname;
   const dirsToScan = ["lib", "app", "components"];
+  const APPROVED_CALLERS = new Set([
+    "lib/ai/autonomousDecision/contracts.ts", // type-only
+    "lib/ai/decisionQualification/contracts.ts", // type-only
+    "lib/ai/preEntryValidation/contracts.ts", // type-only
+    "lib/ai/autonomousRuntime/dedup.ts", // type-only
+    "lib/ai/autonomousRuntime/orchestrator.ts", // Phase 8.2.9 — the real call site
+  ]);
   const offenders: string[] = [];
   for (const dirName of dirsToScan) {
     const files = await walk(path.join(repoRoot, dirName));
     for (const file of files) {
       if (file.includes(`${path.sep}lib${path.sep}ai${path.sep}autonomous${path.sep}`)) continue; // the module's own files don't count as external callers
       const src = await readFile(file, "utf-8");
-      if (src.includes("ai/autonomous")) offenders.push(path.relative(repoRoot, file));
+      const relPath = path.relative(repoRoot, file).replace(/\\/g, "/");
+      // Exact-path boundary (`/autonomous/contracts` or `/autonomous/context`
+      // followed by a quote) — not the bare `includes("ai/autonomous")` that
+      // used to also match sibling modules like autonomousDecision/
+      // autonomousRuntime/autonomousLearning/autonomousSnapshot etc.
+      if (/ai\/autonomous\/(contracts|context)["']/.test(src) && !APPROVED_CALLERS.has(relPath)) {
+        offenders.push(relPath);
+      }
     }
   }
-  check("20. No file under lib/, app/, or components/ (outside lib/ai/autonomous itself) imports from lib/ai/autonomous/* — zero external call sites, fully unwired", offenders.length === 0, `found references in: ${offenders.join(", ")}`);
+  check("20. lib/ai/autonomous/* has exactly the Phase 8.2.9-approved external callers, no unapproved sprawl", offenders.length === 0, `unapproved references in: ${offenders.join(", ")}`);
 }
 
 // ===========================================================================

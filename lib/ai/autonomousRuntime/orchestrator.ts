@@ -450,7 +450,18 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     completedAt: nowIso(),
     durationMs: elapsedSince(qualifyStartAt).durationMs,
     message: `status=${qualification.status}`,
-    metadata: { status: qualification.status },
+    // P3 hardening (mirrors the PRE_ENTRY fix above, same historical gap):
+    // qualification.signals/negativeMemory were already computed by
+    // qualifyAutonomousDecision() — this only persists more of what already
+    // exists, so a future CONFLICTED/INSUFFICIENT_CONTEXT cycle is
+    // attributable per-case instead of just "status: REJECT".
+    metadata: {
+      status: qualification.status,
+      signals: qualification.signals,
+      negativeMemorySignalPresent: qualification.signals.negativeMemorySignalPresent,
+      negativeMemoryState: qualification.negativeMemory?.state ?? null,
+      negativeMemoryNegativeCount: qualification.negativeMemory?.negativeCount ?? null,
+    },
   });
   const macro = analyzeMacroIntelligence({ asOf, calendar });
   const eventImpact = analyzeEventImpact({ asOf, macro, news });
@@ -520,7 +531,22 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
     completedAt: nowIso(),
     durationMs: elapsedSince(preEntryStartAt).durationMs,
     message: `status=${preEntry.status}`,
-    metadata: { status: preEntry.status },
+    // P3 hardening: previously only { status } was persisted, which made it
+    // impossible to prove per-cycle WHY a BLOCKED/CAUTION/INSUFFICIENT_CONTEXT
+    // status fired (see P2 audit — 1,007 historical BLOCKED cycles could not
+    // be attributed to a specific gate). `preEntry.signals` is the exact,
+    // already-computed, deterministic boolean set `selectValidationStatus()`
+    // used — nothing here is recomputed or fabricated. The four evidence
+    // fields below explain *why* the macro/eventImpact booleans are what they
+    // are, without re-deriving them.
+    metadata: {
+      status: preEntry.status,
+      signals: preEntry.signals,
+      macroEventRisk: macro?.eventRisk ?? null,
+      macroDataAvailability: macro?.dataAvailability ?? null,
+      eventImpactRisk: eventImpact?.impactRisk ?? null,
+      newsDataAvailability: eventImpact?.newsAvailability ?? null,
+    },
   });
   const decision: AutonomousDecisionEngineResult = decideAutonomous({ decisionContext: autonomousContext, qualification, macro, eventImpact, preEntry });
 

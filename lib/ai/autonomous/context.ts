@@ -40,10 +40,14 @@
 //   - Pure, synchronous, deterministic. No `Date.now()`, no randomness, no
 //     module-level state, no mutation of any input array/object. Same
 //     inputs -> deep-equal output.
-//   - UNWIRED: this file has zero callers anywhere else in the app. No
-//     route, no cron, no UI, no execution call-site imports from this
-//     module. Wiring a consumer is a separately-approved future phase
-//     (8.2.1+).
+//   - WIRED (Phase 8.2.9): `lib/ai/autonomousRuntime/orchestrator.ts` calls
+//     `buildAutonomousDecisionContext()` — the wiring this file originally
+//     anticipated for "8.2.1+" landed on schedule in 8.2.9. `contracts.ts`'s
+//     types are additionally shared (type-only) by
+//     `autonomousDecision/contracts.ts`, `decisionQualification/contracts.ts`,
+//     `preEntryValidation/contracts.ts`, and `autonomousRuntime/dedup.ts`.
+//     This function itself is unchanged by that wiring: still pure,
+//     read-only, assembly-only — see the ASSEMBLY BOUNDARY note above.
 // ---------------------------------------------------------------------------
 
 import type { OracleAssessment } from "@/lib/ai/oracle/gradingTypes";
