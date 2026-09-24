@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LayoutDashboard, Bug, Gift, Users, ScrollText, LogOut, Loader2 } from "lucide-react";
+import { LayoutDashboard, Bug, Lightbulb, Gift, Users, ScrollText, LogOut, Loader2 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Phase 6.6.0.1 section 6 — Admin Dashboard shell.
@@ -17,12 +17,13 @@ import { LayoutDashboard, Bug, Gift, Users, ScrollText, LogOut, Loader2 } from "
 const NAV_ITEMS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "dashboard" as const, comingSoon: false },
   { key: "bug-hunter", label: "Bug Hunter", icon: Bug, href: "bug-hunter" as const, comingSoon: false },
+  { key: "suggestions", label: "Suggestions", icon: Lightbulb, href: "suggestions" as const, comingSoon: false },
   { key: "rewards", label: "Rewards", icon: Gift, href: null, comingSoon: true },
   { key: "users", label: "Users", icon: Users, href: null, comingSoon: true },
   { key: "logs", label: "System Logs", icon: ScrollText, href: "logs" as const, comingSoon: false },
 ];
 
-export function AdminDashboardShell({ adminEntry, active, children }: { adminEntry: string; active: "dashboard" | "logs" | "bug-hunter"; children: ReactNode }) {
+export function AdminDashboardShell({ adminEntry, active, children }: { adminEntry: string; active: "dashboard" | "logs" | "bug-hunter" | "suggestions"; children: ReactNode }) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 

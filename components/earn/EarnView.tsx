@@ -13,6 +13,7 @@ import {
   Wallet as WalletIcon,
   AlertTriangle,
   Bug,
+  Lightbulb,
   CheckCircle2,
   Waves,
 } from "lucide-react";
@@ -471,6 +472,7 @@ export function EarnView() {
               <QuickActionTile href={ADD_LIQUIDITY_URL} external icon={<Droplets size={16} />} label="Add Liquidity" />
               <QuickActionTile href="#faucet" icon={<Waves size={16} />} label="Testnet Faucet" />
               <QuickActionTile href="#report-bug" icon={<Bug size={16} />} label="Report Bug" />
+              <QuickActionTile href="/earn/suggestions" icon={<Lightbulb size={16} />} label="Suggestions" />
             </div>
           </section>
 
@@ -481,7 +483,7 @@ export function EarnView() {
               used before (untouched), and Report a Bug still links to the
               existing /earn/bug-hunter flow — only the shell around them
               changed. */}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <section id="report-bug" className="scroll-mt-24 relative overflow-hidden rounded-md border border-line bg-bg-surface p-4 shadow-card">
               <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-signal/25 blur-3xl" />
               <div className="pointer-events-none absolute right-5 top-5 flex h-14 w-14 rotate-45 items-center justify-center rounded-2xl border border-signal/40 bg-signal/10 shadow-glow-signal">
@@ -497,6 +499,27 @@ export function EarnView() {
                 className="mt-3 inline-block rounded-md border border-signal/40 bg-signal/10 px-3 py-1.5 text-xs font-semibold text-signal-glow transition-colors hover:bg-signal/20"
               >
                 Report a Bug
+              </a>
+            </section>
+
+            {/* Suggestions — same "card links out to a full page" shell as
+                Bug Hunter; own page keeps the submission form + claim
+                status list out of the main Earn overview. */}
+            <section id="suggestions" className="scroll-mt-24 relative overflow-hidden rounded-md border border-line bg-bg-surface p-4 shadow-card">
+              <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-up/25 blur-3xl" />
+              <div className="pointer-events-none absolute right-5 top-5 flex h-14 w-14 rotate-45 items-center justify-center rounded-2xl border border-up/40 bg-up/10 shadow-glow-up">
+                <Lightbulb size={22} className="-rotate-45 text-up" />
+              </div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-up">Suggestions</p>
+              <p className="mt-1 max-w-[70%] text-sm font-medium text-ink">Have an idea?</p>
+              <p className="mt-1 max-w-[75%] text-xs text-ink-muted">
+                Submit valuable ideas, improvements, or feedback for ELSTAND and earn ELS rewards.
+              </p>
+              <a
+                href="/earn/suggestions"
+                className="mt-3 inline-block rounded-md border border-up/40 bg-up/10 px-3 py-1.5 text-xs font-semibold text-up transition-colors hover:bg-up/20"
+              >
+                Submit a Suggestion
               </a>
             </section>
 

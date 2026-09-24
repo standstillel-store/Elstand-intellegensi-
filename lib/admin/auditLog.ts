@@ -25,7 +25,10 @@ export type AdminAuditAction =
   | "BUG_REPORT_REJECTED"
   | "BUG_CLAIM_INITIATED"
   | "BUG_CLAIM_COMPLETED"
-  | "BUG_CLAIM_FAILED";
+  | "BUG_CLAIM_FAILED"
+  // Phase 6.6.4 — Suggestions admin actions.
+  | "SUGGESTION_APPROVED"
+  | "SUGGESTION_REJECTED";
 
 // Single shared admin identity for this phase — there is no per-admin
 // username/account concept yet (one password, see spec section 3), so this
