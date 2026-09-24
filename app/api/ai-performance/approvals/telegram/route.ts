@@ -3,6 +3,8 @@ import { handleTelegramWebhook, MAX_WEBHOOK_BODY_BYTES } from "@/lib/ai/evolutio
 import { createApprovalStore } from "@/lib/ai/evolutionApproval/repository";
 import { createTelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
 import { emitApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
+import { buildChangeArtifact } from "@/lib/ai/evolutionArtifact/create";
+import { persistChangeArtifact } from "@/lib/ai/evolutionArtifact/repository";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "malformed" }, { status: 400 });
   }
   const bodyText = await request.text();
+  const store = createApprovalStore();
 
   const result = await handleTelegramWebhook(
     {
@@ -48,7 +51,33 @@ export async function POST(request: Request) {
         TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
       },
     },
-    { store: createApprovalStore(), createTelegram: (config) => createTelegramClient(config), diagnose: emitApprovalDiagnostic }
+    { store, createTelegram: (config) => createTelegramClient(config), diagnose: emitApprovalDiagnostic }
   );
+
+  // P4 Step 2 — controlled change artifact. Strictly AFTER the response
+  // above was already computed from handleTelegramWebhook()'s own decision
+  // (this block cannot influence it), and ONLY when that decision was a
+  // freshly-recorded, durable "APPROVED" — never for ALREADY_APPROVED (the
+  // artifact for that record was already attempted the first time it was
+  // approved), never for REJECTED, never for any other outcome. Re-fetches
+  // the record AND the approval row from the store independently (never
+  // trusts result.body alone) before building anything. Wrapped so nothing
+  // here can ever change the HTTP status/body already returned to Telegram,
+  // and no error here is thrown out of this handler.
+  if (result.body.outcome === "APPROVED" && result.body.recordHash) {
+    try {
+      const recordHash = result.body.recordHash;
+      const [fetchedRecord, fetchedApproval] = await Promise.all([store.getRecord(recordHash), store.getApproval(recordHash)]);
+      if (fetchedRecord.status === "FOUND" && fetchedApproval.status === "FOUND" && fetchedApproval.approval.resultingStatus === "HUMAN_APPROVED") {
+        const artifact = buildChangeArtifact(fetchedRecord.record, recordHash);
+        if (artifact !== null) await persistChangeArtifact(artifact);
+      }
+    } catch {
+      // change-artifact generation is best-effort observability on top of an
+      // already-recorded human decision — it must never affect the response
+      // already sent above, and never retries/blocks the webhook.
+    }
+  }
+
   return NextResponse.json(result.body, { status: result.status });
 }
