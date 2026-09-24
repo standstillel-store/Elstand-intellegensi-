@@ -2,13 +2,12 @@
 // ELVOID Macro Intelligence — ingestion lock (Phase G.5, Correction 3).
 //
 // Reuses the claim/release + stale-reclaim ALGORITHM from
-// lib/ai/autonomousRuntime/lock.ts, but against Main Supabase
-// (getSupabase(), same place economic_releases/economic_observations
-// live) and its own small table — NOT the autonomous-runtime lock table,
-// which deliberately lives in the isolated Learning DB for an unrelated
-// concern (decision-learning data). See the Phase G architecture doc's
-// "Conflict flagged before implementation" section for the full
-// rationale.
+// lib/ai/autonomousRuntime/lock.ts, against the Learning DB
+// (getLearningSupabase(), same place economic_releases/
+// economic_observations live) and its own small table
+// (macro_ingestion_lock) — NOT the autonomous_runtime_lock table, which
+// serves an unrelated concern (autonomous runtime). Two separate tables
+// in the same project; they never share rows.
 //
 // THREE DISTINCT STATES (Correction 3 — these are NOT interchangeable):
 //   ACQUIRED       — caller may proceed with the write.
@@ -23,7 +22,7 @@
 //                    ingestion on UNAVAILABLE.
 // ---------------------------------------------------------------------------
 
-import { getSupabase } from "@/lib/supabase";
+import { getLearningSupabase } from "@/lib/ai/learning/db";
 
 const LOCK_STALE_MS = 10 * 60 * 1000; // 10 minutes — matches autonomousRuntime/lock.ts's own stale window
 
@@ -37,8 +36,8 @@ function isUniqueViolation(error: { code?: string } | null): boolean {
 }
 
 export async function claimIngestionLock(lockId: string): Promise<LockClaim> {
-  const db = getSupabase();
-  if (!db) return { state: "UNAVAILABLE", reason: "Main Supabase is not configured (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY missing)" };
+  const db = getLearningSupabase();
+  if (!db) return { state: "UNAVAILABLE", reason: "Learning Supabase is not configured (ELVOID_LEARNING_SUPABASE_URL/ELVOID_LEARNING_SUPABASE_SERVICE_ROLE_KEY missing)" };
 
   const nowIso = new Date().toISOString();
   const staleBeforeIso = new Date(Date.now() - LOCK_STALE_MS).toISOString();
@@ -90,7 +89,7 @@ export async function claimIngestionLock(lockId: string): Promise<LockClaim> {
 }
 
 async function releaseLock(lockId: string): Promise<void> {
-  const db = getSupabase();
+  const db = getLearningSupabase();
   if (!db) return; // nothing to release against if storage vanished mid-run
   const { error } = await db.from("macro_ingestion_lock").update({ running: false, updated_at: new Date().toISOString() }).eq("id", lockId);
   if (error) console.error(`[economicData:ingestionLock] release(${lockId}): ${error.message}`);

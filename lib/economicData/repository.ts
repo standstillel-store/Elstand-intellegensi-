@@ -1,10 +1,12 @@
 // ---------------------------------------------------------------------------
 // ELVOID Macro Intelligence — repository.
 //
-// Only place in this subsystem that touches Supabase. Reuses the existing
-// getSupabase() from lib/supabase.ts (service-role client, null when the
-// two env vars aren't set) and follows the same "degrade to null/empty,
-// never throw" convention as lib/ai/decisionMemory/repository.ts.
+// Only place in this subsystem that touches Supabase. Uses
+// getLearningSupabase() from lib/ai/learning/db.ts (service-role client,
+// null when the two ELVOID_LEARNING_* env vars aren't set) — the
+// economic_releases / economic_observations tables live in the existing
+// Learning DB project, NOT in Main/Core. Follows the same "degrade to
+// null/empty, never throw" convention as lib/ai/decisionMemory/repository.ts.
 //
 // The calculation engine (interpret.ts/clusters.ts/regime.ts) never
 // queries Supabase directly — it only ever receives EconomicRelease[] /
@@ -17,7 +19,7 @@
 // never inserts a duplicate.
 // ---------------------------------------------------------------------------
 
-import { getSupabase } from "@/lib/supabase";
+import { getLearningSupabase } from "@/lib/ai/learning/db";
 import type { CanonicalIndicatorId } from "./canonicalIndicators";
 import type { EconomicObservation, EconomicRelease } from "./types";
 
@@ -88,7 +90,7 @@ function fromObservationRow(row: Record<string, unknown>): EconomicObservation {
 
 export async function upsertReleases(releases: readonly EconomicRelease[]): Promise<boolean> {
   if (!releases.length) return true;
-  const db = getSupabase();
+  const db = getLearningSupabase();
   if (!db) return false;
   const { error } = await db.from("economic_releases").upsert(releases.map(toReleaseRow), { onConflict: "id" });
   if (error) {
@@ -100,7 +102,7 @@ export async function upsertReleases(releases: readonly EconomicRelease[]): Prom
 
 export async function upsertObservations(observations: readonly EconomicObservation[]): Promise<boolean> {
   if (!observations.length) return true;
-  const db = getSupabase();
+  const db = getLearningSupabase();
   if (!db) return false;
   const { error } = await db.from("economic_observations").upsert(observations.map(toObservationRow), { onConflict: "id" });
   if (error) {
@@ -112,7 +114,7 @@ export async function upsertObservations(observations: readonly EconomicObservat
 
 /** Most recent releases for one indicator, newest first. Returns `null` (not []) when Supabase isn't configured, so callers can distinguish "no storage available" from "storage available but empty" — same distinction lib/ai/decisionMemory/repository.ts makes. */
 export async function getRecentReleases(indicatorId: CanonicalIndicatorId, country: string, limit = 6): Promise<EconomicRelease[] | null> {
-  const db = getSupabase();
+  const db = getLearningSupabase();
   if (!db) return null;
   const { data, error } = await db
     .from("economic_releases")
@@ -129,7 +131,7 @@ export async function getRecentReleases(indicatorId: CanonicalIndicatorId, count
 }
 
 export async function getRecentObservations(indicatorId: CanonicalIndicatorId, country: string, limit = 12): Promise<EconomicObservation[] | null> {
-  const db = getSupabase();
+  const db = getLearningSupabase();
   if (!db) return null;
   const { data, error } = await db
     .from("economic_observations")
