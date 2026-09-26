@@ -1596,3 +1596,120 @@ which was a design flaw, so it now can — without ever writing a value:
 Fixtures: 73 -> 80 (D1-D7, incl. quoted / newline-suffixed values and a secret
 with characters Telegram rejects); mutation harness: 35 -> 41 mutations, all
 detected. No behavior change to decisions, statuses, HTTP codes or persistence.
+
+### Phase 9 — controlled self-coding (approval → code → Git → deploy → Telegram)
+The "future promotion phase" 8.6.7's own known-limitations note said would have
+to be "separately specified and approved" — it now has been. This is
+additive only: `evolution_change_artifacts` (P4) is untouched, `patch_status`
+stays `NOT_EXECUTED` there forever. Phase 9 tracks its OWN state in two new
+tables keyed off the SAME `record_hash`.
+
+**Flow, wired into the existing Telegram webhook, right after the Change
+Artifact block:** a freshly `AWAITING_HUMAN_PATCH` artifact now also runs
+`lib/ai/evolutionPipeline/run.ts` — generate code (AI Core, scope-locked to
+the artifact's own `affectedFiles`) → isolated branch + commit + merge
+(GitHub REST API) → best-effort inline deploy check → Telegram result. Never
+affects the HTTP response already sent to Telegram; never retried by this
+route.
+
+**Code generation** (`lib/ai/evolutionCoding`) reuses the existing AI Core
+plumbing (`callAiCore`) — no new provider, no new network client. The model
+is shown ONLY the artifact's own fields plus the CURRENT content of every
+file in its `affectedFiles`, and must return full-file replacements for
+exactly those paths (no diff/patch library exists in this repo, so a
+complete, checkable file is asked for instead of a hunk this app has no way
+to apply — see `scopeGuard.ts`'s own header). `scopeGuard.ts` then
+independently rejects: any path outside the artifact's own scope, a fixed
+global denylist (TickStorage, `bn_trade_ticks`, Footprint, Orderbook,
+`evolutionApproval/`, any migration, the qualification/execution/risk/
+decision modules) even if it somehow appeared inside scope, path traversal,
+duplicate paths, zero files, and forbidden content (`eval(`, `new Function(`,
+`child_process`, or a reference to any of the four secret env var NAMES).
+
+**Git** (`lib/ai/evolutionGit`) uses the GitHub REST API only — this app runs
+as Vercel serverless functions with no local working directory and no `git`
+binary at runtime, so there is no local process to shell out to; the
+Contents/Refs/Merges API is the automated form of the exact same "GitHub web
+UI upload" this project already deploys through by hand. One deterministic
+branch per artifact (`elvoid/phase9/<first16hexofrecordHash>`), base SHA
+captured before writing, files written sequentially (never in parallel —
+each commit's parent must be correct), then merged into the base branch via
+the Merges API. A 409 is reported as `MERGE_CONFLICT`, distinctly from any
+other `MERGE_FAILED`.
+
+**Deploy** (`lib/ai/evolutionDeploy`) deliberately adds NO "trigger
+deployment" call — merging into the base branch already starts a Production
+deployment through this project's existing Vercel↔GitHub Git integration,
+unchanged. This module only WATCHES: a small, bounded (2 attempts, 2s apart)
+inline check right after merge, and — for the common case where the build is
+still running when the request returns — a new webhook route,
+`POST /api/ai-performance/approvals/deployment-webhook`, that Vercel calls on
+`deployment.succeeded` / `deployment.error` / `deployment.canceled`, verified
+by `x-vercel-signature` (HMAC-SHA1, constant-time compare) before anything is
+read from the payload. `PUSH_SUCCESS_DEPLOY_PENDING` is a genuinely distinct,
+persisted state from `DEPLOY_SUCCESS` / `DEPLOY_FAILED` / `DEPLOY_TIMEOUT` /
+`DEPLOY_UNKNOWN` (Section K's own required distinction) — a Telegram message
+is sent for the push, and a second, separate one for the eventual deploy
+result.
+
+**Migration** — `supabase/learning/migrations/2026-09d-evolution-patch-runs.sql`
+(additive, apply AFTER 2026-09c): `evolution_patch_runs` (one mutable row per
+artifact — the first mutable `evolution_*` table in this codebase, because
+this is the first genuinely asynchronous multi-stage process; a BEFORE
+INSERT trigger requires an `AWAITING_HUMAN_PATCH` artifact to already exist,
+a BEFORE UPDATE trigger keeps `record_hash`/`artifact_id`/`proposal_id`/
+`started_at` immutable once set, DELETE/TRUNCATE rejected) and
+`evolution_patch_events` (append-only lineage log, same
+UPDATE/DELETE/TRUNCATE-rejected convention as every table before it). **Not
+yet applied to the live Learning DB from this environment** — no network, no
+credentials here; same caveat every migration file in this repo already
+states.
+
+### Setup (no secret is ever pasted into chat, code or logs)
+Names only — set real values in the deployment environment:
+`GITHUB_TOKEN` (repo write scope), `GITHUB_OWNER`, `GITHUB_REPO`,
+`GITHUB_BASE_BRANCH` (defaults to `main`), `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`,
+`VERCEL_TEAM_ID` (only if the project is under a team), `VERCEL_WEBHOOK_SECRET`.
+Register the Vercel deployment webhook once, from the Vercel dashboard
+(Project Settings → Webhooks) or via its API, subscribed to
+`deployment.succeeded`, `deployment.error`, `deployment.canceled`, pointed at
+`https://<your-domain>/api/ai-performance/approvals/deployment-webhook`, using
+the same value as `VERCEL_WEBHOOK_SECRET`.
+
+### Tests
+`scripts/phase9/evolution-coding-fixtures.ts` (11) and
+`scripts/phase9/evolution-git-and-pipeline-fixtures.ts` (12) — both run for
+real in this sandbox, 23/23 PASS: scope guard (in-scope pass; out-of-scope,
+denylisted-even-if-in-scope, path traversal, duplicate, empty-list,
+forbidden-content all rejected), `generateCodeForArtifact` genuinely exercises
+its own `NO_AFFECTED_FILES_SCOPE` and `NOT_CONFIGURED` paths (no AI Core
+provider is configured in this sandbox — not simulated, actually true here),
+deterministic branch/patch-run naming, and every Telegram message
+(push-pending, deploy-success, commit-success-deploy-failed,
+generic-failure) checked for required fields and for the absence of any
+secret-lookalike substring.
+
+### Known limitations
+- **Not exercised end-to-end**: this sandbox has no network access and no
+  `GITHUB_TOKEN`/`VERCEL_TOKEN`/AI Core credentials, so `githubClient.ts`,
+  `vercelClient.ts` and the AI Core code-generation call itself are
+  syntax-correct and offline-fixture-tested at the boundary
+  (`NOT_CONFIGURED` paths) but their real HTTP calls have never actually run.
+  The first real approval after this ships IS the first real end-to-end test
+  of the Git/deploy path — same caveat this project's Telegram webhook itself
+  had before its first production log.
+- There is no `tsc`/`next build` inside this pipeline's own runtime — Vercel's
+  own build (triggered by the merge) is the real, authoritative type-check
+  and build step; a build failure there surfaces as `DEPLOY_FAILED`
+  (COMMIT SUCCESS, DEPLOY FAILED), not as a separate pre-commit gate.
+  `npm run build`/regression fixtures for Phase 9's OWN code (the 23 above)
+  were run in this delivery sandbox, not automatically for every future
+  AI-generated patch.
+- No second human review of the generated diff before merge — an explicit,
+  informed choice for this phase (full auto to production, single Telegram
+  APPROVE as final authorization); the merge commit itself remains reviewable
+  on GitHub after the fact.
+- A `PUSH_SUCCESS_DEPLOY_PENDING` run whose Vercel webhook is never delivered
+  (webhook not yet registered, or a delivery lost) has no automatic follow-up
+  poll beyond the bounded inline check — it stays pending until the webhook
+  arrives or someone checks `evolution_patch_runs` directly.

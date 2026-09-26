@@ -5,6 +5,7 @@ import { createTelegramClient } from "@/lib/ai/evolutionApproval/telegramClient"
 import { emitApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
 import { buildChangeArtifact } from "@/lib/ai/evolutionArtifact/create";
 import { persistChangeArtifact } from "@/lib/ai/evolutionArtifact/repository";
+import { runPhase9Pipeline } from "@/lib/ai/evolutionPipeline/run";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,12 +19,21 @@ export const runtime = "nodejs";
 // VALID verification, idempotent immutable insert); this file only reads the
 // request and the three env values and hands them over.
 //
-// It records a HUMAN DECISION and answers Telegram. It deploys nothing,
-// activates nothing, promotes nothing, and never logs the request, headers or
-// any secret. Its only log output is one fixed line per event from
+// It records a HUMAN DECISION and answers Telegram FIRST — nothing below
+// this can change that response. It never logs the request, headers or any
+// secret. Its only log output is one fixed line per event from
 // diagnostics.ts (event name, env variable NAMES, outcome codes) — enough to
 // explain a 503 without writing a value. Only POST is exported (any other method is answered 405 by the
 // framework); there is no GET that could cause persistence.
+//
+// PHASE 9 (additive, Sept 2026): a freshly-recorded APPROVED decision now
+// also runs lib/ai/evolutionPipeline/run.ts — the ONLY place in this
+// repository that generates code, commits, pushes and merges. This route
+// itself still deploys nothing directly; Vercel's own existing Git
+// integration is what turns a merge into a deployment (see
+// lib/ai/evolutionDeploy's header for why there is no separate "trigger
+// deploy" call). See app/api/ai-performance/approvals/deployment-webhook/
+// route.ts for how a deployment's terminal result reaches Telegram.
 //
 // Register the webhook once, from your own shell, so no secret is ever pasted
 // anywhere (secret_token must be 1-256 characters of A-Z a-z 0-9 _ -):
@@ -70,7 +80,27 @@ export async function POST(request: Request) {
       const [fetchedRecord, fetchedApproval] = await Promise.all([store.getRecord(recordHash), store.getApproval(recordHash)]);
       if (fetchedRecord.status === "FOUND" && fetchedApproval.status === "FOUND" && fetchedApproval.approval.resultingStatus === "HUMAN_APPROVED") {
         const artifact = buildChangeArtifact(fetchedRecord.record, recordHash);
-        if (artifact !== null) await persistChangeArtifact(artifact);
+        if (artifact !== null) {
+          await persistChangeArtifact(artifact);
+          // Phase 9 — only when the artifact is actually awaiting a patch
+          // (never for VALIDATION_FAILED). Same isolation as the artifact
+          // block itself: never affects the response already computed
+          // above, never retried by this route.
+          if (artifact.artifactStatus === "AWAITING_HUMAN_PATCH") {
+            await runPhase9Pipeline(artifact, {
+              GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+              GITHUB_OWNER: process.env.GITHUB_OWNER,
+              GITHUB_REPO: process.env.GITHUB_REPO,
+              GITHUB_BASE_BRANCH: process.env.GITHUB_BASE_BRANCH,
+              VERCEL_TOKEN: process.env.VERCEL_TOKEN,
+              VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
+              VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
+              TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+              TELEGRAM_APPROVER_ID: process.env.TELEGRAM_APPROVER_ID,
+              TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
+            });
+          }
+        }
       }
     } catch {
       // change-artifact generation is best-effort observability on top of an
