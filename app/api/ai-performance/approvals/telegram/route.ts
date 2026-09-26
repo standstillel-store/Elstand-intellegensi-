@@ -4,7 +4,7 @@ import { createApprovalStore } from "@/lib/ai/evolutionApproval/repository";
 import { createTelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
 import { emitApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
 import { buildChangeArtifact } from "@/lib/ai/evolutionArtifact/create";
-import { persistChangeArtifact } from "@/lib/ai/evolutionArtifact/repository";
+import { persistChangeArtifact, getChangeArtifactByRecordHash } from "@/lib/ai/evolutionArtifact/repository";
 import { runPhase9Pipeline } from "@/lib/ai/evolutionPipeline/run";
 
 export const dynamic = "force-dynamic";
@@ -86,19 +86,39 @@ export async function POST(request: Request) {
           // (never for VALIDATION_FAILED). Same isolation as the artifact
           // block itself: never affects the response already computed
           // above, never retried by this route.
+          //
+          // `artifact` here is ChangeArtifactWithoutTimestamp — create.ts
+          // never stamps generatedAt (no Date.now() in a pure builder,
+          // same convention as every other WithoutTimestamp type in this
+          // codebase); the Learning DB column is `generated_at timestamptz
+          // not null default now()`, so the real, non-fabricated
+          // generatedAt only exists once the row above has actually been
+          // written. runPhase9Pipeline requires the full ChangeArtifact
+          // (see evolutionCoding/generate.ts and prompts.ts, which are
+          // typed against it too), so re-read the just-persisted row —
+          // same accessor evolutionArtifact/repository.ts already exposes
+          // for exactly this shape — instead of widening the type or
+          // fabricating a timestamp. If the Learning DB is not configured,
+          // or the read-back otherwise comes back empty, there is no
+          // legitimate generatedAt to use: skip Phase 9 for this event
+          // (fail closed, same as the NOT_CONFIGURED path inside
+          // runPhase9Pipeline itself) rather than invent one.
           if (artifact.artifactStatus === "AWAITING_HUMAN_PATCH") {
-            await runPhase9Pipeline(artifact, {
-              GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-              GITHUB_OWNER: process.env.GITHUB_OWNER,
-              GITHUB_REPO: process.env.GITHUB_REPO,
-              GITHUB_BASE_BRANCH: process.env.GITHUB_BASE_BRANCH,
-              VERCEL_TOKEN: process.env.VERCEL_TOKEN,
-              VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
-              VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
-              TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
-              TELEGRAM_APPROVER_ID: process.env.TELEGRAM_APPROVER_ID,
-              TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
-            });
+            const persistedArtifact = await getChangeArtifactByRecordHash(recordHash);
+            if (persistedArtifact !== null) {
+              await runPhase9Pipeline(persistedArtifact, {
+                GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+                GITHUB_OWNER: process.env.GITHUB_OWNER,
+                GITHUB_REPO: process.env.GITHUB_REPO,
+                GITHUB_BASE_BRANCH: process.env.GITHUB_BASE_BRANCH,
+                VERCEL_TOKEN: process.env.VERCEL_TOKEN,
+                VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
+                VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
+                TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+                TELEGRAM_APPROVER_ID: process.env.TELEGRAM_APPROVER_ID,
+                TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
+              });
+            }
           }
         }
       }

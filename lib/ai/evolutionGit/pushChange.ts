@@ -15,8 +15,8 @@
 // ---------------------------------------------------------------------------
 
 import type { GeneratedFile } from "@/lib/ai/evolutionCoding/contracts";
-import { createBranch, getBranchHeadSha, getFileContent, mergeBranch, putFileContents, type GitConfig } from "./githubClient";
-import type { GitPushResult } from "./contracts";
+import { createBranch, getBranchHeadSha, getFileContent, mergeBranch, putFileContents } from "./githubClient";
+import type { GitConfig, GitPushResult } from "./contracts";
 
 /** Deterministic, one branch per artifact — a redelivered/retried run reuses the same name rather than piling up branches. Git ref names may not contain `:`; recordHash is 64 lowercase hex so no further sanitizing is needed. */
 export function branchNameFor(recordHash: string): string {
