@@ -1,10 +1,12 @@
 import Link from "next/link";
 import clsx from "clsx";
-import { LayoutDashboard, ClipboardList, Wallet, Briefcase, LineChart } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Wallet, Briefcase, LineChart, Trophy, ListChecks, Scale, Gauge, TrendingUp, TrendingDown } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { EquityCurveChart } from "@/components/paper-trader/EquityCurveChart";
 import { CognitiveMapSection } from "@/components/ai-performance/cognitive/CognitiveMapSection";
+import { AiCoreGrid } from "@/components/ai-performance/cognitive/AiCoreGrid";
+import { EvolutionCharge } from "@/components/ai-performance/cognitive/EvolutionCharge";
 import { SelfPerformancePanel } from "@/components/ai-performance/SelfPerformancePanel";
 import { CurrentActivityPanel } from "@/components/ai-performance/CurrentActivityPanel";
 import { ExternalIntelligencePanel } from "@/components/ai-performance/ExternalIntelligencePanel";
@@ -87,7 +89,7 @@ export function AiPerformanceView({
       <div className="flex items-center justify-between gap-3 rounded border border-line bg-[#070a10] px-3 py-2.5">
         <div>
           <p className="text-sm font-bold tracking-wide text-ink">ELVOID AI PERFORMANCE</p>
-          <p className="text-[10px] uppercase tracking-widest text-ink-faint">AI Intelligence Terminal</p>
+          <p className="text-[10px] uppercase tracking-widest text-ink-faint">Cognitive Runtime Command Center</p>
         </div>
         <span className="flex items-center gap-1.5 rounded-full border border-up/30 bg-up/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-up">
           <span className="h-1.5 w-1.5 rounded-full bg-up animate-pulse" />
@@ -103,26 +105,30 @@ export function AiPerformanceView({
             value={na(hasClosedTrades, `${stats.win_rate.toFixed(1)}%`)}
             hint={hasClosedTrades ? `${stats.wins} Win / ${stats.total_trade} Trades` : "No closed trades yet"}
             tone={hasClosedTrades ? (stats.win_rate >= 50 ? "up" : "down") : "neutral"}
+            icon={Trophy}
           />
-          <StatCard label="Closed Trades" value={String(stats.total_trade)} hint="Closed only — open positions excluded" />
+          <StatCard label="Closed Trades" value={String(stats.total_trade)} hint="Closed only — open positions excluded" icon={ListChecks} />
           <StatCard
             label="Profit Factor"
             value={na(hasClosedTrades, stats.profit_factor.toFixed(2))}
             hint="Gross Profit / Loss"
             tone={hasClosedTrades ? (stats.profit_factor >= 1 ? "up" : "down") : "neutral"}
+            icon={Scale}
           />
-          <StatCard label="Avg RR" value={na(hasClosedTrades, `${stats.average_rr.toFixed(2)}R`)} hint="Average realized R-multiple" />
+          <StatCard label="Avg RR" value={na(hasClosedTrades, `${stats.average_rr.toFixed(2)}R`)} hint="Average realized R-multiple" icon={Gauge} />
           <StatCard
             label="Expectancy"
             value={expectancy === null ? "N/A" : `${expectancy >= 0 ? "+" : ""}${expectancy.toFixed(2)}%`}
             hint="Per trade"
             tone={expectancy === null ? "neutral" : expectancy >= 0 ? "up" : "down"}
+            icon={TrendingUp}
           />
           <StatCard
             label="Max Drawdown"
             value={na(hasClosedTrades, `-${stats.max_drawdown.toFixed(1)}%`)}
             hint="From equity peak"
             tone={hasClosedTrades ? "down" : "neutral"}
+            icon={TrendingDown}
           />
         </div>
       </section>
@@ -182,14 +188,30 @@ export function AiPerformanceView({
         <CurrentActivityPanel />
       </div>
 
-      {/* ===== ELVOID COGNITIVE VISUALIZATION (Phase 8.3.1) — additive, real-data-only ===== */}
+      {/* ===== ELVOID COGNITIVE VISUALIZATION (Phase 8.3.1) — additive, real-data-only.
+          AiCoreGrid is a grid re-layout of the exact same 9 registered modules
+          CognitiveMapSection's ring already renders (own independent poll of
+          the same read-only endpoint); EvolutionCharge is a new, honest
+          progress readout over already-computed evolution/validation data.
+          Both get their own row so CognitiveMapSection keeps its original
+          3fr/1fr pairing with ExternalIntelligencePanel below — that ring
+          graph has its own internal 320px terminal sidebar and was sized
+          for ~75% of the row; squeezing a third sibling into that same row
+          would starve it at common laptop widths. Neither new panel changes
+          what CognitiveMapSection/ExternalIntelligencePanel do. ===== */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <AiCoreGrid />
+        <EvolutionCharge />
+      </div>
       <div className="grid gap-4 lg:grid-cols-[3fr_1fr]">
         <CognitiveMapSection />
         <ExternalIntelligencePanel />
       </div>
 
       {/* ===== SELF PERFORMANCE & NOVELTY (Phase 8.6.1) — additive, observation-only ===== */}
-      <SelfPerformancePanel />
+      <div id="performance" className="scroll-mt-20">
+        <SelfPerformancePanel report={report} stats={stats} wallet={wallet} winCount={winCount} lossCount={lossCount} />
+      </div>
 
       {/* ===== RECENT AI TRADES (from ai_journal x ai_signals — real data) ===== */}
       <div id="ai-journal" className="glow-card scroll-mt-20 p-4">
@@ -310,34 +332,13 @@ export function AiPerformanceView({
         </div>
       </div>
 
-      {/* ===== SIGNAL RELIABILITY ===== */}
-      <div id="performance" className="glow-card scroll-mt-20 p-4">
-        <SectionHeader code="REL" title="AI Signal Reliability" />
-        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4 text-sm">
-          <div>
-            <p className="text-[11px] uppercase text-ink-faint">Avg Confidence</p>
-            <p className="mono-num text-lg font-semibold">{report.avgConfidence !== null ? `${report.avgConfidence.toFixed(0)}%` : "N/A"}</p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase text-ink-faint">Sample Size</p>
-            <p className="mono-num text-lg font-semibold">{stats.total_trade}</p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase text-ink-faint">Best Setup</p>
-            <p className="text-sm font-medium">{report.bestSetup ? `${report.bestSetup.setup} (${report.bestSetup.winRate}%)` : "N/A"}</p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase text-ink-faint">Recent Win/Loss</p>
-            <p className="mono-num text-lg font-semibold">
-              <span className="text-up">{winCount}W</span> / <span className="text-down">{lossCount}L</span>
-            </p>
-          </div>
-        </div>
-        <p className="mt-3 text-[11px] text-ink-faint">
-          Signal Quality dan Stability butuh minimal 50 closed trades untuk dianggap stabil secara statistik — di
-          bawah itu tetap ditampilkan sebagai indikasi awal, bukan kesimpulan final.
-        </p>
-      </div>
+      {/* Signal Quality/Stability disclaimer — previously under the standalone
+          "AI Signal Reliability" section (now folded into SelfPerformancePanel's
+          Card A above); kept verbatim so the note isn't silently dropped. */}
+      <p className="px-1 text-[11px] text-ink-faint">
+        Signal Quality dan Stability butuh minimal 50 closed trades untuk dianggap stabil secara statistik — di
+        bawah itu tetap ditampilkan sebagai indikasi awal, bukan kesimpulan final.
+      </p>
 
       {/* ===== Mobile in-page tab bar — anchor jumps within this page =====
           Stacked directly above the global BottomNav (AppShell), not on

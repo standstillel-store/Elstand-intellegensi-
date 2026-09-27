@@ -12,6 +12,11 @@ import type { EvolutionValidationWithoutTimestamp, ValidationResult } from "@/li
 import { APPROVAL_MEANING, APPROVAL_STATUS_LABEL, OBSERVATIONAL_EVIDENCE_ONLY, OBSERVATIONAL_VALIDATION_PASSED, VALID_MEANING } from "@/lib/ai/evolutionApproval/wording";
 import type { ApprovalStatus } from "@/lib/ai/evolutionApproval/wording";
 import type { EvolutionApprovalView } from "@/lib/ai/evolutionApproval/contracts";
+import { Target, Zap, PieChart, ChevronDown } from "lucide-react";
+import type { PerformanceReport } from "@/lib/elvoid/performance";
+import type { AiStatistics, PaperWallet } from "@/lib/elvoid/types";
+import type { DecisionPopulationReport } from "@/lib/ai/decisionPopulation/contracts";
+import { RadialGauge } from "./cognitive/gauges";
 
 // ---------------------------------------------------------------------------
 // Phase 8.6.1 Part 7+8 — Self Performance + Novelty observation panel.
@@ -95,12 +100,19 @@ interface SelfPerformanceEntry {
   readonly report: SelfPerformanceReport | null;
 }
 
+interface DecisionPopulationEntry {
+  readonly symbol: string;
+  readonly report: DecisionPopulationReport | null;
+}
+
 interface CognitiveRoutePayload {
   readonly selfPerformance?: readonly SelfPerformanceEntry[];
   readonly novelty?: readonly NoveltyAssessment[];
   readonly learningDbConfigured?: boolean;
   readonly cognitiveGaps?: readonly CognitiveGapEntry[];
   readonly evolution?: readonly EvolutionEntry[];
+  /** Phase 8.6 P1 — already computed and returned by the route, previously unused by this panel. See lib/ai/decisionPopulation/contracts.ts. */
+  readonly decisionPopulation?: readonly DecisionPopulationEntry[];
 }
 
 const COVERAGE_LABEL: Record<EvaluationCoverageStatus, string> = {
@@ -295,9 +307,22 @@ function ApprovalBlock({ symbol, candidate, validation, approval }: { symbol: st
   );
 }
 
-export function SelfPerformancePanel() {
+export function SelfPerformancePanel({
+  report,
+  stats,
+  wallet,
+  winCount,
+  lossCount,
+}: {
+  report: PerformanceReport;
+  stats: AiStatistics;
+  wallet: PaperWallet;
+  winCount: number;
+  lossCount: number;
+}) {
   const [data, setData] = useState<CognitiveRoutePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -320,13 +345,128 @@ export function SelfPerformancePanel() {
   const novelty = data?.novelty ?? [];
   const cognitiveGaps = data?.cognitiveGaps ?? [];
   const evolution = data?.evolution ?? [];
+  const decisionPopulation = data?.decisionPopulation ?? [];
+
+  // ---- 3 summary cards (Self Performance redesign) ----------------------
+  // Card 1, AI Signal Reliability: the exact same avgConfidence this page's
+  // server-fetched `report` already carries (was previously its own
+  // standalone "AI Signal Reliability" section further down the page —
+  // consolidated here, same numbers, nothing recomputed).
+  const hasClosedTrades = stats.total_trade > 0;
+  const confidenceAvg = report.avgConfidence;
+
+  // Card 2, Execution Performance: Phase 8.6 P1's decisionPopulation was
+  // fetched by this panel's own request all along but never rendered —
+  // real, already-computed data, just newly surfaced. executionRate is the
+  // share of observed decision CYCLES (not trades) that resolved EXECUTE,
+  // aggregated across every tracked symbol — a different question from
+  // "AI Win Rate" at the top of the page (that's trade outcomes; this is
+  // decision-cycle outcomes) and deliberately not relabeled to look the same.
+  const populationTotals = decisionPopulation.reduce(
+    (acc, { report: r }) => {
+      if (!r) return acc;
+      acc.totalCycles += r.totalCycles;
+      acc.execute += r.decisionCounts.EXECUTE;
+      acc.wait += r.decisionCounts.WAIT;
+      acc.reject += r.decisionCounts.REJECT;
+      return acc;
+    },
+    { totalCycles: 0, execute: 0, wait: 0, reject: 0 }
+  );
+  const executionRate = populationTotals.totalCycles > 0 ? (populationTotals.execute / populationTotals.totalCycles) * 100 : null;
+
+  // Card 3, Portfolio Performance: same Return formula as the existing
+  // Portfolio section further down this page (paper wallet, all-time —
+  // there is no 30-day-windowed return computed anywhere in this codebase,
+  // so this deliberately isn't labeled "(30D)").
+  const portfolioReturn = wallet.balance - wallet.total_profit !== 0 ? (wallet.total_profit / (wallet.balance - wallet.total_profit || 1)) * 100 : null;
 
   return (
     <div className="glow-card p-3 sm:p-4">
-      <SectionHeader code="SPM" title="Self Performance & Novelty" />
-      <p className="-mt-1 max-w-xl text-xs text-ink-muted">Phase 8.6.1 — observation layer only. Coverage and evaluation distributions are counted directly from decision_evaluations; novelty reflects the current Decision Memory query, not a historical record.</p>
-      {data?.learningDbConfigured === false && <p className="mt-2 text-[10.5px] text-amber">Learning DB is not configured — every value below is structurally empty, not evidence of &quot;no history&quot;.</p>}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <SectionHeader code="SPM" title="Self Performance" hint="Key performance indicators and system health" />
+        </div>
+        <button
+          type="button"
+          onClick={() => setDetailsOpen((v) => !v)}
+          className="-mt-1 flex shrink-0 items-center gap-1 text-xs font-medium text-signal-glow hover:underline"
+        >
+          {detailsOpen ? "Hide" : "View"} Detailed Report
+          <ChevronDown size={13} className={detailsOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+        </button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-line/70 bg-black/10 p-3">
+          <div className="flex items-center gap-3">
+            <RadialGauge percent={confidenceAvg ?? 0} color="#A78BFA" size={56} strokeWidth={5} label={confidenceAvg === null ? "N/A" : undefined} />
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                <Target size={12} /> AI Signal Reliability
+              </p>
+              <p className="mono-num text-lg font-semibold text-ink">{confidenceAvg === null ? "N/A" : `${confidenceAvg.toFixed(0)}%`}</p>
+              <p className="text-[10.5px] text-ink-muted">Confidence Average</p>
+            </div>
+          </div>
+          <dl className="mt-2 space-y-0.5 border-t border-line/50 pt-2 text-[10.5px]">
+            <div className="flex justify-between"><dt className="text-ink-faint">Sample size</dt><dd className="text-ink">{stats.total_trade} trades</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-faint">Best setup</dt><dd className="max-w-[60%] truncate text-right text-ink">{report.bestSetup ? `${report.bestSetup.setup} (${report.bestSetup.winRate}%)` : "N/A"}</dd></div>
+            <div className="flex justify-between">
+              <dt className="text-ink-faint">Recent W/L</dt>
+              <dd>
+                <span className="text-up">{winCount}W</span> / <span className="text-down">{lossCount}L</span>
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="rounded-lg border border-line/70 bg-black/10 p-3">
+          <div className="flex items-center gap-3">
+            <RadialGauge percent={executionRate ?? 0} color="#22D3EE" size={56} strokeWidth={5} label={executionRate === null ? "N/A" : undefined} />
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                <Zap size={12} /> Execution Performance
+              </p>
+              <p className="mono-num text-lg font-semibold text-ink">{executionRate === null ? "N/A" : `${executionRate.toFixed(0)}%`}</p>
+              <p className="text-[10.5px] text-ink-muted">Execution Rate</p>
+            </div>
+          </div>
+          <dl className="mt-2 space-y-0.5 border-t border-line/50 pt-2 text-[10.5px]">
+            <div className="flex justify-between"><dt className="text-ink-faint">Total cycles</dt><dd className="text-ink">{populationTotals.totalCycles}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-faint">Execute / Wait / Reject</dt><dd className="text-ink">{populationTotals.execute} / {populationTotals.wait} / {populationTotals.reject}</dd></div>
+          </dl>
+        </div>
+
+        <div className="rounded-lg border border-line/70 bg-black/10 p-3">
+          <div className="flex items-center gap-3">
+            {portfolioReturn === null ? (
+              <RadialGauge percent={0} color="#7d8794" size={56} strokeWidth={5} label="N/A" />
+            ) : (
+              <RadialGauge percent={Math.max(0, Math.min(100, 50 + portfolioReturn / 2))} color={portfolioReturn >= 0 ? "#00E676" : "#FF5252"} size={56} strokeWidth={5} label={`${portfolioReturn >= 0 ? "+" : ""}${portfolioReturn.toFixed(0)}%`} />
+            )}
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                <PieChart size={12} /> Portfolio Performance
+              </p>
+              <p className={`mono-num text-lg font-semibold ${portfolioReturn === null ? "text-ink" : portfolioReturn >= 0 ? "text-up" : "text-down"}`}>{portfolioReturn === null ? "N/A" : `${portfolioReturn >= 0 ? "+" : ""}${portfolioReturn.toFixed(2)}%`}</p>
+              <p className="text-[10.5px] text-ink-muted">Return (all-time)</p>
+            </div>
+          </div>
+          <dl className="mt-2 space-y-0.5 border-t border-line/50 pt-2 text-[10.5px]">
+            <div className="flex justify-between"><dt className="text-ink-faint">Equity</dt><dd className="text-ink">${wallet.equity.toFixed(2)}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-faint">Total PnL</dt><dd className={wallet.total_profit >= 0 ? "text-up" : "text-down"}>{wallet.total_profit >= 0 ? "+" : ""}${wallet.total_profit.toFixed(2)}</dd></div>
+          </dl>
+        </div>
+      </div>
+
+      {!hasClosedTrades && <p className="mt-2 text-[10.5px] text-ink-faint">No closed trades yet — Signal Reliability and Execution Performance will read N/A until the first trade closes.</p>}
+      {data?.learningDbConfigured === false && <p className="mt-2 text-[10.5px] text-amber">Learning DB is not configured — detailed evaluation coverage, novelty, and evolution telemetry below are structurally empty, not evidence of &quot;no history&quot;.</p>}
       {error && <p className="mt-2 text-[10.5px] text-down">{error}</p>}
+
+      {detailsOpen && (
+        <div className="mt-3 border-t border-line pt-3">
+      <p className="max-w-xl text-xs text-ink-muted">Phase 8.6.1 — observation layer only. Coverage and evaluation distributions are counted directly from decision_evaluations; novelty reflects the current Decision Memory query, not a historical record.</p>
       {!data && !error && <p className="py-4 text-center text-xs text-ink-muted">Loading…</p>}
       {data && selfPerformance.length === 0 && novelty.length === 0 && <p className="py-4 text-center text-xs text-ink-muted">No tracked symbols yet.</p>}
 
@@ -474,6 +614,8 @@ export function SelfPerformancePanel() {
               ))
             )}
           </ul>
+        </div>
+      )}
         </div>
       )}
     </div>

@@ -60,52 +60,28 @@ function formatDuration(ms: number | null): string | null {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
-/** A cycle groups every event sharing one cycleId, in the real order they arrived. */
-interface Cycle {
-  readonly cycleId: string;
-  readonly symbol: string;
-  readonly events: readonly RuntimeEvent[];
-  readonly startedAt: string;
-  readonly stillRunning: boolean;
+// Chronological order across the WHOLE stream (not just within one
+// cycle): primarily by real startedAt, falling back to the same
+// sequence/createdAt tiebreak groupIntoCycles used for same-cycle
+// ordering before this redesign flattened cycle boxes into one
+// continuous terminal log (see CHANGES.md).
+function compareEvents(a: RuntimeEvent, b: RuntimeEvent): number {
+  const byTime = Date.parse(a.startedAt) - Date.parse(b.startedAt);
+  if (byTime !== 0) return byTime;
+  if (a.sequence !== null && b.sequence !== null) return a.sequence - b.sequence;
+  return Date.parse(a.createdAt) - Date.parse(b.createdAt);
 }
 
-function groupIntoCycles(events: readonly RuntimeEvent[]): Cycle[] {
-  const byId = new Map<string, RuntimeEvent[]>();
-  for (const e of events) {
-    const list = byId.get(e.cycleId) ?? [];
-    list.push(e);
-    byId.set(e.cycleId, list);
-  }
-  const cycles: Cycle[] = [];
-  for (const [cycleId, list] of byId) {
-    // Bug fix: `sequence` is assigned synchronously by the backend, in
-    // true causal order, before any fire-and-forget insert starts — it's
-    // the reliable sort key. `createdAt` (DB-assigned) can't be trusted
-    // for same-cycle ordering because independent inserts can reach
-    // Postgres out of order. Fall back to createdAt only for events
-    // emitted before `sequence` existed (both null -> stable no-op).
-    const sorted = [...list].sort((a, b) => (a.sequence !== null && b.sequence !== null ? a.sequence - b.sequence : Date.parse(a.createdAt) - Date.parse(b.createdAt)));
-    const cycleMarker = sorted.find((e) => e.component === "CYCLE" && e.status !== "RUNNING");
-    cycles.push({ cycleId, symbol: sorted[0].symbol, events: sorted, startedAt: sorted[0].startedAt, stillRunning: cycleMarker === undefined });
-  }
-  return cycles.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-}
-
-function StatusPill({ status }: { status: RuntimeEventStatus }) {
-  const meta = STATUS_META[status];
-  return (
-    <span
-      className={clsx("shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide", meta.glow && "animate-pulse")}
-      style={{ color: meta.color, backgroundColor: `${meta.color}1f` }}
-    >
-      {meta.label}
-    </span>
-  );
-}
-
-function EventRow({ event, onSelectNode }: { event: RuntimeEvent; onSelectNode: (id: string) => void }) {
+// ELVOID RUNTIME TERMINAL log line — [HH:MM:SS] [COMPONENT] message
+// [STATUS] [SYMBOL], every bracketed field read verbatim from the real
+// public.runtime_events row (see this file's own header). No line here is
+// synthesized: component/status/symbol are the row's own closed-enum
+// fields, message falls back to the row's own `operation` only when
+// `message` itself is null — never a fabricated string.
+function EventLine({ event, onSelectNode }: { event: RuntimeEvent; onSelectNode: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const meta = COMPONENT_META[event.component];
+  const statusMeta = STATUS_META[event.status];
   const duration = formatDuration(event.durationMs);
   const hasDetail = event.metadata !== null && Object.keys(event.metadata ?? {}).length > 0;
 
@@ -117,13 +93,16 @@ function EventRow({ event, onSelectNode }: { event: RuntimeEvent; onSelectNode: 
           if (hasDetail) setExpanded((v) => !v);
           if (meta.nodeId) onSelectNode(meta.nodeId);
         }}
-        className="flex w-full min-w-0 items-start gap-1.5 px-2 py-1 text-left sm:gap-2"
+        className="flex w-full min-w-0 flex-wrap items-baseline gap-x-1.5 px-2 py-1 text-left font-mono text-[10.5px] leading-relaxed"
       >
-        <span className="mt-0.5 shrink-0 text-ink-faint">{formatTime(event.startedAt)}</span>
-        <span className="mt-0.5 w-[92px] shrink-0 truncate text-ink-muted sm:w-[168px]">{meta.label}</span>
+        <span className="shrink-0 text-ink-faint">[{formatTime(event.startedAt)}]</span>
+        <span className="shrink-0 text-cyan">[{event.component.replace(/_/g, " ")}]</span>
         <span className="min-w-0 flex-1 truncate text-ink">{event.message ?? event.operation}</span>
-        {duration && <span className="mt-0.5 shrink-0 tabular-nums text-ink-faint">{duration}</span>}
-        <StatusPill status={event.status} />
+        {duration && <span className="shrink-0 tabular-nums text-ink-faint">{duration}</span>}
+        <span className="shrink-0 font-semibold" style={{ color: statusMeta.color }}>
+          [{statusMeta.label}]
+        </span>
+        <span className="shrink-0 text-signal-glow">[{event.symbol}]</span>
       </button>
 
       {expanded && hasDetail && (
@@ -157,28 +136,6 @@ function EventRow({ event, onSelectNode }: { event: RuntimeEvent; onSelectNode: 
   );
 }
 
-function CycleGroup({ cycle, onSelectNode }: { cycle: Cycle; onSelectNode: (id: string) => void }) {
-  const finalEvent = cycle.events.find((e) => e.component === "CYCLE" && e.status !== "RUNNING");
-  return (
-    <div className="rounded border border-line/60">
-      <div className="flex items-center justify-between gap-2 border-b border-line/60 bg-white/[0.02] px-2 py-1">
-        <div className="flex items-center gap-2">
-          <span className="rounded bg-cyan/15 px-1.5 py-0.5 text-[9px] font-semibold text-cyan">{cycle.symbol}</span>
-          <span className="text-[9px] text-ink-faint">cycle #{cycle.cycleId.slice(0, 8)}</span>
-        </div>
-        {cycle.stillRunning ? <StatusPill status="RUNNING" /> : finalEvent && <StatusPill status={finalEvent.status} />}
-      </div>
-      <div className="divide-y divide-line/30 px-0.5 py-0.5">
-        {cycle.events
-          .filter((e) => e.component !== "CYCLE")
-          .map((e) => (
-            <EventRow key={e.id} event={e} onSelectNode={onSelectNode} />
-          ))}
-      </div>
-    </div>
-  );
-}
-
 export function RuntimeTerminal({ onSelectNode }: { onSelectNode: (id: string) => void }) {
   const { events, connected, lastPolledAt } = useRuntimeEvents();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("ALL");
@@ -197,7 +154,7 @@ export function RuntimeTerminal({ onSelectNode }: { onSelectNode: (id: string) =
     return list;
   }, [events, filter, symbolFilter]);
 
-  const cycles = useMemo(() => groupIntoCycles(filtered), [filtered]);
+  const ordered = useMemo(() => [...filtered].sort(compareEvents), [filtered]);
 
   // Auto-scroll: follow new events by default; stop the instant the user
   // scrolls up to read history, resume when they explicitly return to
@@ -221,12 +178,13 @@ export function RuntimeTerminal({ onSelectNode }: { onSelectNode: (id: string) =
   return (
     <div className="relative flex h-full min-h-0 flex-col rounded border border-line bg-[#070a10]">
       <div className="flex items-center justify-between gap-2 border-b border-line px-2 py-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-muted">ELVOID RUNTIME TERMINAL</span>
         <div className="flex items-center gap-1.5">
           <span className={clsx("h-1.5 w-1.5 rounded-full", connected ? "bg-up animate-pulse" : "bg-down")} />
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-muted">ELVOID Runtime {connected ? "LIVE" : "DISCONNECTED"}</span>
+          <span className="text-[9px] font-semibold uppercase text-ink-faint">{connected ? "LIVE" : "DISCONNECTED"}</span>
         </div>
-        <span className="text-[9px] text-ink-faint">{lastPolledAt ? `polled ${formatTime(lastPolledAt)}` : ""}</span>
       </div>
+      {lastPolledAt && <div className="border-b border-line px-2 py-1 text-right text-[9px] text-ink-faint">polled {formatTime(lastPolledAt)}</div>}
 
       <div className="flex flex-wrap gap-1 border-b border-line px-2 py-1.5">
         {FILTERS.map((f) => (
@@ -253,11 +211,15 @@ export function RuntimeTerminal({ onSelectNode }: { onSelectNode: (id: string) =
         )}
       </div>
 
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-1.5 py-1.5 text-[10.5px] leading-relaxed">
-        {cycles.length === 0 ? (
-          <p className="py-6 text-center text-ink-muted">IDLE — waiting for the next real market cycle.</p>
+      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 py-1.5">
+        {ordered.length === 0 ? (
+          <p className="py-6 text-center text-ink-muted">
+            UNAVAILABLE — no runtime events recorded yet.
+            <br />
+            This terminal never fabricates log lines; it populates the instant a real market cycle emits one.
+          </p>
         ) : (
-          cycles.map((c) => <CycleGroup key={c.cycleId} cycle={c} onSelectNode={onSelectNode} />)
+          ordered.map((e) => <EventLine key={e.id} event={e} onSelectNode={onSelectNode} />)
         )}
       </div>
 
