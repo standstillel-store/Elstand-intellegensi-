@@ -1,12 +1,18 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { Crown, ArrowUpRight, ArrowDownRight, ShieldOff, Radar, CheckCircle2, CircleDashed, XCircle } from "lucide-react";
+import { Crown, ArrowUpRight, ArrowDownRight, ShieldOff, Radar, CheckCircle2, CircleDashed, XCircle, Clock } from "lucide-react";
 import clsx from "clsx";
 import type { ConfluenceResult } from "@/lib/ai/oracle/confluenceTypes";
 import type { OracleAssessment, OracleRiskPlan } from "@/lib/ai/oracle/gradingTypes";
 import type { OracleInsight } from "@/lib/ai/oracle/insight";
 import type { MtfContext } from "@/lib/ai/oracle/mtf";
+import type { LiquidityOrderFlowContext } from "@/lib/ai/oracle/liquidityOrderFlow";
+import type { ContradictionReport } from "@/lib/ai/oracle/contradiction";
+import type { RiskIntelligence } from "@/lib/ai/oracle/riskIntelligence";
+import type { Candle } from "@/lib/elvoid/types";
 import { useAutonomousRuntimeTick } from "@/lib/hooks/useAutonomousRuntimeTick";
+import { OracleDecisionChart } from "./OracleDecisionChart";
+import { OracleWhySection } from "./OracleWhySection";
 
 interface AutonomousStatusResponse {
   symbol: string;
@@ -23,6 +29,12 @@ const AUTONOMOUS_STATUS_POLL_MS = 20_000;
  * authority over whether a Paper Trade gets created; this component only
  * OBSERVES the most recent decision it already produced for this symbol
  * — it never triggers execution itself.
+ *
+ * Also the accurate home for a genuine EXECUTE/WAIT/REJECT/EXPIRE reading:
+ * the Oracle assessment above (OracleAssessment) only ever carries a
+ * grade (NO_TRADE/B+/A/A+) + side, it has no REJECT/EXPIRE state of its
+ * own — those are outcomes of the separate autonomous decision engine,
+ * surfaced here rather than invented on the assessment header.
  */
 function AutonomousStatusCard({ symbol }: { symbol: string }) {
   const [status, setStatus] = useState<AutonomousStatusResponse | null>(null);
@@ -89,20 +101,17 @@ interface OracleResponse {
   risk: OracleRiskPlan | null;
   /** Phase 7.2 — context only, never a second decision. Optional/null when the fetch failed; the rest of the panel must render fine without it. */
   mtf?: MtfContext | null;
+  /** Already returned by the existing route (see app/api/elvoid-pro/oracle/route.ts) — only now also read by the frontend for the "Why ELVOID Decided" section. No new backend field. */
+  liquidityOrderFlow?: LiquidityOrderFlowContext | null;
+  contradictions?: ContradictionReport | null;
+  riskIntelligence?: RiskIntelligence | null;
 }
 
-const MTF_RELATIONSHIP_LABEL: Record<string, string> = {
-  ALIGNED_BULLISH: "HTF & MTF searah bullish",
-  ALIGNED_BEARISH: "HTF & MTF searah bearish",
-  PULLBACK_IN_UPTREND: "Kemungkinan pullback dalam uptrend",
-  PULLBACK_IN_DOWNTREND: "Kemungkinan pullback dalam downtrend",
-  CONTINUATION_AFTER_PULLBACK_BULLISH: "Kandidat continuation bullish setelah pullback",
-  CONTINUATION_AFTER_PULLBACK_BEARISH: "Kandidat continuation bearish setelah pullback",
-  HTF_THESIS_THREATENED_BULLISH: "Tesis HTF bullish terancam",
-  HTF_THESIS_THREATENED_BEARISH: "Tesis HTF bearish terancam",
-  NEUTRAL_OR_MIXED: "HTF/MTF/LTF campuran",
-  INSUFFICIENT_DATA: "Data timeframe tidak lengkap",
-};
+interface KlinesResponse {
+  symbol: string;
+  interval: string;
+  candles: Candle[];
+}
 
 const GRADE_STYLE: Record<string, string> = {
   "A+": "bg-gold/20 text-gold border-gold/40",
@@ -122,6 +131,13 @@ const GENERIC_MAIN_RISK = "Tidak ada risiko data spesifik yang teridentifikasi d
 
 function formatPrice(n: number): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 8 });
+}
+
+/** Formats the existing `assessment.timestamp` for display — never generates a new one. */
+function formatDecisionTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export function OraclePanel({ symbol }: { symbol: string }) {
@@ -162,6 +178,37 @@ export function OraclePanel({ symbol }: { symbol: string }) {
   const side = assessment?.side;
   const isNoTrade = status === "ready" && !!assessment && assessment.grade === "NO_TRADE";
   const isGraded = status === "ready" && !!assessment && assessment.grade !== "NO_TRADE" && !!side;
+  const timeframeLabel = data?.mtf?.mtf.timeframe ?? "15m";
+
+  // Chart candles — from the existing, already-used /api/klines endpoint
+  // (same one the rest of ELVOID Pro's charting already calls), at the
+  // same timeframe already shown as "Timeframe" below. No new backend
+  // route, no synthetic candles: if this fetch fails, the chart area shows
+  // a plain unavailable message instead of inventing bars.
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [candleStatus, setCandleStatus] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    setCandleStatus("loading");
+    fetch(`/api/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(timeframeLabel)}&limit=150`)
+      .then((res) => res.json())
+      .then((json: KlinesResponse & { error?: string }) => {
+        if (cancelled) return;
+        if (json.error || !Array.isArray(json.candles)) {
+          setCandleStatus("error");
+          return;
+        }
+        setCandles(json.candles);
+        setCandleStatus("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setCandleStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, timeframeLabel]);
 
   // Confluence X/Y — real count from the same factors array the grading
   // engine itself used, never a separate/derived score. X = factors that
@@ -174,17 +221,11 @@ export function OraclePanel({ symbol }: { symbol: string }) {
     confluenceLabel = `${firing}/${total}`;
   }
 
-  // Confirmations — real factor labels that actually fired for the
-  // dominant side, straight from the confluence packet. Nothing here is a
-  // fixed template list; a factor that didn't fire (or wasn't available)
-  // simply doesn't produce a row.
-  const confirmations =
-    isGraded && data
-      ? data.confluence.factors.filter((f) => (side === "LONG" ? f.longWeight : f.shortWeight) > 0).map((f) => f.label)
-      : [];
-
   const mainRiskNote = data && data.assessment.mainRisk && data.assessment.mainRisk !== GENERIC_MAIN_RISK ? data.assessment.mainRisk : null;
-  const timeframeLabel = data?.mtf?.mtf.timeframe ?? "15m";
+
+  const chartLevels = data?.risk
+    ? { entry: data.risk.entry, takeProfit: data.risk.takeProfit, stopLoss: data.risk.stopLoss }
+    : { entry: null, takeProfit: null, stopLoss: null };
 
   return (
     <div className="rounded-lg border border-gold/20 bg-bg-surface/60 p-3.5">
@@ -207,8 +248,15 @@ export function OraclePanel({ symbol }: { symbol: string }) {
       )}
 
       {isNoTrade && assessment && (
-        <div className="mt-3 space-y-2 border-t border-line pt-3">
-          <p className="text-base font-bold text-ink-muted">NO_TRADE</p>
+        <div className="mt-3 space-y-3 border-t border-line pt-3">
+          {/* Symbol + Decision + Timestamp — same header shape as the graded case below. */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-semibold text-ink">{symbol}/USDT</span>
+            <span className="shrink-0 rounded border border-line bg-bg-raised px-2 py-0.5 text-[11px] font-bold text-ink-faint">WAIT</span>
+          </div>
+          <p className="flex items-center gap-1 text-[10px] text-ink-faint">
+            <Clock size={11} /> Decision • {formatDecisionTime(assessment.timestamp)}
+          </p>
           <p className="text-[10px] leading-relaxed text-ink-faint">{assessment.gradeReason}</p>
           <AutonomousStatusCard symbol={symbol} />
         </div>
@@ -216,106 +264,89 @@ export function OraclePanel({ symbol }: { symbol: string }) {
 
       {isGraded && assessment && side && (
         <div className="mt-3 space-y-3 border-t border-line pt-3">
-          {/* Direction + grade — the primary decision, one glance. */}
+          {/* 1. Symbol + Decision — the primary decision, one glance. */}
           <div className="flex items-center justify-between gap-2">
-            <div className={clsx("flex min-w-0 items-center gap-1.5 text-lg font-bold", side === "LONG" ? "text-up" : "text-down")}>
-              <span className="truncate">{side}</span>
-              {side === "LONG" ? <ArrowUpRight size={18} className="shrink-0" /> : <ArrowDownRight size={18} className="shrink-0" />}
+            <span className="truncate text-sm font-semibold text-ink">{symbol}/USDT</span>
+            <div className={clsx("flex shrink-0 items-center gap-1.5 text-lg font-bold", side === "LONG" ? "text-up" : "text-down")}>
+              <span>{side}</span>
+              {side === "LONG" ? <ArrowUpRight size={18} /> : <ArrowDownRight size={18} />}
             </div>
-            {grade && <span className={clsx("shrink-0 rounded border px-2 py-0.5 text-[11px] font-bold", GRADE_STYLE[grade])}>{grade}</span>}
           </div>
+          <div className="flex items-center justify-between text-[10px] text-ink-faint">
+            <span className="flex items-center gap-1">
+              <Clock size={11} /> Decision • {formatDecisionTime(assessment.timestamp)}
+            </span>
+            <span className="flex items-center gap-2">
+              {grade && <span className={clsx("rounded border px-1.5 py-0.5 text-[10px] font-bold", GRADE_STYLE[grade])}>{grade}</span>}
+              <span className="mono-num">Confidence {assessment.confidence}%</span>
+            </span>
+          </div>
+          {data && data.insight.patterns.length > 0 && <p className="text-[11px] text-ink-muted">{data.insight.patterns.join(" · ")}</p>}
 
-          {data && data.insight.patterns.length > 0 && (
-            <p className="text-[11px] text-ink-muted">{data.insight.patterns.join(" · ")}</p>
+          {/* 2. Candlestick chart — real candles from /api/klines, with the
+              existing Entry/TP/SL levels overlaid as price lines. This is
+              the primary visual; nothing here is computed in the frontend. */}
+          {candleStatus === "ready" && candles.length > 0 && <OracleDecisionChart candles={candles} levels={chartLevels} height={260} />}
+          {candleStatus === "loading" && (
+            <div className="flex h-[260px] items-center justify-center rounded-md border border-line/60 bg-bg/40">
+              <p className="animate-pulse text-[11px] text-ink-faint">Memuat chart…</p>
+            </div>
           )}
-
-          {/* Confidence */}
-          <div>
-            <div className="flex items-center justify-between text-[10px] text-ink-faint">
-              <span>Confidence</span>
-              <span className="mono-num text-ink">{assessment.confidence}%</span>
-            </div>
-            <div className="mt-1 h-1.5 rounded-full bg-bg-raised">
-              <div className="h-1.5 rounded-full bg-gold" style={{ width: `${Math.min(100, Math.max(0, assessment.confidence))}%` }} />
-            </div>
-          </div>
-
-          {/* Entry / TP / SL / Timeframe / Confluence — every value here comes
-              straight from buildOracleRiskPlan()'s output (single entry/SL/TP,
-              not a tiered TP1-3 or an entry range — this engine doesn't
-              compute those, and the UI must not invent them). */}
-          <dl className="mono-num grid grid-cols-2 gap-y-2 text-[11px]">
-            <dt className="text-ink-faint">Entry</dt>
-            <dd className="break-words text-right text-ink">{data?.risk ? formatPrice(data.risk.entry) : "—"}</dd>
-
-            <dt className="text-ink-faint">Take Profit</dt>
-            <dd className="break-words text-right text-up">{data?.risk ? formatPrice(data.risk.takeProfit) : "—"}</dd>
-
-            <dt className="text-ink-faint">Stop Loss</dt>
-            <dd className="break-words text-right text-down">{data?.risk ? formatPrice(data.risk.stopLoss) : "—"}</dd>
-
-            <dt className="text-ink-faint">Timeframe</dt>
-            <dd className="text-right text-ink">{timeframeLabel}</dd>
-
-            {confluenceLabel && (
-              <>
-                <dt className="text-ink-faint">Confluence</dt>
-                <dd className="text-right text-ink">{confluenceLabel}</dd>
-              </>
-            )}
-
-            {data?.risk && assessment.riskStatus !== "valid" && (
-              <>
-                <dt className="text-ink-faint">R:R Status</dt>
-                <dd className="text-right text-amber-400">belum tervalidasi</dd>
-              </>
-            )}
-          </dl>
-
-          {/* Reason — the deterministic grade explanation from grading.ts,
-              rendered as-is, never rewritten into a generic template. */}
-          <div>
-            <p className="mb-1 text-[9px] font-medium uppercase tracking-wide text-ink-faint">Reason</p>
-            <p className="text-[10px] leading-relaxed text-ink-faint">{assessment.gradeReason}</p>
-          </div>
-
-          {/* Confirmations — real factor labels that fired for this side. */}
-          {confirmations.length > 0 && (
-            <div>
-              <p className="mb-1 text-[9px] font-medium uppercase tracking-wide text-ink-faint">Confirmations</p>
-              <div className="flex flex-wrap gap-1.5">
-                {confirmations.map((label) => (
-                  <span key={label} className="rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-muted">
-                    ✓ {label}
-                  </span>
-                ))}
-              </div>
+          {candleStatus === "error" && (
+            <div className="flex h-[260px] items-center justify-center rounded-md border border-line/60 bg-bg/40">
+              <p className="text-[11px] text-ink-faint">Chart tidak tersedia.</p>
             </div>
           )}
 
-          {/* Risk / Invalidation */}
+          {/* 3. Entry / TP / SL — every value here comes straight from
+              buildOracleRiskPlan()'s output (single entry/SL/TP, not a
+              tiered TP1-3 or an entry range — this engine doesn't compute
+              those, and the UI must not invent them). */}
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="min-w-0 rounded-md border border-line/60 bg-bg-raised/40 px-1 py-2">
+              <p className="text-[9px] uppercase tracking-wide text-gold">Entry</p>
+              <p className="mono-num break-words text-[11px] font-semibold text-ink sm:text-[12px]">{data?.risk ? formatPrice(data.risk.entry) : "—"}</p>
+            </div>
+            <div className="min-w-0 rounded-md border border-line/60 bg-bg-raised/40 px-1 py-2">
+              <p className="text-[9px] uppercase tracking-wide text-up">Take Profit</p>
+              <p className="mono-num break-words text-[11px] font-semibold text-up sm:text-[12px]">{data?.risk ? formatPrice(data.risk.takeProfit) : "—"}</p>
+            </div>
+            <div className="min-w-0 rounded-md border border-line/60 bg-bg-raised/40 px-1 py-2">
+              <p className="text-[9px] uppercase tracking-wide text-down">Stop Loss</p>
+              <p className="mono-num break-words text-[11px] font-semibold text-down sm:text-[12px]">{data?.risk ? formatPrice(data.risk.stopLoss) : "—"}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-ink-faint">
+            <span>Timeframe: <span className="text-ink">{timeframeLabel}</span></span>
+            {confluenceLabel && <span>Confluence: <span className="text-ink">{confluenceLabel}</span></span>}
+            {data?.risk && assessment.riskStatus !== "valid" && <span className="text-amber-400">R:R belum tervalidasi</span>}
+          </div>
+
+          {/* 4. Why ELVOID Decided — categorized read of the same evidence
+              fields the grading engine used (confluence factors,
+              liquidityOrderFlow, mtf, contradictions, riskIntelligence).
+              Falls back to "Unavailable" per-row rather than guessing. */}
+          <div className="border-t border-line pt-3">
+            <p className="mb-2 text-[10px] leading-relaxed text-ink-faint">{assessment.gradeReason}</p>
+            <OracleWhySection
+              side={side}
+              factors={data?.confluence.factors ?? []}
+              liquidityOrderFlow={data?.liquidityOrderFlow}
+              mtf={data?.mtf}
+              contradictions={data?.contradictions}
+              riskIntelligence={data?.riskIntelligence}
+            />
+          </div>
+
+          {/* Invalidation / main risk — existing deterministic text fields, unchanged. */}
           <div>
-            <p className="mb-1 text-[9px] font-medium uppercase tracking-wide text-ink-faint">Risk / Invalidation</p>
+            <p className="mb-1 text-[9px] font-medium uppercase tracking-wide text-ink-faint">Invalidation</p>
             <p className="text-[10px] leading-relaxed text-down/80">{assessment.invalidation}</p>
             {mainRiskNote && <p className="mt-1 text-[10px] leading-relaxed text-amber-400/80">{mainRiskNote}</p>}
           </div>
 
+          {/* 5. Metadata / autonomous status footer. */}
           <AutonomousStatusCard symbol={symbol} />
-        </div>
-      )}
-
-      {status === "ready" && data && data.mtf && (
-        <div className="mt-3 space-y-1 border-t border-line pt-2 text-[10px] leading-relaxed">
-          <p className="font-medium text-ink-muted">Multi-Timeframe Context</p>
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-ink-faint">
-            <span>HTF ({data.mtf.htf?.timeframe ?? "–"}): {data.mtf.htf?.available ? data.mtf.htf.bias : "n/a"}</span>
-            <span>MTF ({data.mtf.mtf.timeframe}): {data.mtf.mtf.bias}</span>
-            <span>LTF ({data.mtf.ltf?.timeframe ?? "–"}): {data.mtf.ltf?.available ? data.mtf.ltf.bias : "n/a"}</span>
-          </div>
-          <p className="text-ink-faint">
-            <span className="text-ink-muted">Relationship: </span>
-            {MTF_RELATIONSHIP_LABEL[data.mtf.relationship] ?? data.mtf.relationship}
-          </p>
         </div>
       )}
     </div>
