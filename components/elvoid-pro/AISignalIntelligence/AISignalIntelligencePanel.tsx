@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { ArrowUpRight, ArrowDownRight, RefreshCw, ShieldOff } from "lucide-react";
 import clsx from "clsx";
+import { OracleTradingChart, toChartLevels } from "../OracleTradingChart";
 
 // ---------------------------------------------------------------------------
 // ELVOID Intelligence — AI Signal Intelligence UI (Phase 8.3.0.1, Module 4)
@@ -91,29 +92,7 @@ function timeAgo(iso: string): string {
   return `${hours}j lalu`;
 }
 
-/**
- * Phase 8.3.0.1 §6 (Mini Chart, Option A) — renders the real, bounded
- * closing-price array already persisted on the snapshot (verbatim from
- * OracleContext.candles at cycle time — see orchestrator.ts's
- * buildSparkline()). This component fetches NOTHING of its own; it is
- * pure SVG over whatever `points` it's given. Returns null (renders
- * nothing, never a placeholder/decorative line) when there's too little
- * real data to draw.
- */
-function Sparkline({ points, color }: { points: number[] | null; color: string }) {
-  if (!points || points.length < 2) return null;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-  const w = 100;
-  const h = 28;
-  const coords = points.map((p, i) => `${(i / (points.length - 1)) * w},${h - ((p - min) / range) * h}`).join(" ");
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-7 w-full">
-      <polyline points={coords} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
+
 
 function SnapshotCard({ snapshot, rank }: { snapshot: Snapshot; rank: number }) {
   const side = snapshot.side;
@@ -138,17 +117,12 @@ function SnapshotCard({ snapshot, rank }: { snapshot: Snapshot; rank: number }) 
         <span className={clsx("rounded border px-1.5 py-0.5 text-[10px] font-bold", GRADE_STYLE[snapshot.grade])}>{snapshot.grade}</span>
       </div>
 
-      <div>
-        <div className="flex items-center justify-between text-[10px] text-ink-faint">
-          <span>Confidence</span>
-          <span className="mono-num text-ink">{snapshot.confidence}%</span>
-        </div>
-        <div className="mt-1 h-1.5 rounded-full bg-bg-raised">
-          <div className="h-1.5 rounded-full bg-gold" style={{ width: `${Math.min(100, Math.max(0, snapshot.confidence))}%` }} />
-        </div>
+      <div className="flex items-center justify-between text-[10px] text-ink-faint">
+        <span>Confidence</span>
+        <span className="mono-num text-ink">{snapshot.confidence}%</span>
       </div>
 
-      <Sparkline points={snapshot.sparkline} color={side === "SHORT" ? "#FF5252" : "#00E676"} />
+      <OracleTradingChart symbol={snapshot.symbol} levels={toChartLevels(snapshot)} height={180} />
 
       <dl className="mono-num grid grid-cols-2 gap-y-1 text-[10px]">
         <dt className="text-ink-faint">Entry</dt>

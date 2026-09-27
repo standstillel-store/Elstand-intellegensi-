@@ -9,9 +9,8 @@ import type { MtfContext } from "@/lib/ai/oracle/mtf";
 import type { LiquidityOrderFlowContext } from "@/lib/ai/oracle/liquidityOrderFlow";
 import type { ContradictionReport } from "@/lib/ai/oracle/contradiction";
 import type { RiskIntelligence } from "@/lib/ai/oracle/riskIntelligence";
-import type { Candle } from "@/lib/elvoid/types";
 import { useAutonomousRuntimeTick } from "@/lib/hooks/useAutonomousRuntimeTick";
-import { OracleDecisionChart } from "./OracleDecisionChart";
+import { OracleTradingChart, toChartLevels } from "../OracleTradingChart";
 import { OracleWhySection } from "./OracleWhySection";
 
 interface AutonomousStatusResponse {
@@ -107,12 +106,6 @@ interface OracleResponse {
   riskIntelligence?: RiskIntelligence | null;
 }
 
-interface KlinesResponse {
-  symbol: string;
-  interval: string;
-  candles: Candle[];
-}
-
 const GRADE_STYLE: Record<string, string> = {
   "A+": "bg-gold/20 text-gold border-gold/40",
   A: "bg-up/15 text-up border-up/30",
@@ -180,36 +173,6 @@ export function OraclePanel({ symbol }: { symbol: string }) {
   const isGraded = status === "ready" && !!assessment && assessment.grade !== "NO_TRADE" && !!side;
   const timeframeLabel = data?.mtf?.mtf.timeframe ?? "15m";
 
-  // Chart candles — from the existing, already-used /api/klines endpoint
-  // (same one the rest of ELVOID Pro's charting already calls), at the
-  // same timeframe already shown as "Timeframe" below. No new backend
-  // route, no synthetic candles: if this fetch fails, the chart area shows
-  // a plain unavailable message instead of inventing bars.
-  const [candles, setCandles] = useState<Candle[]>([]);
-  const [candleStatus, setCandleStatus] = useState<"loading" | "ready" | "error">("loading");
-
-  useEffect(() => {
-    let cancelled = false;
-    setCandleStatus("loading");
-    fetch(`/api/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(timeframeLabel)}&limit=150`)
-      .then((res) => res.json())
-      .then((json: KlinesResponse & { error?: string }) => {
-        if (cancelled) return;
-        if (json.error || !Array.isArray(json.candles)) {
-          setCandleStatus("error");
-          return;
-        }
-        setCandles(json.candles);
-        setCandleStatus("ready");
-      })
-      .catch(() => {
-        if (!cancelled) setCandleStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [symbol, timeframeLabel]);
-
   // Confluence X/Y — real count from the same factors array the grading
   // engine itself used, never a separate/derived score. X = factors that
   // actually fired (weight > 0) for the dominant side; Y = every factor
@@ -223,9 +186,9 @@ export function OraclePanel({ symbol }: { symbol: string }) {
 
   const mainRiskNote = data && data.assessment.mainRisk && data.assessment.mainRisk !== GENERIC_MAIN_RISK ? data.assessment.mainRisk : null;
 
-  const chartLevels = data?.risk
-    ? { entry: data.risk.entry, takeProfit: data.risk.takeProfit, stopLoss: data.risk.stopLoss }
-    : { entry: null, takeProfit: null, stopLoss: null };
+  // Straight passthrough of the existing OracleRiskPlan — see
+  // components/elvoid-pro/OracleTradingChart.tsx for why tp2/tp3 are empty.
+  const chartLevels = toChartLevels({ side: side ?? null, entry: data?.risk?.entry ?? null, stopLoss: data?.risk?.stopLoss ?? null, takeProfit: data?.risk?.takeProfit ?? null });
 
   return (
     <div className="rounded-lg border border-gold/20 bg-bg-surface/60 p-3.5">
@@ -283,20 +246,13 @@ export function OraclePanel({ symbol }: { symbol: string }) {
           </div>
           {data && data.insight.patterns.length > 0 && <p className="text-[11px] text-ink-muted">{data.insight.patterns.join(" · ")}</p>}
 
-          {/* 2. Candlestick chart — real candles from /api/klines, with the
-              existing Entry/TP/SL levels overlaid as price lines. This is
-              the primary visual; nothing here is computed in the frontend. */}
-          {candleStatus === "ready" && candles.length > 0 && <OracleDecisionChart candles={candles} levels={chartLevels} height={260} />}
-          {candleStatus === "loading" && (
-            <div className="flex h-[260px] items-center justify-center rounded-md border border-line/60 bg-bg/40">
-              <p className="animate-pulse text-[11px] text-ink-faint">Memuat chart…</p>
-            </div>
-          )}
-          {candleStatus === "error" && (
-            <div className="flex h-[260px] items-center justify-center rounded-md border border-line/60 bg-bg/40">
-              <p className="text-[11px] text-ink-faint">Chart tidak tersedia.</p>
-            </div>
-          )}
+          {/* 2. Candlestick chart — the same TradingChart (compact) /ai-signal's
+              Watchlist Signal cards already use, real /api/klines candles,
+              with the existing Entry/TP/SL levels drawn as price lines on
+              the candles themselves. Nothing here is computed in the
+              frontend; the component fetches its own candles and handles
+              its own loading/error state. */}
+          <OracleTradingChart symbol={symbol} interval={timeframeLabel} levels={chartLevels} height={240} />
 
           {/* 3. Entry / TP / SL — every value here comes straight from
               buildOracleRiskPlan()'s output (single entry/SL/TP, not a
