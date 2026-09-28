@@ -42,6 +42,9 @@ export async function upsertPatchRun(run: PatchRunWithoutTimestamp): Promise<Per
     deployment_url: run.deploymentUrl,
     failed_stage: run.failedStage,
     error_summary: run.errorSummary,
+    checks_run_url: run.checksRunUrl ?? null,
+    authorized_by: run.authorizedBy ?? null,
+    authorized_at: run.authorizedAt ?? null,
     updated_at: new Date().toISOString(),
   };
 
@@ -65,27 +68,94 @@ export async function appendPatchEvent(recordHash: string, patchRunId: string, s
   return { persisted: true };
 }
 
+function fromRow(data: Record<string, unknown>): PatchRun {
+  return {
+    patchRunId: data.patch_run_id as string,
+    recordHash: data.record_hash as string,
+    artifactId: data.artifact_id as string,
+    proposalId: data.proposal_id as string,
+    status: data.status as PatchRunStatus,
+    branch: data.branch as string | null,
+    baseSha: data.base_sha as string | null,
+    commitSha: data.commit_sha as string | null,
+    mergeCommitSha: data.merge_commit_sha as string | null,
+    deploymentId: data.deployment_id as string | null,
+    deploymentUrl: data.deployment_url as string | null,
+    failedStage: data.failed_stage as string | null,
+    errorSummary: data.error_summary as string | null,
+    checksRunUrl: (data.checks_run_url as string | null) ?? null,
+    authorizedBy: (data.authorized_by as number | null) ?? null,
+    authorizedAt: (data.authorized_at as string | null) ?? null,
+    startedAt: data.started_at as string,
+    updatedAt: data.updated_at as string,
+  };
+}
+
 /** Read-only lookup by the run's own merge commit SHA — used by the Vercel deployment webhook to find which run a completed deployment belongs to. `null` when not configured or not found. */
 export async function getPatchRunByMergeCommitSha(mergeCommitSha: string): Promise<PatchRun | null> {
   const db = getLearningSupabase();
   if (!db) return null;
   const { data, error } = await db.from("evolution_patch_runs").select("*").eq("merge_commit_sha", mergeCommitSha).maybeSingle();
   if (error || !data) return null;
-  return {
-    patchRunId: data.patch_run_id,
-    recordHash: data.record_hash,
-    artifactId: data.artifact_id,
-    proposalId: data.proposal_id,
-    status: data.status,
-    branch: data.branch,
-    baseSha: data.base_sha,
-    commitSha: data.commit_sha,
-    mergeCommitSha: data.merge_commit_sha,
-    deploymentId: data.deployment_id,
-    deploymentUrl: data.deployment_url,
-    failedStage: data.failed_stage,
-    errorSummary: data.error_summary,
-    startedAt: data.started_at,
-    updatedAt: data.updated_at,
-  };
+  return fromRow(data);
+}
+
+/**
+ * Read-only lookup by a record_hash PREFIX (>=16 hex chars — same "prefix is
+ * only a lookup key, the full recordHash is what's actually used" rule as
+ * lib/ai/evolutionApproval/telegramPayload.ts's callback data). Zero or
+ * more than one match is reported as `null` rather than guessing which row
+ * the caller meant — added 2026-09-28 for the authorization callback.
+ */
+export async function getPatchRunByRecordHashPrefix(prefix: string): Promise<PatchRun | null> {
+  const db = getLearningSupabase();
+  if (!db) return null;
+  if (!/^[0-9a-f]{16,64}$/.test(prefix)) return null;
+  const { data, error } = await db.from("evolution_patch_runs").select("*").ilike("record_hash", `${prefix}%`).limit(2);
+  if (error || !data || data.length !== 1) return null;
+  return fromRow(data[0]);
+}
+
+/** Every current row in one status — added 2026-09-28 for checks.ts's poll loop (find every run still awaiting CI, in one query, instead of tracking run ids anywhere else). */
+export async function getPatchRunsByStatus(status: PatchRunStatus): Promise<PatchRun[]> {
+  const db = getLearningSupabase();
+  if (!db) return [];
+  const { data, error } = await db.from("evolution_patch_runs").select("*").eq("status", status).order("started_at", { ascending: true });
+  if (error || !data) return [];
+  return data.map(fromRow);
+}
+
+/**
+ * Atomic claim of the authorization decision — added 2026-09-28. A single
+ * conditional UPDATE: it only matches while the run is STILL
+ * AWAITING_HUMAN_AUTHORIZATION and has never been authorized, so two
+ * concurrent/redelivered "Authorize" presses cannot both proceed to merge —
+ * exactly one UPDATE matches a row. Returns `true` only if THIS call won.
+ */
+export async function claimPatchAuthorization(patchRunId: string, telegramUserId: number): Promise<boolean> {
+  const db = getLearningSupabase();
+  if (!db) return false;
+  const { data, error } = await db
+    .from("evolution_patch_runs")
+    .update({ authorized_by: telegramUserId, authorized_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("patch_run_id", patchRunId)
+    .eq("status", "AWAITING_HUMAN_AUTHORIZATION")
+    .is("authorized_at", null)
+    .select("patch_run_id");
+  if (error || !data) return false;
+  return data.length === 1;
+}
+
+/** Conditional status transition (compare-and-set) — `true` only if the row was still in `expected` when the UPDATE ran. Used for decline/expiry so a late press can never overwrite a decision that already exists. */
+export async function transitionPatchRunIfStatus(patchRunId: string, expected: PatchRunStatus, next: PatchRunStatus, fields: { failedStage?: string | null; errorSummary?: string | null } = {}): Promise<boolean> {
+  const db = getLearningSupabase();
+  if (!db) return false;
+  const { data, error } = await db
+    .from("evolution_patch_runs")
+    .update({ status: next, failed_stage: fields.failedStage ?? null, error_summary: fields.errorSummary ?? null, updated_at: new Date().toISOString() })
+    .eq("patch_run_id", patchRunId)
+    .eq("status", expected)
+    .select("patch_run_id");
+  if (error || !data) return false;
+  return data.length === 1;
 }

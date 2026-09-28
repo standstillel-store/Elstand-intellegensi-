@@ -60,7 +60,7 @@ function describeRisk(older: number | null, newer: number | null, regressionEval
       ? `Sampel kecil (hanya ${minEligible} kasus eligible di salah satu jendela) — anggap sebagai indikasi arah, bukan kesimpulan final.`
       : `Ukuran sampel cukup memadai (${minEligible}+ kasus eligible di jendela yang lebih kecil).`;
   const regressionNote = regressionEvaluated ? "Tidak ada regresi yang terdeteksi terhadap baseline sebelumnya." : "Regresi belum dievaluasi untuk record ini.";
-  return `${sampleNote} ${regressionNote} Ini murni bukti observasional, bukan rekam jejak live-trading — approve hanya mencatat keputusan, tidak men-deploy atau mengaktifkan apa pun.`;
+  return `${sampleNote} ${regressionNote} Ini murni bukti observasional, bukan rekam jejak live-trading — approve mencatat keputusan dan memulai pipeline patch terkontrol (generate patch → branch terisolasi → pengecekan otomatis); approve TIDAK langsung merge/deploy — otorisasi terpisah diminta setelah pengecekan lolos.`;
 }
 
 function summarize(record: EvolutionValidationRecordWithoutTimestamp): ApprovalRequestSummary {

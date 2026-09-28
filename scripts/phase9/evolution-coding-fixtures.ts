@@ -24,7 +24,7 @@ function check(name: string, pass: boolean, detail: string) {
   console.log(`${pass ? "PASS" : "FAIL"} — ${name}${pass ? "" : ` | ${detail}`}`);
 }
 
-const SCOPE = ["lib/ai/evolutionCoding/example.ts", "app/api/example/route.ts"];
+const SCOPE = ["lib/ai/cognitive/example.ts", "app/api/example/route.ts"];
 
 function file(filePath: string, content: string): GeneratedFile {
   return { filePath, content };
@@ -38,7 +38,7 @@ function file(filePath: string, content: string): GeneratedFile {
 
 // 2. Out-of-scope path.
 {
-  const result = validateGeneratedFiles([file("lib/ai/evolutionCoding/example.ts", "x"), file("lib/ai/somethingElse.ts", "y")], SCOPE);
+  const result = validateGeneratedFiles([file("lib/ai/cognitive/example.ts", "x"), file("lib/ai/somethingElse.ts", "y")], SCOPE);
   check("2a out-of-scope path rejected", result.ok === false && !result.ok && result.violatingPaths.includes("lib/ai/somethingElse.ts"), JSON.stringify(result));
 }
 
@@ -88,7 +88,7 @@ async function testGenerateNoScope() {
 // provider configured in this sandbox (genuinely true here, not simulated):
 // must return NOT_CONFIGURED, never a fabricated GENERATED result.
 async function testGenerateNotConfigured() {
-  const artifact = { affectedFiles: ["lib/ai/evolutionCoding/example.ts"] } as unknown as ChangeArtifact;
+  const artifact = { affectedFiles: ["lib/ai/cognitive/example.ts"] } as unknown as ChangeArtifact;
   const result = await generateCodeForArtifact(artifact, async () => "current content");
   check("9a no AI Core configured -> NOT_CONFIGURED, never fabricated", result.outcome === "NOT_CONFIGURED", JSON.stringify(result));
 }

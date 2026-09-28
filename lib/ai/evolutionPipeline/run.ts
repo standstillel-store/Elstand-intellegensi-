@@ -2,24 +2,25 @@
 // ELVOID Intelligence — Phase 9, pipeline orchestrator (Step 4)
 //
 // The ONE function that turns a HUMAN_APPROVED ChangeArtifact into a real
-// code change: generate -> push (branch/commit/merge) -> best-effort inline
-// deploy check -> Telegram result. Called from
-// app/api/ai-performance/approvals/telegram/route.ts, synchronously, in the
-// SAME place the (fast, pure) Change Artifact block already runs — every
-// step through "merge" here is itself just a handful of HTTPS calls and is
-// expected to finish in a few seconds, same order of magnitude as that
-// existing block.
+// code change PROPOSAL: generate -> push to an isolated branch -> Telegram
+// notice. Called from app/api/ai-performance/approvals/telegram/route.ts,
+// synchronously, in the SAME place the (fast, pure) Change Artifact block
+// already runs.
 //
-// It deliberately does NOT wait for Vercel's build to fully finish inline:
-// a real Next.js production build can take minutes, far past what a
-// serverless function invocation should hold open. After a merge succeeds
-// it makes a small, BOUNDED number of quick checks (Section L: "Automatic
-// retry hanya untuk operation yang idempotent dan jumlah retry kecil/
-// deterministic") and otherwise leaves the run as
-// PUSH_SUCCESS_DEPLOY_PENDING — the Vercel deployment webhook
-// (app/api/ai-performance/approvals/deployment-webhook/route.ts) reports
-// the eventual real DEPLOY_SUCCESS / DEPLOY_FAILED for the common case
-// where the build is still running when this function returns.
+// CHANGED 2026-09-28 (Controlled Autonomous Self-Coding upgrade): this
+// function NO LONGER MERGES. It used to go generate -> push -> MERGE to the
+// production branch immediately, while the approval message promised nothing
+// would be deployed (confirmed-live finding, Final Master Audit). It now
+// stops at BRANCH_PUSHED_AWAITING_CHECKS. The rest of the chain lives
+// elsewhere, each stage independently gated:
+//   PATCH (here, bounded by scopeGuard)
+//     -> TEST / REGRESSION  checks.ts   (CI: tsc --noEmit + next build on the
+//                                        exact pushed commit; fail closed)
+//     -> HUMAN AUTHORIZATION authorization.ts (second Telegram decision; the
+//                                        only caller of the merge)
+//     -> MERGE / DEPLOY     authorization.ts (Vercel's Git integration turns
+//                                        the merge into a deployment)
+// Stage order and timeouts are declared in controlPolicy.yaml (data only).
 //
 // NEVER throws out of this function — every stage is wrapped so a bug here
 // can never affect the Telegram approval response already computed by the
@@ -31,24 +32,16 @@ import { generateCodeForArtifact } from "@/lib/ai/evolutionCoding/generate";
 import type { CodeGenerationOutcome } from "@/lib/ai/evolutionCoding/contracts";
 import { readGitConfig, getFileContent } from "@/lib/ai/evolutionGit/githubClient";
 import type { GitEnvInput } from "@/lib/ai/evolutionGit/contracts";
-import { pushGeneratedChange } from "@/lib/ai/evolutionGit/pushChange";
-import { readVercelConfig, findDeploymentByCommitSha } from "@/lib/ai/evolutionDeploy/vercelClient";
+import { pushGeneratedBranch } from "@/lib/ai/evolutionGit/pushChange";
 import type { VercelEnvInput } from "@/lib/ai/evolutionDeploy/contracts";
 import { readTelegramConfig } from "@/lib/ai/evolutionApproval/security";
 import { createTelegramClient } from "@/lib/ai/evolutionApproval/telegramClient";
 import type { TelegramEnvInput } from "@/lib/ai/evolutionApproval/security";
 import { appendPatchEvent, upsertPatchRun } from "./repository";
 import { patchRunIdFor, type PatchRun, type PatchRunStatus, type PatchRunWithoutTimestamp } from "./contracts";
-import { formatDeploySuccessMessage, formatPipelineFailureMessage, formatPushPendingMessage } from "./resultMessages";
+import { formatAwaitingChecksMessage, formatPipelineFailureMessage } from "./resultMessages";
 
 export type Phase9EnvInput = GitEnvInput & VercelEnvInput & TelegramEnvInput;
-
-const INLINE_DEPLOY_CHECK_ATTEMPTS = 2;
-const INLINE_DEPLOY_CHECK_INTERVAL_MS = 2000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 async function notifyApprover(env: Phase9EnvInput, text: string): Promise<void> {
   const telegramConfig = readTelegramConfig(env);
@@ -77,7 +70,6 @@ export async function runPhase9Pipeline(artifact: ChangeArtifact, env: Phase9Env
     if (artifact.artifactStatus !== "AWAITING_HUMAN_PATCH") return; // VALIDATION_FAILED artifacts are never a Phase 9 input — see evolutionArtifact/create.ts.
 
     const gitConfig = readGitConfig(env);
-    const vercelConfig = readVercelConfig(env);
     if (!gitConfig) {
       await upsertPatchRun({ ...baseRun(artifact), status: "NOT_CONFIGURED", branch: null, baseSha: null, commitSha: null, mergeCommitSha: null, deploymentId: null, deploymentUrl: null, failedStage: "CONFIG", errorSummary: "GITHUB_TOKEN/GITHUB_OWNER/GITHUB_REPO not fully set" });
       await notifyApprover(env, formatPipelineFailureMessage(artifact.proposalId, "CONFIG", "NOT_CONFIGURED", "Git integration is not configured (GITHUB_TOKEN/GITHUB_OWNER/GITHUB_REPO)."));
@@ -100,24 +92,24 @@ export async function runPhase9Pipeline(artifact: ChangeArtifact, env: Phase9Env
     }
     await appendPatchEvent(artifact.recordHash, patchRunIdFor(artifact.recordHash), "CODE_GENERATION", "STARTED", `generated ${generation.files.length} file(s) within approved scope`);
 
-    // --- Stage 2: isolated branch, commit, merge ------------------------
-    await appendPatchEvent(artifact.recordHash, patchRunIdFor(artifact.recordHash), "GIT_PUSH", "STARTED", "creating branch and committing generated files");
-    const push = await pushGeneratedChange(gitConfig, artifact.recordHash, artifact.proposalId, generation.files);
+    // --- Stage 2: isolated branch + commit ONLY (no merge) ----------------
+    await appendPatchEvent(artifact.recordHash, patchRunIdFor(artifact.recordHash), "GIT_PUSH", "STARTED", "creating branch and committing generated files (no merge — checks + human authorization come first)");
+    const push = await pushGeneratedBranch(gitConfig, artifact.recordHash, artifact.proposalId, generation.files);
 
-    if (push.outcome !== "MERGE_SUCCESS") {
+    if (push.outcome !== "BRANCH_PUSHED") {
       await upsertPatchRun({ ...baseRun(artifact), status: push.outcome, branch: push.branch ?? null, baseSha: push.baseSha ?? null, commitSha: push.commitSha ?? null, mergeCommitSha: null, deploymentId: null, deploymentUrl: null, failedStage: "GIT_PUSH", errorSummary: push.reason });
       await appendPatchEvent(artifact.recordHash, patchRunIdFor(artifact.recordHash), "GIT_PUSH", push.outcome, push.reason);
       await notifyApprover(env, formatPipelineFailureMessage(artifact.proposalId, "GIT_PUSH", push.outcome, push.reason, push.branch, push.commitSha));
       return;
     }
 
-    let run: PatchRun = {
+    const run: PatchRun = {
       ...baseRun(artifact),
-      status: "PUSH_SUCCESS_DEPLOY_PENDING",
+      status: "BRANCH_PUSHED_AWAITING_CHECKS",
       branch: push.branch,
       baseSha: push.baseSha,
       commitSha: push.commitSha,
-      mergeCommitSha: push.mergeCommitSha,
+      mergeCommitSha: null,
       deploymentId: null,
       deploymentUrl: null,
       failedStage: null,
@@ -126,35 +118,8 @@ export async function runPhase9Pipeline(artifact: ChangeArtifact, env: Phase9Env
       updatedAt: new Date().toISOString(),
     };
     await upsertPatchRun(run);
-    await appendPatchEvent(artifact.recordHash, run.patchRunId, "GIT_PUSH", "PUSH_SUCCESS_DEPLOY_PENDING", `merged ${push.branch} into base at ${push.mergeCommitSha}`);
-    await notifyApprover(env, formatPushPendingMessage(run));
-
-    // --- Stage 3: best-effort inline deploy check (bounded, never blocks long) ---
-    if (!vercelConfig) {
-      await appendPatchEvent(artifact.recordHash, run.patchRunId, "DEPLOY_VERIFY", "DEPLOY_UNKNOWN", "VERCEL_TOKEN/VERCEL_PROJECT_ID not configured — relying on the deployment webhook only, if it is registered");
-      return;
-    }
-
-    for (let attempt = 0; attempt < INLINE_DEPLOY_CHECK_ATTEMPTS; attempt += 1) {
-      await sleep(INLINE_DEPLOY_CHECK_INTERVAL_MS);
-      const snapshot = await findDeploymentByCommitSha(vercelConfig, run.mergeCommitSha!);
-      if (snapshot.state === "READY") {
-        run = { ...run, status: "DEPLOY_SUCCESS", deploymentId: snapshot.deploymentId, deploymentUrl: snapshot.url, updatedAt: new Date().toISOString() };
-        await upsertPatchRun(run);
-        await appendPatchEvent(artifact.recordHash, run.patchRunId, "DEPLOY_VERIFY", "DEPLOY_SUCCESS", `deployment ${snapshot.deploymentId ?? "unknown"} is READY`);
-        await notifyApprover(env, formatDeploySuccessMessage(run));
-        return;
-      }
-      if (snapshot.state === "ERROR" || snapshot.state === "CANCELED") {
-        run = { ...run, status: "DEPLOY_FAILED", deploymentId: snapshot.deploymentId, deploymentUrl: snapshot.url, failedStage: "DEPLOY_VERIFY", errorSummary: `Vercel deployment ended in state ${snapshot.state}`, updatedAt: new Date().toISOString() };
-        await upsertPatchRun(run);
-        await appendPatchEvent(artifact.recordHash, run.patchRunId, "DEPLOY_VERIFY", "DEPLOY_FAILED", `deployment ${snapshot.deploymentId ?? "unknown"} ended in state ${snapshot.state}`);
-        await notifyApprover(env, formatPipelineFailureMessage(artifact.proposalId, "DEPLOY_VERIFY", "DEPLOY_FAILED", `Vercel deployment ended in state ${snapshot.state}. COMMIT SUCCESS, DEPLOY FAILED.`, run.branch, run.mergeCommitSha));
-        return;
-      }
-      // still PENDING/BUILDING/UNKNOWN — keep waiting up to the attempt budget, then leave it to the webhook.
-    }
-    await appendPatchEvent(artifact.recordHash, run.patchRunId, "DEPLOY_VERIFY", "DEPLOY_UNKNOWN", "deployment not yet terminal after inline check budget — awaiting the deployment webhook");
+    await appendPatchEvent(artifact.recordHash, run.patchRunId, "GIT_PUSH", "BRANCH_PUSHED_AWAITING_CHECKS", `pushed ${push.branch} at ${push.commitSha} — NOT merged; awaiting CI checks`);
+    await notifyApprover(env, formatAwaitingChecksMessage(run));
   } catch (err) {
     // Defense in depth: even a bug in this file must never throw out of a
     // best-effort background pipeline. Best-effort final notification only.

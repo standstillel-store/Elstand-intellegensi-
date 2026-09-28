@@ -1,0 +1,37 @@
+name: ELVOID Phase 9 Checks Poll
+
+# ---------------------------------------------------------------------------
+# Added 2026-09-28. Calls the app's checks route every 15 minutes so a pushed
+# self-coding branch's CI result (phase9-patch-check.yml) is picked up, the
+# human authorization request is sent when it passed, and stale/timed-out runs
+# fail closed. Same pattern and same reason as elvoid-autonomous-tick.yml
+# (Vercel Hobby crons are daily-only; GitHub Actions is a real scheduler).
+#
+# This workflow contains no logic and can never merge or deploy anything —
+# the route it calls has no import of the merge function (see
+# app/api/ai-performance/evolution/checks/route.ts).
+#
+# REQUIRED REPO SECRETS (same two as elvoid-autonomous-tick.yml):
+#   ELVOID_PRO_BASE_URL, CRON_SECRET
+# Unlike the tick route, the checks route REFUSES requests when CRON_SECRET is
+# not set on the Vercel side (fail closed), so CRON_SECRET must be present.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll Phase 9 checks
+        run: |
+          if [ -z "${{ secrets.ELVOID_PRO_BASE_URL }}" ]; then
+            echo "ELVOID_PRO_BASE_URL secret is not set — see this workflow file's header comment."
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.ELVOID_PRO_BASE_URL }}/api/ai-performance/evolution/checks"

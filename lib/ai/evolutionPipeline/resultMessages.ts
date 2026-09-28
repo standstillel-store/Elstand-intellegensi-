@@ -67,3 +67,67 @@ export function formatPipelineFailureMessage(proposalId: string, failedStage: st
     `No further action was taken. Nothing was deployed.`
   );
 }
+
+// ---------------------------------------------------------------------------
+// Added 2026-09-28 — messages for the mandatory CHECKS -> HUMAN AUTHORIZATION
+// gate (see checks.ts / authorization.ts). Same plain-text, closed-vocabulary
+// rules as everything above. None of these ever claims a merge or deploy
+// happened — only formatAuthorizationGrantedMessage below is sent after a
+// merge, and it is only reachable from authorization.ts's AUTHORIZED path.
+// ---------------------------------------------------------------------------
+
+export function formatAwaitingChecksMessage(run: PatchRun): string {
+  return (
+    header("PATCH PUSHED — CHECKS RUNNING") +
+    `Proposal: ${run.proposalId}\n` +
+    `Branch: ${run.branch}\n` +
+    `Commit: ${run.commitSha}\n` +
+    `Status: NOT MERGED. Automated checks (tsc --noEmit + next build) are running on this exact commit.\n` +
+    `You will be asked for a separate authorization only if they pass. If they fail or time out, nothing is merged or deployed.`
+  );
+}
+
+export function formatChecksFailedMessage(run: PatchRun): string {
+  return (
+    header("CHECKS FAILED") +
+    `Proposal: ${run.proposalId}\n` +
+    `Branch: ${run.branch}\n` +
+    `Commit: ${run.commitSha}\n` +
+    (run.checksRunUrl ? `CI run: ${run.checksRunUrl}\n` : "") +
+    `Status: FAIL CLOSED — the generated patch did not pass automated checks. It was NOT merged and NOT deployed.`
+  );
+}
+
+export function formatChecksTimeoutMessage(run: PatchRun, timeoutMinutes: number): string {
+  return (
+    header("CHECKS TIMEOUT") +
+    `Proposal: ${run.proposalId}\n` +
+    `Branch: ${run.branch}\n` +
+    `Commit: ${run.commitSha}\n` +
+    `Status: FAIL CLOSED — no conclusive CI result within ${timeoutMinutes} minutes. Unverifiable is treated as failed. NOT merged, NOT deployed.`
+  );
+}
+
+export function formatAuthorizationRequestMessage(run: PatchRun, meaning: string): string {
+  return (
+    header("AUTHORIZATION REQUIRED") +
+    `Proposal: ${run.proposalId}\n` +
+    `Branch: ${run.branch}\n` +
+    `Commit: ${run.commitSha}\n` +
+    (run.checksRunUrl ? `CI run (tsc + build passed): ${run.checksRunUrl}\n` : "CI: passed\n") +
+    `Review the diff on the branch before deciding.\n\n` +
+    meaning
+  );
+}
+
+export function formatAuthorizationRejectedMessage(run: PatchRun): string {
+  return header("AUTHORIZATION DECLINED") + `Proposal: ${run.proposalId}\nBranch: ${run.branch}\nStatus: NOT merged, NOT deployed. The branch is left in place unmerged.`;
+}
+
+export function formatAuthorizationTimeoutMessage(run: PatchRun, timeoutMinutes: number): string {
+  return (
+    header("AUTHORIZATION EXPIRED") +
+    `Proposal: ${run.proposalId}\nBranch: ${run.branch}\n` +
+    `Status: FAIL CLOSED — no authorization within ${timeoutMinutes} minutes. NOT merged, NOT deployed. The branch is left in place unmerged.`
+  );
+}
