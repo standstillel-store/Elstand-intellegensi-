@@ -1,0 +1,83 @@
+# -----------------------------------------------------------------------------
+# ELVOID Intelligence — Phase 9 controlled-autonomous workflow control policy
+# Added 2026-09-28.
+#
+# THIS FILE IS DATA, NEVER CODE. It is parsed by loadControlPolicy.ts with
+# js-yaml's `load()` (its safe, default schema — no `!!js/function`, no
+# custom tags, no arbitrary type construction) and then validated against an
+# explicit, hand-written shape check that rejects anything this file isn't
+# expected to contain. Nothing in this application ever passes a value read
+# from this file to eval(), new Function(), child_process, or a template
+# string that becomes a shell command. It exists purely so the stage order,
+# gate ownership, and timeouts below are readable and auditable in one place
+# rather than scattered as magic numbers across five TypeScript files.
+#
+# stages[].control:
+#   autonomous          — the system may act on its own within this stage.
+#   hard_safety_boundary — bounded by a fixed, non-LLM-derived denylist
+#                          (lib/ai/evolutionCoding/scopeGuard.ts); never
+#                          widened by anything this file says.
+#   automated_gate      — a real, external, independently-run check
+#                          (GitHub Actions CI) must report SUCCESS; a
+#                          missing/ambiguous result is never treated as
+#                          success (see checks.ts).
+#   human               — requires an explicit action by the one configured
+#                          Telegram approver; the system can never satisfy
+#                          this stage on its own behalf.
+#
+# Changing a timeout or a check name here changes operational behavior (how
+# long a run waits before failing closed) — it does NOT and cannot change
+# which stages require a human, remove the hard safety boundary, or grant
+# the autonomous system permission to merge/deploy/authorize itself. Those
+# are enforced in code (scopeGuard.ts, authorization.ts, and the database
+# trigger evolution_patch_runs_require_authorization_for_merge()), not by
+# this file.
+# -----------------------------------------------------------------------------
+version: 1
+
+stages:
+  - id: NEED
+    control: autonomous
+  - id: PROPOSAL
+    control: autonomous
+  - id: CANDIDATE
+    control: autonomous
+  - id: VALIDATION
+    control: autonomous
+  - id: HUMAN_APPROVAL
+    control: human
+  - id: CHANGE_ARTIFACT
+    control: autonomous
+  - id: PATCH
+    control: hard_safety_boundary
+  - id: TEST_REGRESSION
+    control: automated_gate
+    checkNameContains: "phase9-patch-check"
+    timeoutMinutes: 60
+  - id: HUMAN_AUTHORIZATION
+    control: human
+    timeoutMinutes: 1440
+  - id: MERGE_DEPLOY
+    control: autonomous
+
+autonomy:
+  allowed:
+    - detect_gap
+    - proposal
+    - candidate
+    - validation
+    - generate_artifact
+    - generate_patch
+    - run_test
+    - run_regression
+    - fail_closed
+  neverAutonomous:
+    - scope_expansion
+    - denylist_override
+    - approval
+    - authorization
+    - production_merge
+    - production_deploy
+    - secret_access
+    - risk_gate
+    - decision_gate

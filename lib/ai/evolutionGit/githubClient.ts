@@ -106,6 +106,47 @@ export async function putFileContents(config: GitConfig, branch: string, path: s
   return { ok: true, commitSha: result.data.commit.sha };
 }
 
+interface CheckRunSummary {
+  readonly name: string;
+  readonly status: string; // "queued" | "in_progress" | "completed"
+  readonly conclusion: string | null; // null until completed
+  readonly html_url: string | null;
+}
+
+export type CombinedCheckStatus =
+  | { readonly state: "PENDING" } // required check not registered/finished yet
+  | { readonly state: "SUCCESS"; readonly url: string | null }
+  | { readonly state: "FAILURE"; readonly url: string | null }
+  | { readonly state: "ERROR" }; // the GitHub API call itself failed — caller treats this exactly like PENDING (try again next poll), never like FAILURE or SUCCESS
+
+const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale"]);
+
+/**
+ * Verdict on the Check Runs registered against `ref` (a commit SHA):
+ *   - ANY check run on the commit that failed -> FAILURE (conservative: an
+ *     unrelated failing check also blocks; it never unblocks anything).
+ *   - SUCCESS requires at least one check run whose name contains
+ *     `requiredNameContains` (the repo's own phase9-patch-check job:
+ *     `tsc --noEmit` then `next build`), every such run completed, and
+ *     every such run concluded exactly "success". A third-party check that
+ *     happens to pass first (e.g. a Vercel preview) can NEVER stand in for
+ *     it, and neutral/skipped does not count as a pass for the required check.
+ *   - Required check absent, queued or running -> PENDING. "No evidence of
+ *     failure" is never "passed".
+ */
+export async function getCombinedCheckStatus(config: GitConfig, ref: string, requiredNameContains: string): Promise<CombinedCheckStatus> {
+  const result = await callGitHub<{ check_runs: CheckRunSummary[] }>(config, `/repos/${config.owner}/${config.repo}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`);
+  if (!result.ok) return { state: "ERROR" };
+  const runs = result.data.check_runs ?? [];
+  const failed = runs.find((r) => r.status === "completed" && r.conclusion !== null && FAILING_CONCLUSIONS.has(r.conclusion));
+  if (failed) return { state: "FAILURE", url: failed.html_url };
+  const required = runs.filter((r) => r.name.includes(requiredNameContains));
+  if (required.length === 0) return { state: "PENDING" };
+  if (required.some((r) => r.status !== "completed")) return { state: "PENDING" };
+  if (required.every((r) => r.conclusion === "success")) return { state: "SUCCESS", url: required[0]?.html_url ?? null };
+  return { state: "PENDING" }; // completed but neutral/skipped/unknown — not a pass, and not provably a failure either; time decides
+}
+
 export type MergeResult = { readonly ok: true; readonly mergeCommitSha: string } | { readonly ok: false; readonly conflict: boolean; readonly reason: string };
 
 /** Merges `head` into `base`. A 409 from GitHub means a real merge conflict — surfaced as `conflict: true` so the caller reports MERGE_CONFLICT distinctly from any other failure. */

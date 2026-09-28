@@ -16,14 +16,24 @@
 
 import type { GeneratedFile } from "@/lib/ai/evolutionCoding/contracts";
 import { createBranch, getBranchHeadSha, getFileContent, mergeBranch, putFileContents } from "./githubClient";
-import type { GitConfig, GitPushResult } from "./contracts";
+import type { GitConfig, GitPushResult, GitMergeResult } from "./contracts";
 
 /** Deterministic, one branch per artifact — a redelivered/retried run reuses the same name rather than piling up branches. Git ref names may not contain `:`; recordHash is 64 lowercase hex so no further sanitizing is needed. */
 export function branchNameFor(recordHash: string): string {
   return `elvoid/phase9/${recordHash.slice(0, 16)}`;
 }
 
-export async function pushGeneratedChange(config: GitConfig, recordHash: string, proposalId: string, files: readonly GeneratedFile[]): Promise<GitPushResult> {
+/**
+ * Stage 2 of 3, as of 2026-09-28 (Controlled Autonomous Self-Coding
+ * upgrade): branch + commit ONLY — this function no longer merges.
+ * Merging now requires: (1) this branch's CI check-runs to report SUCCESS
+ * (see checks.ts), THEN (2) a human to explicitly authorize the merge on a
+ * second, distinct Telegram message (see authorization.ts, which is the
+ * ONLY caller of mergeApprovedBranch() below). This fixes the confirmed-
+ * live finding that the approval message promised "no deploy" while this
+ * function previously merged unconditionally right after commit.
+ */
+export async function pushGeneratedBranch(config: GitConfig, recordHash: string, proposalId: string, files: readonly GeneratedFile[]): Promise<GitPushResult> {
   const branch = branchNameFor(recordHash);
 
   const baseSha = await getBranchHeadSha(config, config.baseBranch);
@@ -32,9 +42,9 @@ export async function pushGeneratedChange(config: GitConfig, recordHash: string,
   }
 
   // Branch may already exist from a prior, partially-completed attempt for
-  // the SAME artifact (e.g. commit succeeded, merge did not) — creating it
-  // again is allowed to fail with 422 "already exists"; that is not treated
-  // as BRANCH_FAILED here, only a genuine inability to read/create is.
+  // the SAME artifact (e.g. one file committed, the next failed) — creating
+  // it again is allowed to fail with 422 "already exists"; that is not
+  // treated as BRANCH_FAILED here, only a genuine inability to read/create is.
   const existingHead = await getBranchHeadSha(config, branch);
   if (existingHead === null) {
     const created = await createBranch(config, branch, baseSha);
@@ -62,10 +72,22 @@ export async function pushGeneratedChange(config: GitConfig, recordHash: string,
     return { outcome: "COMMIT_FAILED", reason: "no files were written", branch, baseSha };
   }
 
+  return { outcome: "BRANCH_PUSHED", branch, baseSha, commitSha: lastCommitSha };
+}
+
+/**
+ * Stage 3 — the ONLY place `mergeBranch` (githubClient.ts) is called from.
+ * Callers (authorization.ts) MUST have already verified: CI check-runs on
+ * `branch` reported SUCCESS, AND a human explicitly authorized this exact
+ * patch run. This function itself does not and cannot verify either — it
+ * is a thin, honestly-named wrapper, not a second safety boundary; the
+ * database-level trigger `evolution_patch_runs_require_authorization_for_merge()`
+ * is the actual backstop if a caller ever gets this wrong.
+ */
+export async function mergeApprovedBranch(config: GitConfig, recordHash: string, proposalId: string, branch: string): Promise<GitMergeResult> {
   const merge = await mergeBranch(config, config.baseBranch, branch, `Phase 9: merge ${proposalId} (${recordHash.slice(0, 12)})`);
   if (!merge.ok) {
-    return { outcome: merge.conflict ? "MERGE_CONFLICT" : "MERGE_FAILED", reason: merge.reason, branch, baseSha, commitSha: lastCommitSha };
+    return { outcome: merge.conflict ? "MERGE_CONFLICT" : "MERGE_FAILED", reason: merge.reason };
   }
-
-  return { outcome: "MERGE_SUCCESS", branch, baseSha, commitSha: lastCommitSha, mergeCommitSha: merge.mergeCommitSha };
+  return { outcome: "MERGE_SUCCESS", mergeCommitSha: merge.mergeCommitSha };
 }

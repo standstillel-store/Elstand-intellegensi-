@@ -48,6 +48,19 @@ const GLOBAL_DENYLIST_PATH_SUBSTRINGS: readonly string[] = [
   "lib/ai/preEntryValidation/",
   "lib/ai/autonomousExecution/",
   "lib/ai/autonomousDecision/",
+  // Added 2026-09-28: the machinery that GATES self-coding must itself be
+  // unreachable by self-coding. Without these, a generated patch could in
+  // principle rewrite checks.ts / authorization.ts / the policy loader or the
+  // merge wrapper and quietly remove the TEST -> REGRESSION -> HUMAN
+  // AUTHORIZATION gate it is supposed to pass through.
+  "lib/ai/evolutionPipeline/", // run/checks/authorization/policy loader/contracts/repository
+  "lib/ai/evolutionGit/", // branch/commit/merge wrappers + GitHub client
+  "lib/ai/evolutionDeploy/",
+  "lib/ai/evolutionCoding/", // this guard and the generator itself
+  "app/api/ai-performance/approvals/", // Telegram + deployment webhooks
+  "app/api/ai-performance/evolution/", // checks cron route
+  ".github/", // CI gate + schedulers
+  "controlPolicy",
 ];
 
 const FORBIDDEN_CONTENT_SUBSTRINGS: readonly string[] = [

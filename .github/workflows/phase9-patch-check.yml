@@ -1,0 +1,52 @@
+name: phase9-patch-check
+
+# ---------------------------------------------------------------------------
+# Phase 9 mandatory TEST -> REGRESSION gate (added 2026-09-28).
+#
+# Runs on every push to an isolated self-coding branch (`elvoid/phase9/*`,
+# see lib/ai/evolutionGit/pushChange.ts::branchNameFor). The app polls the
+# result of THIS job's check run for the exact pushed commit
+# (lib/ai/evolutionPipeline/checks.ts). A patch is only ever offered to the
+# human for merge authorization if this job concluded "success"; failure,
+# cancellation, or no result within the timeout is a fail-closed stop.
+#
+# ONE job, sequential steps, on purpose: it registers as ONE check run that
+# is only "success" if BOTH steps passed, so the app can never see TEST
+# green while REGRESSION hasn't run yet. The job name below
+# (`phase9-patch-check`) must stay in sync with controlPolicy.yaml's
+# TEST_REGRESSION.checkNameContains.
+#
+#   TEST        tsc --noEmit  — the whole project still type-checks with the patch
+#   REGRESSION  next build    — the whole project still compiles and builds
+#
+# This repository has no unit/integration test suite; these two checks ARE
+# the automated gate, and this file does not pretend otherwise.
+#
+# No secrets are used or needed. It never merges, deploys, or pushes.
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches:
+      - "elvoid/phase9/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  phase9-patch-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install (lockfile-exact)
+        run: npm ci --no-audit --no-fund
+      - name: TEST — tsc --noEmit
+        run: npx tsc --noEmit
+      - name: REGRESSION — next build
+        run: npm run build

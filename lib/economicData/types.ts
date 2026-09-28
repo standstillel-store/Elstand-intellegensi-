@@ -18,7 +18,7 @@
 
 import type { CanonicalIndicatorId } from "./canonicalIndicators";
 
-export type EconomicDataSource = "forexfactory" | "alphavantage";
+export type EconomicDataSource = "forexfactory" | "alphavantage" | "fred";
 
 export type ReleaseStatus = "upcoming" | "released" | "pending";
 

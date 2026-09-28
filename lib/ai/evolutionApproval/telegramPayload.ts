@@ -104,8 +104,46 @@ export function buildApprovalKeyboard(recordHash: string): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: "Setujui (hanya mencatat keputusan)", callback_data: encodeCallbackData("APPROVE", recordHash) },
+        { text: "Setujui (mulai pipeline patch terkontrol)", callback_data: encodeCallbackData("APPROVE", recordHash) },
         { text: "Tolak", callback_data: encodeCallbackData("REJECT", recordHash) },
+      ],
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SECOND GATE — added 2026-09-28: "authorize the merge" callback data,
+// entirely separate from encodeCallbackData/decodeCallbackData above (which
+// remain APPROVE/REJECT on an evolution_approvals record and are completely
+// untouched by this addition). This gate decides evolution_patch_runs, a
+// different table, keyed the same way (record_hash prefix as a lookup key
+// only — see this file's own header). Read by app/api/ai-performance/
+// approvals/telegram/route.ts BEFORE it calls handleTelegramWebhook, so a
+// "pa:"/"pd:" press never reaches the original APPROVE/REJECT decision path
+// at all, and an "a:"/"r:" press never reaches this one.
+// ---------------------------------------------------------------------------
+
+export type PatchAuthorizationAction = "AUTHORIZE" | "DECLINE";
+
+export function encodeAuthCallbackData(action: PatchAuthorizationAction, recordHash: string): string {
+  return `${action === "AUTHORIZE" ? "pa" : "pd"}:${recordHash.slice(0, CALLBACK_PREFIX_LENGTH)}`;
+}
+
+/** `null` for anything that is not exactly `pa:`/`pd:` + 32 (or 64) lowercase hex characters. Deliberately a different prefix shape (`pa`/`pd`, two letters) than `a`/`r` above so the two callback families can never collide even if a button press is somehow redelivered against the wrong handler. */
+export function decodeAuthCallbackData(data: string): { readonly action: PatchAuthorizationAction; readonly reference: string } | null {
+  const match = /^(pa|pd):([0-9a-f]+)$/.exec(data);
+  if (match === null) return null;
+  const reference = match[2];
+  if (!HEX_32.test(reference) && !HEX_64.test(reference)) return null;
+  return { action: match[1] === "pa" ? "AUTHORIZE" : "DECLINE", reference };
+}
+
+export function buildAuthorizationKeyboard(recordHash: string): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Authorize merge + deploy", callback_data: encodeAuthCallbackData("AUTHORIZE", recordHash) },
+        { text: "Decline", callback_data: encodeAuthCallbackData("DECLINE", recordHash) },
       ],
     ],
   };

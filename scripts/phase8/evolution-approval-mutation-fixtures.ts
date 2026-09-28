@@ -68,7 +68,7 @@ const MUTATIONS: readonly Mutation[] = [
   // --- auto-promotion / production coupling ---------------------------------
   { id: "promo-import", what: "the approval service imports the qualification decision path", file: `${A}/service.ts`, find: 'import { evaluateApprovalEligibility } from "./eligibility";', replace: 'import "@/lib/ai/decisionQualification/qualify";\nimport { evaluateApprovalEligibility } from "./eligibility";' },
   { id: "promo-status", what: "a DEPLOYED status appears in the approval contracts", file: `${A}/contracts.ts`, find: 'export type ResultingApprovalStatus = "HUMAN_APPROVED" | "HUMAN_REJECTED";', replace: 'export type ResultingApprovalStatus = "HUMAN_APPROVED" | "HUMAN_REJECTED" | "DEPLOYED";' },
-  { id: "promo-wording", what: "the APPROVE answer claims a deployment", file: `${A}/wording.ts`, find: 'APPROVED: "Recorded: human approved. Nothing was deployed or activated.",', replace: 'APPROVED: "Approved and deployed.",' },
+  { id: "promo-wording", what: "the APPROVE answer claims a deployment", file: `${A}/wording.ts`, find: 'APPROVED: "Recorded: human approved. Controlled patch pipeline started — nothing is merged or deployed until you separately authorize it after checks pass.",', replace: 'APPROVED: "Approved and deployed.",' },
   { id: "promo-legacy-table", what: "the approval adapter reads the LEGACY evolution_validations table", file: `${A}/repository.ts`, find: 'learningDb.from("evolution_validation_records").select("record_hash");', replace: 'learningDb.from("evolution_validations").select("record_hash");' },
 
   // --- secret leakage / logging ---------------------------------------------

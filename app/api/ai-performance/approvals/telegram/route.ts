@@ -6,6 +6,7 @@ import { emitApprovalDiagnostic } from "@/lib/ai/evolutionApproval/diagnostics";
 import { buildChangeArtifact } from "@/lib/ai/evolutionArtifact/create";
 import { persistChangeArtifact, getChangeArtifactByRecordHash } from "@/lib/ai/evolutionArtifact/repository";
 import { runPhase9Pipeline } from "@/lib/ai/evolutionPipeline/run";
+import { tryHandlePatchAuthorizationCallback } from "@/lib/ai/evolutionPipeline/authorization";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -26,14 +27,24 @@ export const runtime = "nodejs";
 // explain a 503 without writing a value. Only POST is exported (any other method is answered 405 by the
 // framework); there is no GET that could cause persistence.
 //
-// PHASE 9 (additive, Sept 2026): a freshly-recorded APPROVED decision now
-// also runs lib/ai/evolutionPipeline/run.ts — the ONLY place in this
-// repository that generates code, commits, pushes and merges. This route
-// itself still deploys nothing directly; Vercel's own existing Git
-// integration is what turns a merge into a deployment (see
-// lib/ai/evolutionDeploy's header for why there is no separate "trigger
-// deploy" call). See app/api/ai-performance/approvals/deployment-webhook/
-// route.ts for how a deployment's terminal result reaches Telegram.
+// PHASE 9 (Sept 2026), CORRECTED 2026-09-28 — this route now serves TWO
+// separate human gates, each on its own Telegram message and callback prefix:
+//   GATE 1  "a:"/"r:"  APPROVE/REJECT a validated proposal. Handled by
+//           handleTelegramWebhook() below, completely unchanged. A freshly-
+//           recorded APPROVED decision authorizes the controlled pipeline to
+//           START: lib/ai/evolutionPipeline/run.ts generates a patch and
+//           pushes it to an isolated branch. It does NOT merge or deploy.
+//   GATE 2  "pa:"/"pd:"  AUTHORIZE/DECLINE the merge. Handled FIRST, by
+//           tryHandlePatchAuthorizationCallback(), which returns null for
+//           anything that is not a "pa:"/"pd:" press (so gate 1 traffic is
+//           untouched). That message is only ever sent by checks.ts after CI
+//           (tsc --noEmit + next build) passed on the exact pushed commit.
+//           Authorizing is what merges to the production branch — and only
+//           then does Vercel's own Git integration deploy it (see
+//           lib/ai/evolutionDeploy's header). The autonomous system cannot
+//           press either button.
+// Terminal results reach Telegram via authorization.ts (inline) and
+// app/api/ai-performance/approvals/deployment-webhook/route.ts.
 //
 // Register the webhook once, from your own shell, so no secret is ever pasted
 // anywhere (secret_token must be 1-256 characters of A-Z a-z 0-9 _ -):
@@ -49,6 +60,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "malformed" }, { status: 400 });
   }
   const bodyText = await request.text();
+
+  // Gate 2 first — returns null for everything that is not a "pa:"/"pd:"
+  // press, in which case the original gate-1 handler below runs exactly as
+  // before. Same three env values, same secret/approver/private-chat rules.
+  const authorization = await tryHandlePatchAuthorizationCallback({
+    secretHeader: request.headers.get("x-telegram-bot-api-secret-token"),
+    bodyText,
+    env: {
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+      GITHUB_OWNER: process.env.GITHUB_OWNER,
+      GITHUB_REPO: process.env.GITHUB_REPO,
+      GITHUB_BASE_BRANCH: process.env.GITHUB_BASE_BRANCH,
+      VERCEL_TOKEN: process.env.VERCEL_TOKEN,
+      VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
+      VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
+      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+      TELEGRAM_APPROVER_ID: process.env.TELEGRAM_APPROVER_ID,
+      TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
+    },
+  });
+  if (authorization !== null) {
+    return NextResponse.json(authorization.body, { status: authorization.status });
+  }
+
   const store = createApprovalStore();
 
   const result = await handleTelegramWebhook(
@@ -82,7 +117,7 @@ export async function POST(request: Request) {
         const artifact = buildChangeArtifact(fetchedRecord.record, recordHash);
         if (artifact !== null) {
           await persistChangeArtifact(artifact);
-          // Phase 9 — only when the artifact is actually awaiting a patch
+          // Phase 9 stage 1 (generate + push a branch; NO merge) — only when the artifact is actually awaiting a patch
           // (never for VALIDATION_FAILED). Same isolation as the artifact
           // block itself: never affects the response already computed
           // above, never retried by this route.

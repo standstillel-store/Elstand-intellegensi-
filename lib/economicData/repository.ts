@@ -23,6 +23,42 @@ import { getLearningSupabase } from "@/lib/ai/learning/db";
 import type { CanonicalIndicatorId } from "./canonicalIndicators";
 import type { EconomicObservation, EconomicRelease } from "./types";
 
+/**
+ * Distinguishes PostgREST's "table not found in schema cache" failure
+ * (code PGRST205 — the table exists at the SQL level but the REST layer's
+ * cached schema hasn't picked it up yet, e.g. right after a migration was
+ * applied through the SQL Editor) from every other kind of query failure.
+ *
+ * Added 2026-09-28 after a confirmed-live production incident: reads against
+ * economic_releases failed with exactly this signature for several days
+ * after the Phase G migration was applied, self-resolved once the cache
+ * refreshed. This never changes behavior (callers still degrade to []/false
+ * the same as any other error) — it only makes the *next* occurrence
+ * instantly diagnosable in logs instead of looking like a generic failure,
+ * a wiring bug, or a missing migration.
+ */
+function isSchemaCacheError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === "PGRST205") return true;
+  const msg = error.message ?? "";
+  return /schema cache/i.test(msg) && /not find/i.test(msg);
+}
+
+function logRepositoryError(op: string, error: { code?: string; message?: string }): void {
+  if (isSchemaCacheError(error)) {
+    console.error(
+      `[economicData:repository] SCHEMA_CACHE_STALE during ${op}: PostgREST cannot see the table yet ` +
+        `(code=${error.code ?? "unknown"}). The table itself may already exist and hold data — this is a ` +
+        `REST schema-cache staleness signal, NOT proof the migration was never applied or applied to the ` +
+        `wrong project. Reload the Learning DB project's schema cache (Supabase dashboard → API → ` +
+        `"Reload schema", or \`NOTIFY pgrst, 'reload schema';\`) before assuming a deeper wiring problem. ` +
+        `Raw: ${error.message}`,
+    );
+  } else {
+    console.error(`[economicData:repository] ${op}: ${error.message}`);
+  }
+}
+
 function toReleaseRow(r: EconomicRelease) {
   return {
     id: r.id,
@@ -94,7 +130,7 @@ export async function upsertReleases(releases: readonly EconomicRelease[]): Prom
   if (!db) return false;
   const { error } = await db.from("economic_releases").upsert(releases.map(toReleaseRow), { onConflict: "id" });
   if (error) {
-    console.error(`[economicData:repository] upsertReleases: ${error.message}`);
+    logRepositoryError("upsertReleases", error);
     return false;
   }
   return true;
@@ -106,7 +142,7 @@ export async function upsertObservations(observations: readonly EconomicObservat
   if (!db) return false;
   const { error } = await db.from("economic_observations").upsert(observations.map(toObservationRow), { onConflict: "id" });
   if (error) {
-    console.error(`[economicData:repository] upsertObservations: ${error.message}`);
+    logRepositoryError("upsertObservations", error);
     return false;
   }
   return true;
@@ -124,7 +160,7 @@ export async function getRecentReleases(indicatorId: CanonicalIndicatorId, count
     .order("scheduled_at", { ascending: false })
     .limit(limit);
   if (error) {
-    console.error(`[economicData:repository] getRecentReleases(${indicatorId}): ${error.message}`);
+    logRepositoryError(`getRecentReleases(${indicatorId})`, error);
     return [];
   }
   return (data ?? []).map(fromReleaseRow);
@@ -141,7 +177,7 @@ export async function getRecentObservations(indicatorId: CanonicalIndicatorId, c
     .order("observation_period", { ascending: false })
     .limit(limit);
   if (error) {
-    console.error(`[economicData:repository] getRecentObservations(${indicatorId}): ${error.message}`);
+    logRepositoryError(`getRecentObservations(${indicatorId})`, error);
     return [];
   }
   return (data ?? []).map(fromObservationRow);
