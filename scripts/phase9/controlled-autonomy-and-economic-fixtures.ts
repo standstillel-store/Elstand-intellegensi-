@@ -22,7 +22,7 @@ import { isAuthorizationExpired, tryHandlePatchAuthorizationCallback } from "@/l
 import { getControlPolicySource, getRequiredCheckName, getTimeoutMinutes, isValidControlPolicyShape, loadControlPolicy } from "@/lib/ai/evolutionPipeline/loadControlPolicy";
 import { validateGeneratedFiles } from "@/lib/ai/evolutionCoding/scopeGuard";
 import { TERMINAL_STATUSES } from "@/lib/ai/evolutionPipeline/contracts";
-import { applyFredPrecedence } from "@/lib/economicData/ingest";
+import { evaluateIngestionHealth } from "@/lib/economicData/ingestHealth";
 import { fetchFredObservationsDetailed } from "@/lib/economicData/providers/fredProvider";
 
 let failures = 0;
@@ -160,16 +160,19 @@ async function main() {
   const cpiYoy = fred.data.filter((o) => o.indicatorId === "CPI_HEADLINE_YOY");
   check("10a. FRED provider returns oldest-first observations, tagged source 'fred', for the covered indicators", fred.ok && cpiYoy.length === 2 && cpiYoy[0].observationPeriod === "2026-06" && cpiYoy[1].observationPeriod === "2026-08" && cpiYoy.every((o) => o.source === "fred"), JSON.stringify(cpiYoy));
   check("10b. FRED's '.' (no value published) is DROPPED, never coerced to 0", !fred.data.some((o) => o.observationPeriod === "2026-07"), "");
-  check("10c. every covered indicator is reported so Alpha Vantage can defer to it", ["CPI_HEADLINE_MOM", "CPI_HEADLINE_YOY", "CORE_CPI_MOM", "CORE_CPI_YOY", "UNEMPLOYMENT_RATE", "NFP", "RETAIL_SALES_HEADLINE", "DURABLE_GOODS_ORDERS"].every((i) => fred.coveredIndicatorIds.includes(i as never)), JSON.stringify(fred.coveredIndicatorIds));
+  check("10c. FRED reports covered indicators (informational) — used for context, never to gate Alpha Vantage writes", ["CPI_HEADLINE_MOM", "CPI_HEADLINE_YOY", "CORE_CPI_MOM", "CORE_CPI_YOY", "UNEMPLOYMENT_RATE", "NFP", "RETAIL_SALES_HEADLINE", "DURABLE_GOODS_ORDERS"].every((i) => fred.coveredIndicatorIds.includes(i as never)), JSON.stringify(fred.coveredIndicatorIds));
   check("10d. ambiguous mappings are deliberately NOT covered (PPI, GDP, core retail) — they stay with Alpha Vantage unchanged", !fred.coveredIndicatorIds.some((i) => /PPI|GDP|RETAIL_SALES_CORE/.test(i)), JSON.stringify(fred.coveredIndicatorIds));
   check("10e. the FRED API key is only ever used server-side (provider is a lib/ module, never a client component)", !/"use client"/.test(src("lib/economicData/providers/fredProvider.ts")), "");
 
-  const av = [{ indicatorId: "CPI_HEADLINE_YOY", v: 1 }, { indicatorId: "PPI_HEADLINE_YOY", v: 2 }, { indicatorId: "NFP", v: 3 }];
-  const split = applyFredPrecedence(av, ["CPI_HEADLINE_YOY", "NFP"]);
-  check("10f. precedence: indicators FRED covered this run are deferred; everything FRED did not cover is still written from Alpha Vantage", split.deferredToFred.length === 2 && split.avDataToWrite.length === 1 && split.avDataToWrite[0].indicatorId === "PPI_HEADLINE_YOY", JSON.stringify(split));
-  const failOver = applyFredPrecedence(av, []);
-  check("10g. FRED unavailable (covers nothing) -> Alpha Vantage writes everything exactly as before (failover, no data lost)", failOver.avDataToWrite.length === 3 && failOver.deferredToFred.length === 0, "");
-  check("10h. determinism: same inputs -> same split", JSON.stringify(applyFredPrecedence(av, ["NFP"])) === JSON.stringify(applyFredPrecedence(av, ["NFP"])), "");
+  // DATA HIERARCHY (2026-09-29 fix): Alpha Vantage is PRIMARY — it ALWAYS writes its full dataset
+  // unconditionally. applyFredPrecedence has been removed. FRED writes under its own source ('fred')
+  // as a SUPPORTING provider. Neither can gate or displace the other.
+  const ing = src("lib/economicData/ingest.ts");
+  check("10f. HIERARCHY: Alpha Vantage data is NEVER withheld because FRED covered the same indicator (applyFredPrecedence removed — AV always writes in full)", !/applyFredPrecedence|deferredToFred|avDataToWrite/.test(ing.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")), "");
+  check("10g. HIERARCHY: Alpha Vantage writes UNCONDITIONALLY (upsertObservations(avResult.data) — not filtered by FRED coverage)", /upsertObservations\(avResult\.data\)/.test(ing), "");
+  // evaluateIngestionHealth: FRED failure degrades (reported in `degraded`) but never fails a healthy primary run
+  const healthGoodPrimary = evaluateIngestionHealth({ alphaVantageOk: true, alphaVantageUpserted: true, alphaVantageThrottled: false, forexFactoryOk: true, forexFactoryUpserted: true, fredOk: false, fredUpserted: false });
+  check("10h. HIERARCHY: a FRED (supporting) failure degrades the run but does not fail it when Alpha Vantage succeeded — the inverse of the old behaviour where FRED failure silently lost AV data", healthGoodPrimary.ok && healthGoodPrimary.degraded.length > 0 && healthGoodPrimary.degraded.every((d) => d.startsWith("supporting_")), JSON.stringify(healthGoodPrimary));
 
   handler = () => ({ status: 503 });
   // Fresh series key space: bust cache by using a new provider run after TTL is impossible offline, so verify the failure path via a missing key instead.
@@ -177,7 +180,6 @@ async function main() {
   const noKey = await fetchFredObservationsDetailed();
   check("10i. FRED not configured -> ok:false, ZERO fabricated observations, ZERO covered indicators (unavailable is explicit, never invented)", !noKey.ok && noKey.data.length === 0 && noKey.coveredIndicatorIds.length === 0 && noKey.failedSeries.length === 8, JSON.stringify(noKey.failedSeries.length));
 
-  const ing = src("lib/economicData/ingest.ts");
   const repo = src("lib/economicData/repository.ts");
   check("10j. no economic ingest/repository code deletes rows (a provider failure can never remove existing data)", !/\.delete\s*\(/.test(ing + repo + src("lib/economicData/providers/fredProvider.ts")), "");
   check("10k. writer and reader use the SAME database client (Learning DB) and no new table/schema was introduced", /getLearningSupabase/.test(repo) && !/getSupabase\(|getDataSupabase\(/.test(repo) && !/create table/i.test(src("lib/economicData/providers/fredProvider.ts")), "");
