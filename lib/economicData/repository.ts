@@ -166,16 +166,13 @@ export async function getRecentReleases(indicatorId: CanonicalIndicatorId, count
   return (data ?? []).map(fromReleaseRow);
 }
 
-export async function getRecentObservations(indicatorId: CanonicalIndicatorId, country: string, limit = 12): Promise<EconomicObservation[] | null> {
+/** `source` narrows the read to ONE provider. The runtime economic reading passes "alphavantage" (PRIMARY); without it, rows from every provider for the same period would interleave and two disagreeing values could masquerade as one series. */
+export async function getRecentObservations(indicatorId: CanonicalIndicatorId, country: string, limit = 12, source?: EconomicObservation["source"]): Promise<EconomicObservation[] | null> {
   const db = getLearningSupabase();
   if (!db) return null;
-  const { data, error } = await db
-    .from("economic_observations")
-    .select("*")
-    .eq("indicator_id", indicatorId)
-    .eq("country", country)
-    .order("observation_period", { ascending: false })
-    .limit(limit);
+  let query = db.from("economic_observations").select("*").eq("indicator_id", indicatorId).eq("country", country);
+  if (source) query = query.eq("source", source);
+  const { data, error } = await query.order("observation_period", { ascending: false }).limit(limit);
   if (error) {
     logRepositoryError(`getRecentObservations(${indicatorId})`, error);
     return [];

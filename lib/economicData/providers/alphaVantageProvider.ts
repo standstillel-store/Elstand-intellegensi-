@@ -28,6 +28,24 @@
 //     retry storm" requirement: one attempt per function per cron
 //     invocation, full stop — the next day's cron is the retry.
 //
+// 2026-09-29 CORRECTIONS (production evidence — runtime logs 09-24..09-28):
+//   Alpha Vantage answered "spread out your free API requests ... (1 request
+//   per second)" on NONFARM_PAYROLL / CPI / UNEMPLOYMENT, and only CPI has
+//   EVER been persisted (economic_observations: 2,713 rows, CPI only). So:
+//   - Requests are now SPACED (>= ALPHA_VANTAGE_MIN_SPACING_MS, default 1200ms)
+//     instead of fired back-to-back, and a throttled function gets ONE bounded
+//     retry after ALPHA_VANTAGE_THROTTLE_RETRY_MS (default 2500ms). Still no
+//     retry storm: at most 2 attempts per function, and the first function that
+//     is still throttled after its retry stops the loop, as before.
+//   - fetch() uses cache: "no-store". The old `next: { revalidate }` let Next's
+//     data cache keep a throttle body (HTTP 200) for hours, and cached() kept
+//     error/throttled outcomes too. Now only an "ok" series is ever cached.
+//   - `interval` is sent only where Alpha Vantage defines it: CPI=monthly,
+//     REAL_GDP=quarterly (the old code sent "monthly" to REAL_GDP although the
+//     derivation below assumes quarterly points). Other functions take none.
+//   - The flat fetchAlphaVantageObservations() no longer reports ok:true when
+//     functions failed.
+//
 // Raw series are LEVELS or a RATE, not pre-computed % changes — see
 // canonicalIndicators.ts's ALPHA_VANTAGE_FUNCTION_MAP header for the full
 // explanation. This file fetches the raw series and, for LEVEL-type
@@ -66,35 +84,70 @@ function isThrottleResponse(json: AlphaVantageRawResponse): string | undefined {
   return undefined;
 }
 
+/** Query params per function — only what Alpha Vantage documents for that function. */
+const AV_FUNCTION_PARAMS: Record<string, string> = {
+  CPI: "&interval=monthly",
+  REAL_GDP: "&interval=quarterly",
+};
+
+function readMs(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+const sleep = (ms: number) => (ms > 0 ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
+
+/** Thrown inside cached() so a non-ok outcome is NEVER stored (cached() stores only what its callback returns). */
+class NotOk extends Error {
+  outcome: SeriesOutcome;
+  constructor(outcome: SeriesOutcome) {
+    super("alphavantage-not-ok");
+    this.outcome = outcome;
+  }
+}
+
+async function requestSeries(functionName: string, apiKey: string): Promise<SeriesOutcome> {
+  try {
+    const url = `${AV_BASE}?function=${functionName}${AV_FUNCTION_PARAMS[functionName] ?? ""}&apikey=${apiKey}`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      return { status: "error", message: `HTTP ${res.status} ${res.statusText}` };
+    }
+    const json = (await res.json()) as AlphaVantageRawResponse;
+
+    const throttleMessage = isThrottleResponse(json);
+    if (throttleMessage) return { status: "throttled", message: throttleMessage };
+    if (json["Error Message"]) return { status: "error", message: json["Error Message"] };
+    if (json.Information) return { status: "error", message: json.Information }; // non-throttle Information (e.g. bad function name)
+    if (!json.data?.length) return { status: "empty" };
+
+    // Alpha Vantage returns newest-first; deriveChangeSeries() needs oldest-first.
+    const points: RawSeriesPoint[] = [...json.data]
+      .reverse()
+      .map((d) => ({ date: d.date, value: Number(d.value) }))
+      .filter((p) => Number.isFinite(p.value));
+    return points.length ? { status: "ok", points } : { status: "empty" };
+  } catch (err) {
+    return { status: "error", message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function fetchRawSeries(functionName: string): Promise<SeriesOutcome> {
   const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
   if (!apiKey) return { status: "error", message: "ALPHA_VANTAGE_API_KEY not configured" };
 
-  return cached(`av:${functionName}`, 6 * 3_600_000, async (): Promise<SeriesOutcome> => {
-    try {
-      const url = `${AV_BASE}?function=${functionName}&interval=monthly&apikey=${apiKey}`;
-      const res = await fetch(url, { next: { revalidate: 6 * 3600 } });
-      if (!res.ok) {
-        return { status: "error", message: `HTTP ${res.status} ${res.statusText}` };
-      }
-      const json = (await res.json()) as AlphaVantageRawResponse;
-
-      const throttleMessage = isThrottleResponse(json);
-      if (throttleMessage) return { status: "throttled", message: throttleMessage };
-      if (json["Error Message"]) return { status: "error", message: json["Error Message"] };
-      if (json.Information) return { status: "error", message: json.Information }; // non-throttle Information (e.g. bad function name)
-      if (!json.data?.length) return { status: "empty" };
-
-      // Alpha Vantage returns newest-first; deriveChangeSeries() needs oldest-first.
-      const points: RawSeriesPoint[] = [...json.data]
-        .reverse()
-        .map((d) => ({ date: d.date, value: Number(d.value) }))
-        .filter((p) => Number.isFinite(p.value));
-      return points.length ? { status: "ok", points } : { status: "empty" };
-    } catch (err) {
-      return { status: "error", message: err instanceof Error ? err.message : String(err) };
-    }
-  });
+  try {
+    return await cached(`av:${functionName}`, 6 * 3_600_000, async (): Promise<SeriesOutcome> => {
+      const outcome = await requestSeries(functionName, apiKey);
+      if (outcome.status !== "ok") throw new NotOk(outcome);
+      return outcome;
+    });
+  } catch (err) {
+    if (err instanceof NotOk) return err.outcome;
+    return { status: "error", message: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Lag (in series-native periods) for each derivation, per target. GDP is quarterly (lag 4 = YoY), everything else here is monthly (lag 12 = YoY). MoM/QoQ derivations always use lag 1 — "one period back" at whatever the series' native cadence is. */
@@ -145,13 +198,21 @@ export async function fetchAlphaVantageObservationsDetailed(): Promise<AlphaVant
   const succeededFunctions: string[] = [];
   const failedFunctions: { function: string; reason: string }[] = [];
   let throttled = false;
+  let attempted = 0;
 
   for (const fn of functionNames) {
     if (throttled) {
       failedFunctions.push({ function: fn, reason: "skipped_after_throttle" });
       continue;
     }
-    const outcome = await fetchRawSeries(fn);
+    if (attempted > 0) await sleep(readMs("ALPHA_VANTAGE_MIN_SPACING_MS", 1_200));
+    attempted++;
+    let outcome = await fetchRawSeries(fn);
+    if (outcome.status === "throttled") {
+      // The documented free-tier burst limit is 1 request/second; one bounded retry after a pause distinguishes a burst throttle from an exhausted daily quota.
+      await sleep(readMs("ALPHA_VANTAGE_THROTTLE_RETRY_MS", 2_500));
+      outcome = await fetchRawSeries(fn);
+    }
     if (outcome.status === "ok") {
       data.push(...deriveObservations(fn, outcome.points));
       succeededFunctions.push(fn);
@@ -176,5 +237,6 @@ export async function fetchAlphaVantageObservationsDetailed(): Promise<AlphaVant
 /** Simple ProviderResult shape, built on top of the detailed sequential fetch above — kept for any caller that only needs the flat EconomicObservation[] and doesn't care about per-function/throttle detail. */
 export async function fetchAlphaVantageObservations(): Promise<ProviderResult<EconomicObservation>> {
   const detailed = await fetchAlphaVantageObservationsDetailed();
-  return { ok: true, data: detailed.data }; // "not configured"/throttled/etc. all honestly degrade to an empty-but-ok result here, matching lib/macro.ts's "no key -> undefined, not throw" convention
+  // ok mirrors reality: any failed/throttled function makes the result partial, and callers must be able to tell (the old `ok: true` hid every failure).
+  return detailed.ok ? { ok: true, data: detailed.data } : { ok: false, data: detailed.data, error: detailed.failedFunctions.map((f) => `${f.function}: ${f.reason}`).join("; ") };
 }

@@ -26,16 +26,21 @@ import { fetchForexFactoryReleases } from "./providers/forexFactoryProvider";
 import { fetchAlphaVantageObservationsDetailed } from "./providers/alphaVantageProvider";
 import { fetchFredObservationsDetailed } from "./providers/fredProvider";
 import { upsertObservations, upsertReleases } from "./repository";
+import { evaluateIngestionHealth } from "./ingestHealth";
+
+export { evaluateIngestionHealth } from "./ingestHealth";
 
 /**
- * Deterministic per-run precedence (pure, exported for fixtures): observations
- * for an indicator FRED covered THIS run are deferred to FRED; everything else
- * (incl. every indicator FRED never covers) flows from Alpha Vantage unchanged.
+ * DATA HIERARCHY (owner decision, 2026-09-29): Alpha Vantage is the PRIMARY
+ * economic source; FRED / ForexFactory / others are SUPPORTING. Supporting data
+ * never displaces primary data — so every Alpha Vantage observation fetched in
+ * a run is written, unconditionally. (The previous `applyFredPrecedence` held
+ * back any indicator FRED "covered" — and when the FRED write was then rejected
+ * by the source CHECK constraint, both were lost: NFP was never persisted.)
+ * Rows from different providers never collide: the row id embeds the source.
+ * At read time the runtime selects source = "alphavantage" (see
+ * primaryRelease.ts / composeMacroContext.ts).
  */
-export function applyFredPrecedence<T extends { indicatorId: string }>(avData: readonly T[], fredCovered: readonly string[]): { deferredToFred: T[]; avDataToWrite: T[] } {
-  const covered = new Set(fredCovered);
-  return { deferredToFred: avData.filter((o) => covered.has(o.indicatorId)), avDataToWrite: avData.filter((o) => !covered.has(o.indicatorId)) };
-}
 
 export interface IngestionSummary {
   ok: boolean;
@@ -55,17 +60,18 @@ export interface IngestionSummary {
   alphaVantage?: {
     ok: boolean; // every function attempted succeeded (empty counts as success — see alphaVantageProvider.ts)
     fetched: number; // fetched from Alpha Vantage this run, BEFORE precedence filtering
-    written: number; // actually upserted this run, AFTER dropping indicators FRED already covered (see `deferredToFred`)
+    written: number; // upserted this run — always equal to `fetched` (Alpha Vantage is PRIMARY and is never withheld)
     empty: boolean;
     upserted: boolean;
     throttled: boolean;
     succeededFunctions: string[];
     failedFunctions: { function: string; reason: string }[];
-    /** Indicator ids Alpha Vantage fetched but did NOT write this run, because FRED already covered them this run — added 2026-09-28 (see fredProvider.ts's precedence note). Never means Alpha Vantage's data was wrong; it means FRED's is preferred when both are available the same run. */
-    deferredToFred: string[];
   };
 
-  /** Added 2026-09-28 — preferred macro-observation source; see fredProvider.ts for exactly which indicators it covers and why some are deliberately left to Alpha Vantage. */
+  /** Health problems found this run. Names starting with PRIMARY_ make `ok` false; `supporting_` ones are informational. Empty when everything is healthy. */
+  degraded?: string[];
+
+  /** SUPPORTING observation source (confirms / enriches; never outranks Alpha Vantage). See fredProvider.ts for exactly which indicators it covers. */
   fred?: {
     ok: boolean;
     fetched: number;
@@ -98,30 +104,34 @@ export async function runMacroDataIngestion(): Promise<IngestionSummary> {
     const forexFactoryEmpty = ffResult.ok && ffResult.data.length === 0;
     const forexFactoryUpserted = ffResult.ok && ffResult.data.length > 0 ? await upsertReleases(ffResult.data) : true;
 
-    // FRED is fetched BEFORE Alpha Vantage's data is written, so precedence
-    // (below) can be applied before any upsert happens — see
-    // fredProvider.ts's header for exactly which indicators FRED covers.
+    // PRIMARY: Alpha Vantage. Written in full, independent of any supporting provider.
+    const avResult = await fetchAlphaVantageObservationsDetailed();
+    const alphaVantageEmpty = avResult.data.length === 0;
+    const alphaVantageUpserted = avResult.data.length > 0 ? await upsertObservations(avResult.data) : true;
+
+    // SUPPORTING: FRED — persisted under its own source for confirmation/enrichment.
     const fredResult = await fetchFredObservationsDetailed();
     const fredEmpty = fredResult.data.length === 0;
     const fredUpserted = fredResult.data.length > 0 ? await upsertObservations(fredResult.data) : true;
 
-    const avResult = await fetchAlphaVantageObservationsDetailed();
-    // Precedence, per run: for any indicator FRED actually returned data
-    // for THIS run, don't also write Alpha Vantage's version of that same
-    // indicator this run — avoids two rows (one per source) disagreeing
-    // for the same period. Indicators FRED doesn't cover at all (PPI, GDP,
-    // Core Retail Sales — see fredProvider.ts) are unaffected and always
-    // flow through from Alpha Vantage exactly as before this change.
-    const { deferredToFred, avDataToWrite } = applyFredPrecedence(avResult.data, fredResult.coveredIndicatorIds);
-    const alphaVantageEmpty = avDataToWrite.length === 0;
-    const alphaVantageUpserted = avDataToWrite.length > 0 ? await upsertObservations(avDataToWrite) : true;
+    const health = evaluateIngestionHealth({
+      alphaVantageOk: avResult.ok,
+      // "nothing fetched" with failed functions is already covered by alphaVantageOk=false; an empty-but-clean fetch is not a write failure.
+      alphaVantageUpserted,
+      alphaVantageThrottled: avResult.throttled,
+      forexFactoryOk: ffResult.ok,
+      forexFactoryUpserted,
+      fredOk: fredResult.ok,
+      fredUpserted,
+    });
 
     const summary: IngestionSummary = {
-      ok: true,
+      ok: health.ok,
       ran: true,
       startedAt,
       finishedAt: new Date().toISOString(),
       lock: { state: "ACQUIRED" },
+      degraded: health.degraded,
       forexFactory: {
         ok: ffResult.ok,
         fetched: ffResult.data.length,
@@ -140,15 +150,18 @@ export async function runMacroDataIngestion(): Promise<IngestionSummary> {
       alphaVantage: {
         ok: avResult.ok,
         fetched: avResult.data.length,
-        written: avDataToWrite.length,
+        written: alphaVantageUpserted ? avResult.data.length : 0,
         empty: alphaVantageEmpty,
         upserted: alphaVantageUpserted,
         throttled: avResult.throttled,
         succeededFunctions: avResult.succeededFunctions,
         failedFunctions: avResult.failedFunctions,
-        deferredToFred: [...new Set(deferredToFred.map((o) => o.indicatorId))],
       },
     };
+    // One compact, greppable line per run so the outcome survives in runtime logs even when the response body is discarded by the cron caller.
+    console.log(
+      `[economicData:ingest] ok=${summary.ok} primary(av) fetched=${summary.alphaVantage?.fetched} written=${summary.alphaVantage?.written} throttled=${summary.alphaVantage?.throttled} failed=${summary.alphaVantage?.failedFunctions.length} | supporting fred fetched=${summary.fred?.fetched} upserted=${summary.fred?.upserted} ff fetched=${summary.forexFactory?.fetched} | degraded=[${health.degraded.join(",")}]`
+    );
     return summary;
   } finally {
     await lock.release();

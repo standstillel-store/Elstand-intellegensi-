@@ -63,6 +63,8 @@ export interface IndicatorInterpretation {
   macroPressure: MacroPressure;
   policyImplication: PolicyImplication;
   dataCompleteness: DataCompleteness;
+  /** What the pressure/policy reading was derived from. SURPRISE = actual vs consensus forecast (the calendar-era basis). TREND = latest PRIMARY print vs the prior period, used ONLY for Alpha Vantage releases, which carry no consensus forecast. NONE = no usable basis (INSUFFICIENT_DATA). */
+  pressureBasis?: "SURPRISE" | "TREND" | "NONE";
   explanation: string;
 }
 
@@ -84,6 +86,14 @@ function computeMomentum(actual: number | null, previous: number | null): Moment
   if (actual === null || previous === null) return "UNAVAILABLE";
   if (actual === previous) return "STABLE";
   return actual > previous ? "ACCELERATING" : "DECELERATING";
+}
+
+/** Trend basis (PRIMARY source, no forecast): a rising print reads like an upside surprise, a falling print like a downside one, through the SAME category mappings below (incl. the explicit Unemployment inversion). Deterministic, no thresholds invented; exact equality is STABLE. */
+function trendAsSurprise(momentum: Momentum): Surprise {
+  if (momentum === "ACCELERATING") return "HOTTER_THAN_EXPECTED";
+  if (momentum === "DECELERATING") return "COOLER_THAN_EXPECTED";
+  if (momentum === "STABLE") return "IN_LINE";
+  return "UNAVAILABLE";
 }
 
 function computeDataCompleteness(actual: number | null, forecast: number | null, previous: number | null): DataCompleteness {
@@ -147,9 +157,11 @@ function laborPressure(indicatorId: CanonicalIndicatorId, surprise: Surprise): {
   }
 }
 
-function buildExplanation(indicatorId: CanonicalIndicatorId, surprise: Surprise, momentum: Momentum, revisionImpact: RevisionImpact): string {
+function buildExplanation(indicatorId: CanonicalIndicatorId, surprise: Surprise, momentum: Momentum, revisionImpact: RevisionImpact, basis: "SURPRISE" | "TREND" | "NONE" = "SURPRISE"): string {
   const parts: string[] = [];
-  if (surprise === "UNAVAILABLE") {
+  if (basis === "TREND") {
+    parts.push(`${indicatorId}: primary-source print read on trend basis (no consensus forecast from the primary source).`);
+  } else if (surprise === "UNAVAILABLE") {
     parts.push(`${indicatorId}: forecast unavailable from current provider, surprise cannot be computed.`);
   } else if (surprise === "IN_LINE") {
     parts.push(`${indicatorId} printed in line with consensus.`);
@@ -174,7 +186,12 @@ export function interpretRelease(release: EconomicRelease): IndicatorInterpretat
   const surprise = computeSurprise(actual, forecast);
   const momentum = computeMomentum(actual, previous);
   const revisionImpact = analyzeRevision(release.previous, release.revisedPrevious);
-  const dataCompleteness = computeDataCompleteness(actual, forecast, previous);
+  // TREND basis applies ONLY to PRIMARY (Alpha Vantage) releases that have no forecast; a calendar (supporting) release without a forecast stays UNAVAILABLE exactly as before.
+  const useTrend = release.source === "alphavantage" && surprise === "UNAVAILABLE" && momentum !== "UNAVAILABLE";
+  const pressureSurprise: Surprise = useTrend ? trendAsSurprise(momentum) : surprise;
+  const pressureBasis: "SURPRISE" | "TREND" | "NONE" = useTrend ? "TREND" : surprise !== "UNAVAILABLE" ? "SURPRISE" : "NONE";
+  // On TREND basis the forecast is not an input of the method, so completeness is judged on what the method needs: actual AND previous.
+  const dataCompleteness: DataCompleteness = useTrend ? "HIGH" : computeDataCompleteness(actual, forecast, previous);
 
   const category = INDICATOR_CATEGORY[release.indicatorId];
   let pressure: { macroPressure: MacroPressure; policyImplication: PolicyImplication };
@@ -185,11 +202,11 @@ export function interpretRelease(release: EconomicRelease): IndicatorInterpretat
     // statement/dot-plot reading is out of this phase's scope.
     pressure = { macroPressure: "INSUFFICIENT_DATA", policyImplication: "INSUFFICIENT_DATA" };
   } else if (category === "INFLATION") {
-    pressure = inflationPressure(surprise);
+    pressure = inflationPressure(pressureSurprise);
   } else if (category === "GROWTH") {
-    pressure = growthPressure(surprise);
+    pressure = growthPressure(pressureSurprise);
   } else if (category === "LABOR") {
-    pressure = laborPressure(release.indicatorId, surprise);
+    pressure = laborPressure(release.indicatorId, pressureSurprise);
   } else {
     pressure = { macroPressure: "NEUTRAL", policyImplication: "NEUTRAL" };
   }
@@ -202,6 +219,7 @@ export function interpretRelease(release: EconomicRelease): IndicatorInterpretat
     macroPressure: pressure.macroPressure,
     policyImplication: pressure.policyImplication,
     dataCompleteness,
-    explanation: buildExplanation(release.indicatorId, surprise, momentum, revisionImpact),
+    pressureBasis,
+    explanation: buildExplanation(release.indicatorId, surprise, momentum, revisionImpact, pressureBasis),
   };
 }

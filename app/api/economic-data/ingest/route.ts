@@ -17,6 +17,9 @@ import { runMacroDataIngestion } from "@/lib/economicData/ingest";
 // phase (see the Phase G architecture doc, Correction 1).
 // ---------------------------------------------------------------------------
 
+// Six spaced Alpha Vantage requests (>=1.2s apart, plus at most one 2.5s throttle retry each) need more than the default function budget. Plan limits still cap this value.
+export const maxDuration = 60;
+
 function isAuthorizedCron(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return true;
