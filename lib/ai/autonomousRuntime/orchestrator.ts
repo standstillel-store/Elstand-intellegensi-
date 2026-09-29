@@ -30,7 +30,7 @@
 //   -> getConstraintValidations                             (Phase 8.1.5 read)
 //   -> buildAutonomousDecisionContext                       (Phase 8.2.0)
 //   -> qualifyAutonomousDecision                            (Phase 8.2.2)
-//   -> analyzeMacroIntelligence                             (Phase 8.2.3)
+//   -> assembleOracleMacroContext (economic intelligence, Phase 9; was calendar-based analyzeMacroIntelligence in 8.2.3)
 //   -> analyzeEventImpact                                   (Phase 8.2.4)
 //   -> assembleExternalIntelligenceSignal                   (Phase 8.3x8.4
 //      wiring — Research Trigger + real, keyless funding-rate observation
@@ -76,8 +76,9 @@ import { getConstraintValidations } from "@/lib/ai/learningValidation/repository
 import { buildAutonomousDecisionContext } from "@/lib/ai/autonomous/context";
 import { qualifyAutonomousDecision } from "@/lib/ai/decisionQualification/qualify";
 import { NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS } from "@/lib/ai/decisionQualification/contracts";
-import { analyzeMacroIntelligence } from "@/lib/ai/macroIntelligence/analyze";
-import { analyzeEventImpact } from "@/lib/ai/eventImpact/analyze";
+import { assembleOracleMacroContext } from "@/lib/ai/economicIntelligence/oracleMacro";
+import { safeAnalyzeEventImpact } from "@/lib/ai/economicIntelligence/failClosed";
+import type { MacroIntelligenceContext } from "@/lib/ai/macroIntelligence/contracts";
 import { validatePreEntry } from "@/lib/ai/preEntryValidation/validate";
 import { assembleExternalIntelligenceSignal } from "@/lib/ai/wiring/externalIntelligenceGate";
 import { decideAutonomous } from "@/lib/ai/autonomousDecision/decide";
@@ -88,7 +89,6 @@ import { upsertAutonomousIntelligenceSnapshot } from "@/lib/ai/autonomousSnapsho
 import { persistCognitiveTrace } from "@/lib/ai/cognitiveTrace/repository";
 import { emitRuntimeEvent, elapsedSince, type RuntimeEventStatus } from "@/lib/ai/runtimeEvents/emit";
 import { randomUUID } from "crypto";
-import type { EconomicEvent } from "@/lib/ai/macroIntelligence/contracts";
 import type { NewsItem } from "@/lib/ai/eventImpact/contracts";
 import type { AutonomousDecisionEngineResult } from "@/lib/ai/autonomousDecision/contracts";
 import type { ConfluenceSource } from "@/lib/ai/oracle/confluenceTypes";
@@ -176,12 +176,12 @@ function logPersistenceThrew(label: string, err: unknown): void {
  * `calendar`/`news` are optional pre-fetched inputs so a batch runner
  * covering many symbols in one cycle can fetch the economic calendar and
  * news feed ONCE and share them across every symbol's macro/event-impact
- * analysis, instead of re-fetching per symbol — `analyzeMacroIntelligence`/
+ * analysis, instead of re-fetching per symbol — the economic-intelligence macro context and
  * `analyzeEventImpact` are pure over whatever calendar/news they're given
  * either way, so sharing one fetch changes nothing about their output for
  * a given `asOf`.
  */
-export async function runAutonomousCycle(symbol: string, interval: string, calendar: readonly EconomicEvent[], news: readonly NewsItem[]): Promise<AutonomousCycleResult> {
+export async function runAutonomousCycle(symbol: string, interval: string, news: readonly NewsItem[], sharedMacro?: MacroIntelligenceContext): Promise<AutonomousCycleResult> {
   const asOf = nowIso();
   // Phase 8.5 — one real id per runAutonomousCycle() invocation (one
   // symbol, one tick), used only to group this cycle's runtime_events rows
@@ -463,8 +463,21 @@ export async function runAutonomousCycle(symbol: string, interval: string, calen
       negativeMemoryNegativeCount: qualification.negativeMemory?.negativeCount ?? null,
     },
   });
-  const macro = analyzeMacroIntelligence({ asOf, calendar });
-  const eventImpact = analyzeEventImpact({ asOf, macro, news });
+  // Phase 9 — Oracle macro context now comes from ECONOMIC INTELLIGENCE
+  // (FRED / Alpha Vantage), never the ForexFactory calendar. Both steps are
+  // explicit fail-closed: a throw yields an UNAVAILABLE context (pre-entry =>
+  // CAUTION, never EXECUTE), not a silent null.
+  const macro = sharedMacro ?? (await assembleOracleMacroContext(asOf));
+  const eventImpact = safeAnalyzeEventImpact({ asOf, macro, news });
+  if (macro.failureReason || (eventImpact as { failureReason?: string }).failureReason) {
+    emitRuntimeEvent({
+      cycleId, sequence: eventSequence++, symbol,
+      component: "EXTERNAL_INTELLIGENCE", operation: "assembleOracleMacroContext",
+      status: "UNAVAILABLE", startedAt: asOf, completedAt: nowIso(), durationMs: null,
+      message: macro.failureReason ?? (eventImpact as { failureReason?: string }).failureReason ?? "economic intelligence unavailable",
+      metadata: { macroDataAvailability: macro.dataAvailability, source: macro.oracleSource ?? null },
+    });
+  }
 
   // --- Phase 8.3x8.4 wiring: Research Trigger -> capability availability -> (real, keyless funding-rate observation only, if requested and watchlisted) -> Evidence Normalization -> Community Intelligence (always empty, honestly) -> conflict check. Never throws; a total failure degrades to null, the same as every other Step-2 sub-analysis above. ---
   const externalIntelligenceAt = nowIso();

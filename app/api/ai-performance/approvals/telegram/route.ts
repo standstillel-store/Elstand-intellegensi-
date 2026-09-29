@@ -10,6 +10,8 @@ import { tryHandlePatchAuthorizationCallback } from "@/lib/ai/evolutionPipeline/
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+// Phase 9: this webhook runs the controlled pipeline (patch generation + git push) after a gate-1 approval, which can exceed the platform default. Explicit ceiling instead of an implicit one.
+export const maxDuration = 60;
 
 // ---------------------------------------------------------------------------
 // POST /api/ai-performance/approvals/telegram

@@ -42,7 +42,9 @@ interface EvolutionEntry {
   readonly candidates: readonly EvolutionCandidateEntry[];
 }
 
+interface MonitorRow { readonly candidateId: string; readonly proposalId: string; readonly symbol: string; readonly gapPattern: string; readonly occurrenceCount: number | null; readonly confidence: number | null; readonly status: string; readonly createdAt: string | null; readonly validationState: string; readonly nextGate: string }
 interface EvolutionRoutePayload {
+  readonly candidateMonitoring?: { readonly status: "ACTIVE_CANDIDATES" | "NO_ACTIVE_CANDIDATE" | "MONITORING_UNAVAILABLE"; readonly candidates: readonly MonitorRow[] };
   readonly evolution?: readonly EvolutionEntry[];
   readonly learningDbConfigured?: boolean;
   readonly core?: { readonly lastCycleAt: string | null };
@@ -146,6 +148,17 @@ export function EvolutionCharge() {
             <LinearGauge percent={percent} color={statusColor} />
           </div>
           <p className="mt-2 text-[10.5px] text-ink-faint">{detail}</p>
+          {data?.candidateMonitoring && data.candidateMonitoring.status !== "ACTIVE_CANDIDATES" && (
+            <p className="mt-1 text-[10.5px] text-ink-faint">{data.candidateMonitoring.status}</p>
+          )}
+          {data?.candidateMonitoring?.candidates.map((m) => (
+            <div key={m.candidateId} className="mt-2 rounded border border-white/5 p-2 text-[10px] text-ink-faint">
+              <div className="mono-num text-ink">{m.candidateId}</div>
+              <div>proposal {m.proposalId} · {m.symbol} · {m.gapPattern}</div>
+              <div>occurrences {m.occurrenceCount ?? "—"} · confidence {m.confidence ?? "—"} · {m.status}</div>
+              <div>created {m.createdAt ?? "—"} · validation {m.validationState} · next: {m.nextGate}</div>
+            </div>
+          ))}
           {data?.core?.lastCycleAt && (
             <p className="mt-1 text-[10px] text-ink-faint">Last cycle observed {new Date(data.core.lastCycleAt).toLocaleTimeString(undefined, { hour12: false })}</p>
           )}

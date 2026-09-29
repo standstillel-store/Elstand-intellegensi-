@@ -84,8 +84,15 @@ export async function pushGeneratedBranch(config: GitConfig, recordHash: string,
  * database-level trigger `evolution_patch_runs_require_authorization_for_merge()`
  * is the actual backstop if a caller ever gets this wrong.
  */
-export async function mergeApprovedBranch(config: GitConfig, recordHash: string, proposalId: string, branch: string): Promise<GitMergeResult> {
-  const merge = await mergeBranch(config, config.baseBranch, branch, `Phase 9: merge ${proposalId} (${recordHash.slice(0, 12)})`);
+export async function mergeApprovedBranch(config: GitConfig, recordHash: string, proposalId: string, branch: string, pinnedCommitSha: string): Promise<GitMergeResult> {
+  // Phase 9 (pinned-SHA fix): merge the EXACT commit CI checked and the human
+  // authorized — never the mutable branch name. If the branch moved after the
+  // check, the branch tip is no longer what gets merged. `branch` is kept only
+  // for the caller's own reporting.
+  if (!/^[0-9a-f]{40}$/i.test(pinnedCommitSha)) {
+    return { outcome: "MERGE_FAILED", reason: "refusing to merge: pinned commit SHA is missing or malformed" };
+  }
+  const merge = await mergeBranch(config, config.baseBranch, pinnedCommitSha, `Phase 9: merge ${proposalId} (${recordHash.slice(0, 12)}) from ${branch}@${pinnedCommitSha.slice(0, 12)}`);
   if (!merge.ok) {
     return { outcome: merge.conflict ? "MERGE_CONFLICT" : "MERGE_FAILED", reason: merge.reason };
   }

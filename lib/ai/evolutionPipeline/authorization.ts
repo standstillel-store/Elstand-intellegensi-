@@ -151,7 +151,7 @@ export async function tryHandlePatchAuthorizationCallback(input: { secretHeader:
   await appendPatchEvent(run.recordHash, run.patchRunId, "AUTHORIZATION", "AWAITING_HUMAN_AUTHORIZATION", `human authorized merge (telegram user ${update.fromId})`);
   await clearKeyboard();
 
-  const merge = await mergeApprovedBranch(gitConfig, run.recordHash, run.proposalId, run.branch);
+  const merge = await mergeApprovedBranch(gitConfig, run.recordHash, run.proposalId, run.branch, run.commitSha);
   if (merge.outcome !== "MERGE_SUCCESS") {
     await upsertPatchRun({ ...run, status: merge.outcome, failedStage: "GIT_PUSH", errorSummary: merge.reason, authorizedBy: update.fromId, authorizedAt });
     await appendPatchEvent(run.recordHash, run.patchRunId, "GIT_PUSH", merge.outcome, merge.reason);

@@ -20,7 +20,7 @@
 // ---------------------------------------------------------------------------
 
 import { getWatchlistCoins } from "@/lib/elvoid/watchlist";
-import { getEconomicCalendar } from "@/lib/economiccalendar";
+import { assembleOracleMacroContext } from "@/lib/ai/economicIntelligence/oracleMacro";
 import { getNews } from "@/lib/newsapi";
 import { runAutonomousCycle } from "./orchestrator";
 import { claimLock } from "./lock";
@@ -59,16 +59,19 @@ export async function runAutonomousBatch(interval: string = DEFAULT_INTERVAL): P
   const startedAt = new Date().toISOString();
 
   try {
-    const [coins, calendar, news] = await Promise.all([
+    // Phase 9 — the ForexFactory calendar is no longer fetched for the Oracle
+    // decision path. Economic intelligence (FRED / Alpha Vantage, via the
+    // stored, normalized releases) is assembled ONCE per batch and shared.
+    const [coins, macro, news] = await Promise.all([
       getWatchlistCoins().catch(() => []),
-      getEconomicCalendar().catch(() => []),
+      assembleOracleMacroContext(startedAt),
       getNews().catch(() => []),
     ]);
 
     const results: AutonomousCycleResult[] = [];
     for (const symbol of coins) {
       try {
-        const result = await runAutonomousCycle(symbol, interval, calendar, news);
+        const result = await runAutonomousCycle(symbol, interval, news, macro);
         results.push(result);
       } catch (err) {
         // Extra safety net — runAutonomousCycle is designed to never

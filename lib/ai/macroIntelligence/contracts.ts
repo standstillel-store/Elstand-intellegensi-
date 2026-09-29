@@ -270,6 +270,10 @@ export interface MacroIntelligenceContext {
   readonly recentReleases?: readonly EconomicReleaseWithInterpretation[];
   /** Per-cluster evidence strings — each contributing indicator's own `interpret.ts` explanation, deduplicated. Empty array for a cluster with no usable evidence yet (renders as "no evidence available" in the UI, never fabricated). */
   readonly clusterEvidence?: MacroClusterEvidence;
+  /** Phase 9 — present only on contexts built by lib/ai/economicIntelligence/oracleMacro.ts. `ECONOMIC_INTELLIGENCE` = derived from FRED/Alpha Vantage releases in storage; never from the ForexFactory calendar. */
+  readonly oracleSource?: "ECONOMIC_INTELLIGENCE";
+  /** Phase 9 — set only when the context is an explicit fail-closed UNAVAILABLE placeholder (provider/storage/composition threw). */
+  readonly failureReason?: string;
   /** The employment composite (NFP + Unemployment + AHE) — surfaced separately from `clusters.labor` because it explains WHY the labor cluster reads the way it does, same evidence-not-just-verdict reasoning as `clusterEvidence`. */
   readonly employmentSummary?: { readonly signal: EmploymentCompositeSignal; readonly explanation: string };
 }

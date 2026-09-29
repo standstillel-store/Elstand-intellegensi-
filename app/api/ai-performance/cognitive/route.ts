@@ -20,6 +20,7 @@ import type { ConfluenceAttributionReport } from "@/lib/ai/confluenceAttribution
 import { buildCognitiveGapReport } from "@/lib/ai/cognitiveGap/repository";
 import type { CognitiveGapReport } from "@/lib/ai/cognitiveGap/contracts";
 import { deriveSymbolEvolution } from "@/lib/ai/evolutionApproval/derive";
+import { buildCandidateMonitoring } from "@/lib/ai/evolutionCandidate/monitoring";
 import { getApprovalView } from "@/lib/ai/evolutionApproval/repository";
 import { buildEvolutionValidationRecord } from "@/lib/ai/evolutionValidation/record";
 
@@ -269,5 +270,5 @@ export async function GET() {
     }))
   );
 
-  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), decisionPopulation, confluenceAttribution, cognitiveGaps, evolution });
+  return NextResponse.json({ ...snapshot, axisConflicts, learningLoop, novelty, selfPerformance, learningDbConfigured: isLearningSupabaseConfigured(), decisionPopulation, confluenceAttribution, cognitiveGaps, evolution, candidateMonitoring: buildCandidateMonitoring(evolution as never, isLearningSupabaseConfigured()) });
 }
