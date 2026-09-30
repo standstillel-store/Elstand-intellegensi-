@@ -28,7 +28,9 @@ export type AdminAuditAction =
   | "BUG_CLAIM_FAILED"
   // Phase 6.6.4 — Suggestions admin actions.
   | "SUGGESTION_APPROVED"
-  | "SUGGESTION_REJECTED";
+  | "SUGGESTION_REJECTED"
+  // Phase 6.6.4b — Suggestions Model B (automatic distribution).
+  | "SUGGESTION_DISTRIBUTION_RETRIED";
 
 // Single shared admin identity for this phase — there is no per-admin
 // username/account concept yet (one password, see spec section 3), so this
