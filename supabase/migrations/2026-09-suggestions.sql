@@ -5,12 +5,16 @@
 -- (contracts/ELSTestnetRewardDistributor.sol via lib/rewards/distributor.ts
 -- distribute(user, amount, claimId)) instead of the Bug Hunter escrow
 -- contract — there is no per-submission on-chain "prepare" step needed
--- (no researcher-initiated claimBounty tx), so a suggestion's ELS reward is
--- paid out server-side once approved, exactly like Eligible Reward Center
--- (supabase/migrations/2026-08-eligible-reward.sql) does. claim_id is this
--- table's OWN id-space (keccak256 of "suggestion:<row id>"), never reused
--- from bug_reports or eligible_reward_claims, so the on-chain replay guard
--- can't collide across systems.
+-- (no researcher-initiated claimBounty tx). Unlike Eligible Reward Center
+-- (supabase/migrations/2026-08-eligible-reward.sql), a suggestion's ELS
+-- reward is NOT paid out automatically at approval time: approval only
+-- computes and persists reward_amount/claim_id (status -> APPROVED, i.e.
+-- "reward available"). The actual on-chain distribute() call happens only
+-- when the user submits POST /api/suggestions/claim (see
+-- lib/suggestions/claim.ts), which drives APPROVED -> CLAIMING -> CLAIMED.
+-- claim_id is this table's OWN id-space (keccak256 of "suggestion:<row
+-- id>"), never reused from bug_reports or eligible_reward_claims, so the
+-- on-chain replay guard can't collide across systems.
 --
 -- Status model (brief's SUBMITTED -> UNDER REVIEW -> APPROVED/REJECTED ->
 -- REWARD AVAILABLE -> CLAIM -> ELS DISTRIBUTION), collapsed to what the DB

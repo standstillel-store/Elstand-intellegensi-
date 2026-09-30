@@ -11,7 +11,7 @@ export async function GET(request: Request, { params }: { params: { adminEntry: 
   const url = new URL(request.url);
   const statusParam = url.searchParams.get("status");
   const status =
-    statusParam && ["PENDING", "APPROVED", "REJECTED", "CLAIMING", "CLAIMED"].includes(statusParam) ? (statusParam as SuggestionStatus) : undefined;
+    statusParam && ["PENDING", "APPROVED", "REJECTED", "CLAIMING", "CLAIMED", "REWARDED"].includes(statusParam) ? (statusParam as SuggestionStatus) : undefined;
 
   try {
     const suggestions = await listSuggestions(status);

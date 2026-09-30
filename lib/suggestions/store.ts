@@ -14,7 +14,7 @@ import { SUGGESTION_BASE_ELS_REWARD, SUGGESTION_AI_ENERGY_REWARD } from "./confi
 // caller whether a row was actually matched.
 // ---------------------------------------------------------------------------
 
-export type SuggestionStatus = "PENDING" | "APPROVED" | "REJECTED" | "CLAIMING" | "CLAIMED";
+export type SuggestionStatus = "PENDING" | "APPROVED" | "REJECTED" | "CLAIMING" | "CLAIMED" | "REWARDED";
 
 export interface SuggestionRow {
   id: string;
@@ -180,12 +180,32 @@ export async function markSuggestionClaiming(id: string): Promise<SuggestionRow 
   return (data as SuggestionRow) ?? null;
 }
 
-/** CLAIMING -> CLAIMED, only after the distributor tx is confirmed. */
+/** CLAIMING -> CLAIMED, only after the distributor tx is confirmed. Kept for backward compatibility (older rows / retry of an in-flight legacy claim); new automatic distributions use markSuggestionRewarded instead. */
 export async function markSuggestionClaimed(id: string, txHash: string): Promise<SuggestionRow | null> {
   const sb = requireSupabase();
   const { data, error } = await sb
     .from("suggestions")
     .update({ status: "CLAIMED", tx_hash: txHash, claimed_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("status", "CLAIMING")
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as SuggestionRow) ?? null;
+}
+
+/**
+ * CLAIMING -> REWARDED, only after the distributor tx is confirmed on-chain.
+ * This is the Model B terminal state: reached automatically from the admin
+ * approve route (see lib/suggestions/distribute.ts), never from a
+ * user-initiated request. Same atomic-guard shape as markSuggestionClaimed
+ * (`.eq("status", "CLAIMING")`), so it can never mark a row REWARDED twice.
+ */
+export async function markSuggestionRewarded(id: string, txHash: string): Promise<SuggestionRow | null> {
+  const sb = requireSupabase();
+  const { data, error } = await sb
+    .from("suggestions")
+    .update({ status: "REWARDED", tx_hash: txHash, claimed_at: new Date().toISOString() })
     .eq("id", id)
     .eq("status", "CLAIMING")
     .select()

@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { SUGGESTION_BASE_ELS_REWARD, SUGGESTION_AI_ENERGY_REWARD } from "@/lib/suggestions/config";
+import { WALLET_NETWORK_CONFIG } from "@/lib/web3/config";
 
 interface SuggestionSummary {
   id: string;
@@ -23,14 +24,16 @@ interface SuggestionDetail extends SuggestionSummary {
   base_reward_els: string;
   admin_bonus_els: string;
   ai_energy_amount: number;
+  last_error_message: string | null;
 }
 
 const STATUS_COLOR: Record<string, string> = {
   PENDING: "text-yellow-400",
-  APPROVED: "text-up",
+  APPROVED: "text-signal-glow",
   REJECTED: "text-down",
   CLAIMING: "text-signal-glow",
   CLAIMED: "text-up",
+  REWARDED: "text-up",
 };
 
 export function SuggestionsPanel({ adminEntry }: { adminEntry: string }) {
@@ -81,6 +84,7 @@ export function SuggestionsPanel({ adminEntry }: { adminEntry: string }) {
         base_reward_els: s.base_reward_els,
         admin_bonus_els: s.admin_bonus_els,
         ai_energy_amount: s.ai_energy_amount,
+        last_error_message: s.last_error_message ?? null,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat detail.");
@@ -218,7 +222,7 @@ function SuggestionDetailCard({ adminEntry, suggestion, onChanged }: { adminEntr
       <DetailRow label="Description" value={suggestion.description} block />
       {suggestion.supporting_info && <DetailRow label="Supporting info" value={suggestion.supporting_info} block />}
 
-      {(suggestion.status === "APPROVED" || suggestion.status === "CLAIMING" || suggestion.status === "CLAIMED") && (
+      {(suggestion.status === "APPROVED" || suggestion.status === "CLAIMING" || suggestion.status === "CLAIMED" || suggestion.status === "REWARDED") && (
         <>
           <DetailRow label="Base reward" value={`${suggestion.base_reward_els} ELS`} />
           <DetailRow label="Admin bonus" value={`${suggestion.admin_bonus_els} ELS`} />
@@ -226,8 +230,24 @@ function SuggestionDetailCard({ adminEntry, suggestion, onChanged }: { adminEntr
           <DetailRow label="AI Energy" value={`${suggestion.ai_energy_amount} (granted on approval)`} />
         </>
       )}
-      {suggestion.tx_hash && <DetailRow label="Tx Hash" value={suggestion.tx_hash} mono />}
+      {suggestion.tx_hash && (
+        <div>
+          <p className="text-white/40">Tx Hash</p>
+          <a
+            href={`${WALLET_NETWORK_CONFIG.explorerUrl}/tx/${suggestion.tx_hash}`}
+            target="_blank"
+            rel="noreferrer"
+            className="break-all font-mono text-signal-glow hover:underline"
+          >
+            {suggestion.tx_hash}
+          </a>
+        </div>
+      )}
       {suggestion.rejected_reason && <DetailRow label="Rejected reason" value={suggestion.rejected_reason} block />}
+
+      {suggestion.status === "APPROVED" && !suggestion.tx_hash && (
+        <RetryDistributionBlock adminEntry={adminEntry} suggestionId={suggestion.id} lastError={suggestion.last_error_message} onChanged={onChanged} />
+      )}
 
       {suggestion.status === "PENDING" && (
         <div className="space-y-3 border-t border-line pt-3">
@@ -270,6 +290,57 @@ function SuggestionDetailCard({ adminEntry, suggestion, onChanged }: { adminEntr
           {actionError && <p className="text-down">{actionError}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Shown only when a Suggestion is APPROVED but has no tx_hash yet — meaning
+ * the automatic distribution attempt (triggered by the approve route
+ * itself) either failed or hasn't completed. Calls the idempotent
+ * retry-distribution route; safe to click repeatedly / from multiple admin
+ * tabs, since distributeSuggestionRewardServerSide never double-pays.
+ */
+function RetryDistributionBlock({
+  adminEntry,
+  suggestionId,
+  lastError,
+  onChanged,
+}: {
+  adminEntry: string;
+  suggestionId: string;
+  lastError: string | null;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function retry() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/${adminEntry}/api/suggestions/${suggestionId}/retry-distribution`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok && json.status !== "IN_PROGRESS") throw new Error(json.detail ?? json.reason ?? json.status ?? "Gagal distribusi.");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal distribusi.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t border-line pt-3">
+      <p className="text-down">Distribusi on-chain belum selesai{lastError ? `: ${lastError}` : "."}</p>
+      <button
+        onClick={retry}
+        disabled={busy}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-signal-glow/40 bg-signal-glow/10 px-3 py-1.5 font-semibold text-signal-glow hover:bg-signal-glow/20 disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : null} Retry Distribution
+      </button>
+      {error && <p className="text-down">{error}</p>}
     </div>
   );
 }

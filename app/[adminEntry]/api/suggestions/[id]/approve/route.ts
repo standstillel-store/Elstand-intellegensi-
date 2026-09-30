@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidAdminEntryPath, requireAdminSession } from "@/lib/admin/auth";
 import { approveSuggestion } from "@/lib/suggestions/store";
 import { grantSuggestionAiEnergy } from "@/lib/suggestions/claim";
+import { distributeSuggestionRewardServerSide } from "@/lib/suggestions/distribute";
 import { SUGGESTION_BASE_ELS_REWARD, SUGGESTION_AI_ENERGY_REWARD } from "@/lib/suggestions/config";
 import { logAdminAction } from "@/lib/admin/auditLog";
 import { getRequestIp } from "@/lib/admin/requestIp";
@@ -10,7 +11,7 @@ import { hashIp } from "@/lib/admin/crypto";
 export const dynamic = "force-dynamic";
 
 // ---------------------------------------------------------------------------
-// Phase 6.6.4 — approve.
+// Phase 6.6.4b — approve (Model B: automatic distribution).
 //
 // Reward model (fixed, server-side — the request body can influence ONLY
 // adminBonusEls, and even that is clamped to >= 0 both here and again in
@@ -20,10 +21,20 @@ export const dynamic = "force-dynamic";
 //   aiEnergyReward = SUGGESTION_AI_ENERGY_REWARD (10), always — not
 //                    accepted from the request body at all.
 //
-// ELS is NOT paid out here — it only becomes claimable (status ->
-// APPROVED, reward_amount persisted). AI Energy IS granted here,
-// immediately, since it has no separate on-chain claim step (brief:
-// "AI Energy must only be granted after the Suggestion is approved").
+// approveSuggestion() only computes/persists reward_amount (status ->
+// APPROVED). Immediately after, this route calls
+// distributeSuggestionRewardServerSide() in the SAME request so the admin
+// sees the real outcome (REWARDED + tx hash, or a distribution error) right
+// away — there is no separate user "Claim" step anymore. If distribution
+// fails (e.g. distributor temporarily out of funds), the suggestion stays
+// APPROVED with last_error_message set, and the admin panel exposes a
+// "Retry Distribution" action (see [id]/retry-distribution/route.ts) that
+// calls the exact same idempotent function again — approval itself is
+// NEVER retried/reversed by a failed distribution attempt.
+//
+// AI Energy IS granted here, immediately, since it has no separate on-chain
+// step (brief: "AI Energy must only be granted after the Suggestion is
+// approved") — unaffected by whether ELS distribution succeeds.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: Request, { params }: { params: { adminEntry: string; id: string } }) {
@@ -60,6 +71,8 @@ export async function POST(request: Request, { params }: { params: { adminEntry:
       console.error("[suggestions admin] AI Energy grant failed:", energyResult.error);
     }
 
+    const distribution = await distributeSuggestionRewardServerSide(suggestion.id);
+
     const ip = getRequestIp(request as unknown as import("next/server").NextRequest);
     await logAdminAction("SUGGESTION_APPROVED", {
       ipHash: hashIp(ip),
@@ -70,8 +83,14 @@ export async function POST(request: Request, { params }: { params: { adminEntry:
         adminBonusEls,
         totalRewardEls: SUGGESTION_BASE_ELS_REWARD + adminBonusEls,
         aiEnergyReward: SUGGESTION_AI_ENERGY_REWARD,
+        distributionOutcome: distribution.outcome,
+        txHash: distribution.outcome === "REWARDED" ? distribution.txHash : undefined,
       },
     }).catch(() => {});
+
+    if (distribution.outcome !== "REWARDED") {
+      console.error("[suggestions admin] auto-distribution did not complete:", distribution);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -81,6 +100,10 @@ export async function POST(request: Request, { params }: { params: { adminEntry:
       totalRewardEls: suggestion.reward_amount,
       aiEnergyReward: suggestion.ai_energy_amount,
       aiEnergyGranted: energyResult.ok,
+      distribution:
+        distribution.outcome === "REWARDED"
+          ? { status: "REWARDED", txHash: distribution.txHash }
+          : { status: "PENDING_RETRY", reason: distribution.outcome === "DISTRIBUTE_ERROR" ? distribution.reason : distribution.outcome, detail: distribution.outcome === "DISTRIBUTE_ERROR" ? distribution.detail : undefined },
     });
   } catch (err) {
     console.error("[suggestions admin] approve failed:", err);

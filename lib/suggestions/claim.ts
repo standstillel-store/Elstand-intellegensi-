@@ -1,30 +1,21 @@
 import { getSupabase } from "@/lib/supabase";
 import { refundEnergy } from "@/lib/energy";
-import { distributeToWallet } from "@/lib/rewards/distributor";
-import { REWARD_DISTRIBUTOR_CONFIGURED } from "@/lib/rewards/config";
-import {
-  getSuggestionById,
-  markSuggestionClaiming,
-  markSuggestionClaimed,
-  markSuggestionAiEnergyGranted,
-  revertSuggestionClaiming,
-  type SuggestionRow,
-} from "./store";
+import { getSuggestionById, markSuggestionAiEnergyGranted } from "./store";
+import { distributeSuggestionRewardServerSide } from "./distribute";
+import type { SuggestionRow } from "./store";
 
 // ---------------------------------------------------------------------------
-// Phase 6.6.4 — Suggestion ELS claim.
+// Phase 6.6.4b — Suggestion ELS claim (legacy/manual fallback).
 //
-// Reuses the EXACT SAME generic distributor lib/rewards/distributor.ts
-// already uses for Buy ELS / Eligible Reward payouts — no second token
-// distribution architecture. The only per-call difference from
-// lib/rewards/eligibility.ts's claimEligibleReward() is the claimId space
-// (this table's own row id, via claimIdForSuggestion in store.ts) and that
-// the reward amount here is an admin decision made at approval time, not
-// something recomputed from a formula at claim time.
-//
-// Ownership check: the claimant must be either the user who submitted the
-// suggestion (signed-in match) or, for an anonymous submission, the exact
-// wallet on file — never a client-supplied "trust me" wallet.
+// Model B (see distribute.ts) now distributes automatically the moment an
+// admin approves — a user no longer needs to call this. This endpoint is
+// kept only as a safe, idempotent fallback (e.g. an older client still
+// calling it, or a manual "nudge" if the automatic attempt hasn't run yet
+// for some reason): it does the SAME ownership check as before, then
+// delegates the actual distribution to distributeSuggestionRewardServerSide
+// — the single source of truth for the on-chain call and its idempotency
+// guards, shared with the admin approve/retry routes. It never runs a
+// second, separate distributor call path.
 // ---------------------------------------------------------------------------
 
 export type ClaimSuggestionResult =
@@ -50,40 +41,20 @@ export async function claimSuggestionReward(params: {
     : suggestion.wallet_address.toLowerCase() === params.walletAddress.toLowerCase();
   if (!isOwner) return { outcome: "FORBIDDEN" };
 
-  if (suggestion.status === "CLAIMED") return { outcome: "ALREADY_CLAIMED" };
-  if (suggestion.status === "CLAIMING") return { outcome: "CLAIM_IN_PROGRESS" };
-  if (suggestion.status !== "APPROVED") return { outcome: "NOT_APPROVED" };
-  if (!suggestion.reward_amount || !suggestion.claim_id) return { outcome: "NOT_APPROVED" };
-
-  if (!REWARD_DISTRIBUTOR_CONFIGURED) return { outcome: "DISTRIBUTOR_NOT_CONFIGURED" };
-
-  // Atomic APPROVED -> CLAIMING acquire. Only one concurrent request wins.
-  const acquired: SuggestionRow | null = await markSuggestionClaiming(suggestion.id);
-  if (!acquired) {
-    // Someone else's request already moved it — report the current truth.
-    const latest = await getSuggestionById(suggestion.id);
-    if (latest?.status === "CLAIMED") return { outcome: "ALREADY_CLAIMED" };
-    return { outcome: "CLAIM_IN_PROGRESS" };
-  }
-
-  try {
-    const result = await distributeToWallet({
-      walletAddress: params.walletAddress,
-      amountElsTestnet: Number(acquired.reward_amount),
-      claimId: acquired.claim_id as `0x${string}`,
-    });
-
-    if (!result.ok) {
-      await revertSuggestionClaiming(acquired.id, `${result.reason}${result.detail ? `: ${result.detail}` : ""}`);
+  const result = await distributeSuggestionRewardServerSide(suggestion.id);
+  switch (result.outcome) {
+    case "REWARDED":
+      return { outcome: "CLAIMED", txHash: result.txHash, rewardAmount: result.rewardAmount };
+    case "ALREADY_REWARDED":
+      return { outcome: "ALREADY_CLAIMED" };
+    case "IN_PROGRESS":
+      return { outcome: "CLAIM_IN_PROGRESS" };
+    case "NOT_APPROVED":
+      return { outcome: "NOT_APPROVED" };
+    case "DISTRIBUTOR_NOT_CONFIGURED":
+      return { outcome: "DISTRIBUTOR_NOT_CONFIGURED" };
+    case "DISTRIBUTE_ERROR":
       return { outcome: "CLAIM_ERROR", reason: result.reason, detail: result.detail };
-    }
-
-    await markSuggestionClaimed(acquired.id, result.txHash);
-    return { outcome: "CLAIMED", txHash: result.txHash, rewardAmount: Number(acquired.reward_amount) };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await revertSuggestionClaiming(acquired.id, message);
-    return { outcome: "CLAIM_ERROR", reason: message };
   }
 }
 

@@ -7,7 +7,7 @@ interface MySuggestion {
   publicId: string;
   title: string;
   category: string;
-  status: "PENDING" | "APPROVED" | "REJECTED" | "CLAIMING" | "CLAIMED";
+  status: "PENDING" | "APPROVED" | "REJECTED" | "CLAIMING" | "CLAIMED" | "REWARDED";
   rewardAmount: string | null;
   aiEnergyAmount: number;
   aiEnergyGranted: boolean;
@@ -18,29 +18,32 @@ interface MySuggestion {
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: "Under review",
-  APPROVED: "Reward available",
+  APPROVED: "Distributing reward...",
   REJECTED: "Rejected",
-  CLAIMING: "Claiming...",
-  CLAIMED: "Claimed",
+  CLAIMING: "Distributing reward...",
+  CLAIMED: "Rewarded",
+  REWARDED: "Rewarded",
 };
 
 const STATUS_COLOR: Record<string, string> = {
   PENDING: "text-yellow-400",
-  APPROVED: "text-up",
+  APPROVED: "text-signal-glow",
   REJECTED: "text-down",
   CLAIMING: "text-signal-glow",
   CLAIMED: "text-up",
+  REWARDED: "text-up",
 };
 
 /**
- * Signed-in users only (mirrors EligibleRewardCard — claiming requires a
- * verified wallet on the account, so an anonymous submitter can't reach
- * this view; they were told their public ID at submission time instead).
+ * Signed-in users only (mirrors EligibleRewardCard). Model B: ELS is
+ * distributed automatically the moment an admin approves — there is no
+ * user-facing claim action anymore. APPROVED here just means "reward
+ * approved, on-chain distribution in progress" (it resolves to REWARDED
+ * within the same admin approve request in the normal case).
  */
 export function MySuggestionsList() {
   const [items, setItems] = useState<MySuggestion[]>([]);
   const [loading, setLoading] = useState(true);
-  const [claimingId, setClaimingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(true);
 
@@ -66,27 +69,8 @@ export function MySuggestionsList() {
     load();
   }, [load]);
 
-  async function claim(id: string) {
-    setError(null);
-    setClaimingId(id);
-    try {
-      const res = await fetch("/api/suggestions/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ suggestionId: id }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.message ?? json.reason ?? "Gagal claim reward.");
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal claim reward.");
-    } finally {
-      setClaimingId(null);
-    }
-  }
-
   if (!signedIn) {
-    return <p className="text-xs text-ink-faint">Sign in and link a verified wallet to track and claim your suggestion rewards.</p>;
+    return <p className="text-xs text-ink-faint">Sign in and link a verified wallet to track your suggestion rewards.</p>;
   }
 
   if (loading) {
@@ -131,22 +115,17 @@ export function MySuggestionsList() {
 
           {s.status === "REJECTED" && s.rejectedReason && <p className="mt-1.5 text-[11px] text-down">{s.rejectedReason}</p>}
 
-          {s.status === "CLAIMED" && s.txHash && (
+          {(s.status === "CLAIMED" || s.status === "REWARDED") && s.txHash && (
             <p className="mt-1.5 flex items-center gap-1 text-[11px] text-up">
-              <CheckCircle2 size={11} /> Claimed <span className="font-mono">{s.txHash.slice(0, 10)}...</span>
+              <CheckCircle2 size={11} /> Rewarded <span className="font-mono">{s.txHash.slice(0, 10)}...</span>
               <ExternalLink size={10} />
             </p>
           )}
 
-          {s.status === "APPROVED" && (
-            <button
-              onClick={() => claim(s.id)}
-              disabled={claimingId === s.id}
-              className="mt-2 flex items-center gap-1.5 rounded-md border border-up/40 bg-up/10 px-3 py-1.5 text-[11px] font-semibold text-up hover:bg-up/20 disabled:opacity-50"
-            >
-              {claimingId === s.id ? <Loader2 size={11} className="animate-spin" /> : null}
-              Claim Reward
-            </button>
+          {(s.status === "APPROVED" || s.status === "CLAIMING") && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-ink-faint">
+              <Loader2 size={11} className="animate-spin" /> Reward distribution in progress...
+            </p>
           )}
         </div>
       ))}
