@@ -16,7 +16,7 @@ import { interpretRelease } from "@/lib/economicData/interpret";
 import { evaluateIngestionHealth } from "@/lib/economicData/ingestHealth";
 import { applyCoverageGuard, composeFromPairs } from "@/lib/ai/macroIntelligence/composeMacroContextPure";
 import { toOracleMacroContext } from "@/lib/ai/economicIntelligence/oracleMacroPure";
-import { fetchAlphaVantageObservations, fetchAlphaVantageObservationsDetailed } from "@/lib/economicData/providers/alphaVantageProvider";
+import { fetchAlphaVantageObservations, fetchAlphaVantageObservationsDetailed, rotatedFunctionOrder } from "@/lib/economicData/providers/alphaVantageProvider";
 import type { EconomicObservation, EconomicRelease } from "@/lib/economicData/types";
 import type { CanonicalIndicatorId } from "@/lib/economicData/canonicalIndicators";
 
@@ -167,10 +167,22 @@ async function providerFixtures() {
   }) as typeof fetch;
 
   try {
-    // Run 1 — persistent throttle: bounded to 2 attempts on the first function, rest skipped, nothing cached.
+    // Run 1 — persistent throttle: every function gets its own bounded 2
+    // attempts (1 + 1 retry) — a throttle on one function no longer aborts
+    // the rest (2026-09-30 correction). 6 functions x 2 attempts = 12 calls.
     const r1 = await fetchAlphaVantageObservationsDetailed();
-    check("E1. persistent throttle -> exactly 2 attempts total (1 + 1 bounded retry), no retry storm", calls.length === 2, `calls=${calls.length}`);
-    check("E2. persistent throttle -> throttled:true, ok:false, remaining functions reported skipped_after_throttle (not silently dropped)", r1.throttled && !r1.ok && r1.failedFunctions.filter((f) => f.reason === "skipped_after_throttle").length === 5 && r1.data.length === 0, JSON.stringify(r1.failedFunctions.map((f) => f.reason.slice(0, 24))));
+    check("E1. persistent throttle -> every function gets 2 bounded attempts, no retry storm (6 functions x 2 = 12 calls)", calls.length === 12, `calls=${calls.length}`);
+    check("E2. persistent throttle -> throttled:true, ok:false, ALL 6 functions individually reported failed with the real throttle reason (none skipped, none silently dropped)", r1.throttled && !r1.ok && r1.failedFunctions.length === 6 && r1.failedFunctions.every((f) => f.reason !== "skipped_after_throttle" && f.reason.includes("Alpha Vantage")) && r1.data.length === 0, JSON.stringify(r1.failedFunctions.map((f) => ({ fn: f.function, reason: f.reason.slice(0, 24) }))));
+    // Capture the order functions were actually attempted in during run 1,
+    // BEFORE the flat-wrapper call below runs a second internal fetch (which
+    // would append its own 12 calls to the same array) and before `calls`
+    // gets reset for run 2 (used by E12 below).
+    const run1AttemptedOrder: string[] = [];
+    for (const c of calls) {
+      const fn = /function=([A-Z_]+)/.exec(c.url)?.[1];
+      if (fn && run1AttemptedOrder[run1AttemptedOrder.length - 1] !== fn) run1AttemptedOrder.push(fn);
+    }
+
     const flat = await fetchAlphaVantageObservations();
     check("E3. flat wrapper no longer reports ok:true when the run failed", flat.ok === false && typeof flat.error === "string" && flat.error.length > 0, JSON.stringify(flat));
 
@@ -187,6 +199,33 @@ async function providerFixtures() {
     const ids = new Set(r2.data.map((o) => o.indicatorId));
     check("E8. all mapped indicators are produced from a full run (CPI MoM/YoY, NFP, Unemployment, Retail, Durables, GDP QoQ/YoY)", ["CPI_HEADLINE_MOM", "CPI_HEADLINE_YOY", "NFP", "UNEMPLOYMENT_RATE", "RETAIL_SALES_HEADLINE", "DURABLE_GOODS_ORDERS", "REAL_GDP_QOQ", "REAL_GDP_YOY"].every((k) => ids.has(k as CanonicalIndicatorId)), [...ids].join(","));
     check("E9. every produced row is source alphavantage / country US", r2.data.every((o) => o.source === "alphavantage" && o.country === "US"), "");
+
+    // ---- E10-E12. daily rotation (2026-09-30 correction) --------------------
+    const functionNames = ["CPI", "NONFARM_PAYROLL", "UNEMPLOYMENT", "RETAIL_SALES", "DURABLES", "REAL_GDP"];
+    check("E10. rotatedFunctionOrder is a pure permutation — same 6 functions, no duplicates, deterministic for a given date", (() => {
+      const day = new Date("2026-09-30T00:00:00Z");
+      const a = rotatedFunctionOrder(functionNames, day);
+      const b = rotatedFunctionOrder(functionNames, day);
+      const isPermutation = a.length === functionNames.length && new Set(a).size === functionNames.length && functionNames.every((f) => a.includes(f));
+      return isPermutation && JSON.stringify(a) === JSON.stringify(b);
+    })(), "");
+
+    check("E11. rotation starts a DIFFERENT function each UTC day and cycles back after N days (CPI no longer permanently first)", (() => {
+      const day0 = new Date("2026-09-30T00:00:00Z");
+      const orders = Array.from({ length: functionNames.length }, (_, i) => rotatedFunctionOrder(functionNames, new Date(day0.getTime() + i * 86_400_000)));
+      const starts = orders.map((o) => o[0]);
+      const everyFunctionLedOnce = new Set(starts).size === functionNames.length;
+      const cyclesBack = JSON.stringify(rotatedFunctionOrder(functionNames, new Date(day0.getTime() + functionNames.length * 86_400_000))) === JSON.stringify(orders[0]);
+      return everyFunctionLedOnce && cyclesBack;
+    })(), "");
+
+    // Integration check against run 1 (always-throttle, captured above): the
+    // actual fetch order this process used for "today" must match
+    // rotatedFunctionOrder() for that same date — confirms
+    // fetchAlphaVantageObservationsDetailed() is really wired to the
+    // rotation, not just testing the helper in isolation.
+    const expectedOrderToday = rotatedFunctionOrder(functionNames, new Date());
+    check("E12. fetchAlphaVantageObservationsDetailed() actually fetches in rotatedFunctionOrder() order (not always CPI-first)", JSON.stringify(run1AttemptedOrder) === JSON.stringify(expectedOrderToday), `attempted=${run1AttemptedOrder.join(",")} expected=${expectedOrderToday.join(",")}`);
   } finally {
     globalThis.fetch = realFetch;
   }

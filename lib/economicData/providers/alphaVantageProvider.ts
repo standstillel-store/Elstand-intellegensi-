@@ -13,20 +13,10 @@
 //     — never more than one in-flight Alpha Vantage request from this
 //     provider at a time.
 //   - Each function's outcome is tracked independently
-//     (ok / empty / throttled / error) — one function's failure never
-//     cancels the others' attempts (unless the failure IS a throttle
-//     signal, see next point).
-//   - Alpha Vantage's throttle responses are always HTTP 200 with a JSON
-//     body carrying `Note` (classic rate-limit message) or an
-//     `Information` field mentioning "rate limit"/"frequency" (current
-//     messaging) — detected via isThrottleResponse() below. The FIRST
-//     detected throttle response stops the loop immediately (no point
-//     spending the remaining functions' calls against a key that's
-//     already being rate-limited this run) — the remaining, not-yet-
-//     attempted functions are reported as failed with reason
-//     "skipped_after_throttle", not silently dropped. This is the "no
-//     retry storm" requirement: one attempt per function per cron
-//     invocation, full stop — the next day's cron is the retry.
+//     (ok / empty / throttled / error) — one function's throttle/failure
+//     no longer cancels the others' attempts (see 2026-09-30 correction
+//     below) — every configured function gets its own bounded attempt
+//     every run.
 //
 // 2026-09-29 CORRECTIONS (production evidence — runtime logs 09-24..09-28):
 //   Alpha Vantage answered "spread out your free API requests ... (1 request
@@ -35,8 +25,7 @@
 //   - Requests are now SPACED (>= ALPHA_VANTAGE_MIN_SPACING_MS, default 1200ms)
 //     instead of fired back-to-back, and a throttled function gets ONE bounded
 //     retry after ALPHA_VANTAGE_THROTTLE_RETRY_MS (default 2500ms). Still no
-//     retry storm: at most 2 attempts per function, and the first function that
-//     is still throttled after its retry stops the loop, as before.
+//     retry storm: at most 2 attempts per function.
 //   - fetch() uses cache: "no-store". The old `next: { revalidate }` let Next's
 //     data cache keep a throttle body (HTTP 200) for hours, and cached() kept
 //     error/throttled outcomes too. Now only an "ok" series is ever cached.
@@ -45,6 +34,29 @@
 //     derivation below assumes quarterly points). Other functions take none.
 //   - The flat fetchAlphaVantageObservations() no longer reports ok:true when
 //     functions failed.
+//
+// 2026-09-30 CORRECTION (production evidence — Supabase economic_observations
+// query + Vercel runtime error logs 09-24..09-28): with the 09-29 spacing/retry
+// fix in place, the loop still stopped on the FIRST throttled function each
+// run, and functionNames was always Object.keys(ALPHA_VANTAGE_FUNCTION_MAP) in
+// its fixed declaration order (CPI first). Confirmed in production:
+// economic_observations held ONLY CPI_HEADLINE_MOM/YOY rows, zero rows ever
+// for NONFARM_PAYROLL/UNEMPLOYMENT/RETAIL_SALES/DURABLES/REAL_GDP — CPI, being
+// first, reliably claimed the run's best (least-throttled) request slot every
+// single day, while every other function was either throttled itself or
+// marked "skipped_after_throttle" without even being attempted, forever. This
+// starved the labor and growth clusters in composeMacroContext, which is why
+// dataAvailability could never leave PARTIAL. Two changes:
+//   - rotatedFunctionOrder() picks a different function to go first each
+//     calendar day (deterministic, UTC-day-based) so CPI no longer
+//     permanently monopolizes the best slot — every function gets a turn at
+//     the front of the queue roughly every N days (N = function count).
+//   - A throttled function (even after its bounded retry) no longer aborts
+//     the run — it's recorded as failed with the real throttle message and
+//     the loop moves on to the NEXT function (same spacing as any other
+//     transition). Total attempts per run are still bounded (at most 2 per
+//     function, same as before) — this only removes the "one throttle kills
+//     every function behind it" cascade, it does not add extra retries.
 //
 // Raw series are LEVELS or a RATE, not pre-computed % changes — see
 // canonicalIndicators.ts's ALPHA_VANTAGE_FUNCTION_MAP header for the full
@@ -179,6 +191,25 @@ function deriveObservations(functionName: string, points: RawSeriesPoint[]): Eco
   return observations;
 }
 
+/**
+ * Deterministic daily rotation of the fetch order (2026-09-30 correction —
+ * see file header). Pure function of `functionNames` and `date`: given the
+ * same inputs it always returns the same order, so it's fixture-testable
+ * without mocking the clock's passage, only its value.
+ *
+ * Rotates by whole UTC days since the Unix epoch, so the starting function
+ * changes once per calendar day (not per invocation) and cycles back to the
+ * original order every `functionNames.length` days — every function gets a
+ * turn at the front over one rotation.
+ */
+export function rotatedFunctionOrder(functionNames: string[], date: Date = new Date()): string[] {
+  const n = functionNames.length;
+  if (n === 0) return [];
+  const epochDay = Math.floor(date.getTime() / 86_400_000);
+  const start = ((epochDay % n) + n) % n; // JS % can return negative; normalize into [0, n)
+  return [...functionNames.slice(start), ...functionNames.slice(0, start)];
+}
+
 export interface AlphaVantageIngestResult {
   ok: boolean;
   data: EconomicObservation[];
@@ -193,7 +224,7 @@ export interface AlphaVantageIngestResult {
  * header for the sequential/stop-on-throttle rationale.
  */
 export async function fetchAlphaVantageObservationsDetailed(): Promise<AlphaVantageIngestResult> {
-  const functionNames = Object.keys(ALPHA_VANTAGE_FUNCTION_MAP);
+  const functionNames = rotatedFunctionOrder(Object.keys(ALPHA_VANTAGE_FUNCTION_MAP));
   const data: EconomicObservation[] = [];
   const succeededFunctions: string[] = [];
   const failedFunctions: { function: string; reason: string }[] = [];
@@ -201,10 +232,6 @@ export async function fetchAlphaVantageObservationsDetailed(): Promise<AlphaVant
   let attempted = 0;
 
   for (const fn of functionNames) {
-    if (throttled) {
-      failedFunctions.push({ function: fn, reason: "skipped_after_throttle" });
-      continue;
-    }
     if (attempted > 0) await sleep(readMs("ALPHA_VANTAGE_MIN_SPACING_MS", 1_200));
     attempted++;
     let outcome = await fetchRawSeries(fn);
@@ -222,6 +249,9 @@ export async function fetchAlphaVantageObservationsDetailed(): Promise<AlphaVant
       // ingestion summary can distinguish "nothing new" from "broken".
       succeededFunctions.push(fn);
     } else if (outcome.status === "throttled") {
+      // 2026-09-30: no longer aborts the remaining functions (see file
+      // header) — this function is recorded as failed and the loop
+      // continues to the next one with the same spacing.
       throttled = true;
       failedFunctions.push({ function: fn, reason: outcome.message });
       console.error(`[economicData:alphavantage] ${fn}: throttled — ${outcome.message}`);
