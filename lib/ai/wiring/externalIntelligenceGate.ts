@@ -86,13 +86,24 @@ const DERIVATIVES_CAPABILITIES: readonly SourceCapability[] = ["funding_rate", "
  * `shouldResearch: false` means Research Trigger found no reason to ask
  * for external corroboration this cycle — `evidenceSatisfied` is
  * trivially `true` in that case (nothing was needed, so nothing is
- * missing). When `shouldResearch: true`, `evidenceSatisfied` reflects
- * whether this module actually obtained real, `AVAILABLE` evidence for
- * at least one requested capability — `false` covers both "genuinely
- * unavailable" and "available per the registry but not fetched by this
- * module" identically, because from the qualification pipeline's
- * perspective both mean the same real thing: the corroboration Research
- * Trigger determined was needed is not in hand.
+ * missing).
+ *
+ * When `shouldResearch: true`, `evidenceSatisfied` is `true` in TWO
+ * distinct cases, and `false` in exactly one (2026-09-30 correction — see
+ * `assembleExternalIntelligenceSignal()`'s own inline comment for the
+ * full root-cause writeup):
+ *   - true: none of `requestedCapabilities` are a capability this module
+ *     can ever attempt (derivatives only) — there is nothing for this
+ *     gate to honestly call "missing", since no check was ever possible.
+ *   - true: a derivatives capability WAS requested and real, `AVAILABLE`
+ *     evidence for it was actually obtained.
+ *   - false: a derivatives capability was requested and this module's one
+ *     real fetch path ran but did not produce `AVAILABLE` evidence for it
+ *     (off-watchlist symbol, fetch failure, or no matching row) — the one
+ *     case this field is actually meant to catch.
+ * `false` therefore means "a real, in-principle-possible check came back
+ * empty or missing" — never "this module never had any ability to check
+ * what was requested in the first place".
  */
 export interface ExternalIntelligenceSignal {
   readonly shouldResearch: boolean;
@@ -177,6 +188,41 @@ export async function assembleExternalIntelligenceSignal(
 
   if (!trigger.shouldResearch) {
     return { shouldResearch: false, hasConflict: false, evidenceSatisfied: true, requestedCapabilities: [] };
+  }
+
+  // 2026-09-30 fix (runtime audit — orchestrator homogeneity): Research
+  // Trigger fires for six independent reasons (contracts.ts), but this
+  // module's ONE real fetch path only ever covers derivatives capabilities
+  // (funding_rate/open_interest/long_short_ratio — see file header). Three
+  // reasons — HIGH_IMPACT_EVENT, UNUSUAL_MARKET_CONDITION, ALTCOIN_SCREENING
+  // — NEVER request a derivatives capability at all (their capability
+  // functions above return none), and EVIDENCE_CONFLICT/DATA_GAP often don't
+  // either (a macro-only contradiction or a pure macro/news data gap
+  // requests only economic_release/general_news/crypto_news). For every one
+  // of those, `evidenceSatisfied` was structurally false 100% of the time,
+  // for every symbol, with zero per-pair variation possible — not an
+  // honest "evidence sought and missing" signal, since no fetch attempt
+  // was ever architecturally possible for what was actually requested.
+  // Conflating that with "insufficient" made `externalEvidenceInsufficient`
+  // fire near-universally and masked genuinely different per-pair
+  // evidence behind the same generic CAUTION reason.
+  //
+  // This does NOT touch the case fixture 3 already locks in (a derivatives
+  // capability WAS requested — e.g. LOW_CONFIDENCE's funding_rate — but
+  // this specific symbol isn't on DERIVATIVES_WATCHLIST): that remains
+  // `evidenceSatisfied: false`, honestly, exactly as before. The fix only
+  // applies when NONE of the requested capabilities are even in principle
+  // fetchable by this module — i.e. the only `false` this function reports
+  // now is "a real check that could have run but came back empty/missing",
+  // never "a check this module never had any ability to run at all".
+  const hasFetchableCapability = trigger.requestedCapabilities.some((c) => DERIVATIVES_CAPABILITIES.includes(c));
+  if (!hasFetchableCapability) {
+    // shouldResearch stays `true` here — Research Trigger genuinely fired,
+    // and that fact (plus requestedCapabilities) stays visible for
+    // traceability. Only evidenceSatisfied changes: "true" because nothing
+    // this module can ever fetch was requested, so there is nothing for it
+    // to honestly report as missing.
+    return { shouldResearch: true, hasConflict: false, evidenceSatisfied: true, requestedCapabilities: trigger.requestedCapabilities };
   }
 
   const evidence = await gatherRealEvidence(symbol, asOf, trigger.requestedCapabilities, deps.fetchFundingSnapshot);

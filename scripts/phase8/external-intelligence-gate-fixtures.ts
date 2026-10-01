@@ -310,7 +310,23 @@ const THROWING_FUNDING = async (): Promise<readonly FundingInfo[]> => {
 }
 
 // ---------------------------------------------------------------------------
-// 13. No provider -> honest UNAVAILABLE (a non-derivatives capability request is never satisfied by this module)
+// 13. No fetchable capability requested -> not-applicable, not "insufficient"
+//
+// 2026-09-30 correction (runtime audit — orchestrator homogeneity): this
+// fixture used to assert evidenceSatisfied===false here, i.e. that a
+// HIGH_IMPACT_EVENT trigger (which NEVER requests a derivatives capability —
+// see evalHighImpactEventCapabilities()) always produces "insufficient
+// evidence". That made externalEvidenceInsufficient fire 100% of the time,
+// for every symbol, whenever this one specific reason was the trigger —
+// not an honest "a check ran and came back empty" signal, since this module
+// never had any ability to check economic_release/crypto_news/general_news
+// in the first place (see assembleExternalIntelligenceSignal()'s own
+// comment). The corrected, intended behavior: nothing fetchable was
+// requested -> evidenceSatisfied=true (there is nothing to honestly call
+// "missing"), so this signal does not mask whatever the REAL per-pair
+// macro/qualification signals say. Fixture 3 (below the off-watchlist case,
+// where a derivatives capability WAS requested) is deliberately untouched
+// by this fix and still asserts evidenceSatisfied===false.
 // ---------------------------------------------------------------------------
 
 {
@@ -328,7 +344,44 @@ const THROWING_FUNDING = async (): Promise<readonly FundingInfo[]> => {
     { fetchFundingSnapshot: NEVER_CALL_FUNDING }
   );
   check("13. HIGH_IMPACT_EVENT requests economic_release/news capabilities, not derivatives", !signal.requestedCapabilities.includes("funding_rate"), JSON.stringify(signal.requestedCapabilities));
-  check("13b. no provider exists for those capabilities in this module -> evidenceSatisfied honestly false", signal.evidenceSatisfied === false, JSON.stringify(signal));
+  check("13b. no fetchable (derivatives) capability was requested -> evidenceSatisfied=true, not forced into CAUTION", signal.evidenceSatisfied === true, JSON.stringify(signal));
+  check("13c. shouldResearch stays true (Research Trigger genuinely fired) — only evidenceSatisfied's meaning changes", signal.shouldResearch === true, JSON.stringify(signal));
+
+  const preEntry = validatePreEntry({
+    decisionContext: decisionContext(),
+    qualification: qualification(),
+    macro: macro(),
+    eventImpact: eventImpact({ highImpactPresent: true, impactRisk: "ELEVATED", upcomingHighImpactEvent: { title: "FOMC", date: ASOF, impact: "high", hoursAway: 2, proximity: "IMMINENT" } }),
+    externalIntelligence: signal,
+  });
+  check(
+    "13d. a HIGH_IMPACT_EVENT cycle is still correctly BLOCKED by the real eventImpactRiskElevated signal (NOT by externalEvidenceInsufficient) — the fix never weakens that gate",
+    preEntry.status === "BLOCKED",
+    JSON.stringify(preEntry)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 13e. Same non-fetchable-capability case, but with nothing else wrong ->
+// proves the fix actually removes the homogenizing CAUTION rather than just
+// relabeling it (13d above still hits BLOCKED via the real event-risk
+// signal; this one isolates the fix with a clean eventImpact so VALID is
+// reachable).
+// ---------------------------------------------------------------------------
+
+{
+  const signal = await assembleExternalIntelligenceSignal(
+    { symbol: "BTCUSDT", asOf: ASOF, assessment: assessment(), contradictions: null, arbitration: null, cognitiveObservation: null, riskIntelligence: null, marketImpact: eventImpact({ highImpactPresent: true, upcomingHighImpactEvent: { title: "FOMC", date: ASOF, impact: "high", hoursAway: 2, proximity: "IMMINENT" } }) },
+    { fetchFundingSnapshot: NEVER_CALL_FUNDING }
+  );
+  const preEntry = validatePreEntry({
+    decisionContext: decisionContext(),
+    qualification: qualification(),
+    macro: macro(),
+    eventImpact: eventImpact(), // clean this time — no elevated event risk
+    externalIntelligence: signal,
+  });
+  check("13e. with no other concern present, a non-fetchable-capability signal no longer forces CAUTION -> VALID", preEntry.status === "VALID", JSON.stringify(preEntry));
 }
 
 // ---------------------------------------------------------------------------
