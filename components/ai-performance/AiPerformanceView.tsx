@@ -6,7 +6,7 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { EquityCurveChart } from "@/components/paper-trader/EquityCurveChart";
 import { CognitiveMapSection } from "@/components/ai-performance/cognitive/CognitiveMapSection";
 import { AiCoreGrid } from "@/components/ai-performance/cognitive/AiCoreGrid";
-import { EvolutionCharge } from "@/components/ai-performance/cognitive/EvolutionCharge";
+import { EvolutionCommandCenter } from "@/components/ai-performance/cognitive/EvolutionCommandCenter";
 import { SelfPerformancePanel } from "@/components/ai-performance/SelfPerformancePanel";
 import { CurrentActivityPanel } from "@/components/ai-performance/CurrentActivityPanel";
 import { ExternalIntelligencePanel } from "@/components/ai-performance/ExternalIntelligencePanel";
@@ -201,7 +201,7 @@ export function AiPerformanceView({
           what CognitiveMapSection/ExternalIntelligencePanel do. ===== */}
       <div className="grid gap-4 lg:grid-cols-2">
         <AiCoreGrid />
-        <EvolutionCharge />
+        <EvolutionCommandCenter />
       </div>
       <div className="grid gap-4 lg:grid-cols-[3fr_1fr]">
         <CognitiveMapSection />
