@@ -9,6 +9,7 @@
 
 import { timingSafeEqual, createHmac } from "node:crypto";
 import type { DeploymentSnapshot, DeploymentState, VercelConfig, VercelEnvInput } from "./contracts";
+import type { DeploymentFacts } from "@/lib/ai/evolutionVerification/contracts";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -77,6 +78,53 @@ export async function getDeploymentById(config: VercelConfig, deploymentId: stri
     return { state: mapReadyState(json.readyState), deploymentId, url: json.url ? `https://${json.url}` : null };
   } catch {
     return { state: "UNKNOWN", deploymentId, url: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Full deployment facts for post-deploy PRODUCTION_VERIFICATION (added
+ * 2026-10-04). Same never-throws / never-echo-the-token contract as the
+ * functions above. Unlike getDeploymentById (state + url only), this also
+ * returns what verification must compare against the merge commit: the git
+ * commit Vercel built, the deployment target (production vs preview), when
+ * Vercel marked it ready, and its aliases. Every field the upstream body
+ * did not provide is null — never guessed.
+ */
+export async function getDeploymentFacts(config: VercelConfig, deploymentId: string): Promise<DeploymentFacts> {
+  const unknown: DeploymentFacts = { state: "UNKNOWN", deploymentId, commitSha: null, target: null, readyAtMs: null, url: null, aliases: [] };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const params = config.teamId ? `?teamId=${encodeURIComponent(config.teamId)}` : "";
+    const res = await fetch(`https://api.vercel.com/v13/deployments/${deploymentId}${params}`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+      signal: controller.signal,
+    });
+    if (!res.ok) return unknown;
+    const json = (await res.json()) as {
+      id?: string;
+      url?: string;
+      readyState?: string;
+      target?: string | null;
+      ready?: number;
+      alias?: readonly string[];
+      meta?: Record<string, string>;
+      gitSource?: { sha?: string };
+    };
+    const commitSha = typeof json.meta?.githubCommitSha === "string" ? json.meta.githubCommitSha : typeof json.gitSource?.sha === "string" ? json.gitSource.sha : null;
+    return {
+      state: mapReadyState(json.readyState),
+      deploymentId: typeof json.id === "string" ? json.id : deploymentId,
+      commitSha,
+      target: typeof json.target === "string" ? json.target : null,
+      readyAtMs: typeof json.ready === "number" && Number.isFinite(json.ready) ? json.ready : null,
+      url: json.url ? `https://${json.url}` : null,
+      aliases: Array.isArray(json.alias) ? json.alias.filter((a): a is string => typeof a === "string") : [],
+    };
+  } catch {
+    return unknown;
   } finally {
     clearTimeout(timer);
   }

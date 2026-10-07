@@ -8,6 +8,7 @@ import { listEvolutionCandidates } from "@/lib/ai/evolutionCandidate/repository"
 import { getApprovalView } from "@/lib/ai/evolutionApproval/repository";
 import { getChangeArtifactByRecordHash } from "@/lib/ai/evolutionArtifact/repository";
 import { buildEvolutionValidationRecord } from "@/lib/ai/evolutionValidation/record";
+import { getLatestLearningForGap } from "@/lib/ai/evolutionOutcome/repository";
 import { diagnoseTelegramConfig } from "@/lib/ai/evolutionApproval/security";
 import { deriveCandidateView, pickLeadCandidate } from "@/lib/ai/evolutionCommandCenter/deriveStage";
 import type { EvolutionCandidateView, EvolutionCommandCenterView } from "@/lib/ai/evolutionCommandCenter/contracts";
@@ -61,7 +62,10 @@ export async function GET() {
       const approval = await getApprovalView({ validationResult: validation.result, recordHash });
       const artifact = recordHash && approval.status !== "INELIGIBLE" ? await getChangeArtifactByRecordHash(recordHash) : null;
 
-      candidates.push(
+      const learning = await getLatestLearningForGap(EVOLUTION_SOURCE, entry.symbol, proposal.gapCategory);
+      const priorLearning = learning ? { learningKind: learning.learningKind, nextEvolutionState: learning.nextEvolutionState, summary: learning.summary, commitSha: learning.commitSha, recordedAt: learning.recordedAt } : null;
+
+      const view = (
         deriveCandidateView({
           symbol: entry.symbol,
           need: entry.evolutionNeed.need,
@@ -75,6 +79,7 @@ export async function GET() {
           artifact,
         })
       );
+      candidates.push({ ...view, priorLearning });
     }
   }
 

@@ -149,6 +149,13 @@ function CandidateCard({ candidate, headline }: { candidate: EvolutionCandidateV
         </div>
       )}
 
+      {candidate.priorLearning && (
+        <div className="mt-3 rounded-md border border-white/10 bg-white/[0.03] p-2 text-[11px]">
+          <div className="text-[10px] uppercase tracking-wider text-ink-faint">Prior learning for this gap — {candidate.priorLearning.nextEvolutionState}</div>
+          <div className="mt-0.5 text-ink">{candidate.priorLearning.summary}</div>
+        </div>
+      )}
+
       {ready && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-signal/40 bg-signal/10 p-2">
           <Rocket size={14} className="shrink-0 text-signal-glow" />

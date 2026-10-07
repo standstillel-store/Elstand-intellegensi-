@@ -67,7 +67,7 @@ import type { DecisionEvaluation } from "@/lib/ai/decisionEvaluation/contracts";
 import { SAMPLE_EXCLUSION_REASONS } from "./semantics";
 import type { DecisionSource, GapCategory, ReplaySlice, ReplayComparison, SampleAccounting, SampleExclusionReason } from "./contracts";
 
-function isInScope(row: DecisionMemoryJoinedRow, source: DecisionSource, symbol: string): boolean {
+export function isInScope(row: DecisionMemoryJoinedRow, source: DecisionSource, symbol: string): boolean {
   return row.experience.source === source && row.experience.symbol === symbol;
 }
 
@@ -135,7 +135,8 @@ export function compareReplayRows(a: DecisionMemoryJoinedRow, b: DecisionMemoryJ
   return 0;
 }
 
-function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSource, symbol: string, halfRows: readonly DecisionMemoryJoinedRow[], gapCategory: GapCategory): ReplaySlice {
+/** Exported 2026-10-04 (keyword only — no behavior change) so post-deploy outcome measurement (lib/ai/evolutionOutcome) measures a window with EXACTLY the same function validation used, instead of re-implementing it. */
+export function buildSlice(windowLabel: ReplaySlice["windowLabel"], source: DecisionSource, symbol: string, halfRows: readonly DecisionMemoryJoinedRow[], gapCategory: GapCategory): ReplaySlice {
   const coverage = computeEvaluationCoverage(source, symbol, halfRows);
   const performance = aggregatePerformance(source, symbol, halfRows);
   const gaps = detectCognitiveGaps({ source, symbol, rows: halfRows, matchedPatternCount: 0, constraintValidations: [] });

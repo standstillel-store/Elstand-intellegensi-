@@ -50,6 +50,20 @@ export interface EvolutionAuditEvent {
 
 export type EvolutionTerminalOutcome = "HUMAN_APPROVED" | "HUMAN_REJECTED" | null;
 
+/**
+ * The most recent post-deploy LEARNING for this candidate's (symbol, gap
+ * category) — what a previously DEPLOYED change taught about this gap
+ * (lib/ai/evolutionOutcome). Optional and read-only: it informs the next
+ * observation, it never changes a stage, a threshold or a gate.
+ */
+export interface EvolutionPriorLearning {
+  readonly learningKind: string;
+  readonly nextEvolutionState: string;
+  readonly summary: string;
+  readonly commitSha: string;
+  readonly recordedAt: string;
+}
+
 export interface EvolutionCandidateView {
   readonly symbol: string;
   readonly candidateId: string;
@@ -71,6 +85,7 @@ export interface EvolutionCandidateView {
   readonly progressPercent: number;
   readonly currentStage: EvolutionStageId;
   readonly auditTrail: readonly EvolutionAuditEvent[];
+  readonly priorLearning?: EvolutionPriorLearning | null;
 }
 
 export interface EvolutionCommandCenterView {
