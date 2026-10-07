@@ -1,0 +1,51 @@
+name: ELVOID Phase 9 Verification Sweep
+
+# ---------------------------------------------------------------------------
+# Added 2026-10-07 (P0.3 hardening). Calls the app's post-deploy sweep route
+# every 15 minutes so a DEPLOY_SUCCESS patch run is actually walked through
+# PRODUCTION_VERIFICATION -> OUTCOME -> LEARNING. Without this workflow,
+# app/api/ai-performance/evolution/verify/route.ts exists but nothing ever
+# calls it — the route's own header comment says exactly this ("Not yet
+# wired into a GitHub Actions schedule").
+#
+# Same reason and same pattern as phase9-checks-poll.yml: Vercel Hobby crons
+# are daily-only, GitHub Actions is the real scheduler here.
+#
+# This workflow contains no logic and can never approve, merge, or deploy
+# anything — the route it calls (lib/ai/evolutionVerification/sweep.ts) only
+# reads DEPLOY_SUCCESS runs and writes production-verification/outcome/
+# learning rows; see that module's own header and
+# scripts/phase9/evolution-verification-outcome-fixtures.ts's static guard
+# S6/S8 for the enforced absence of any approve/merge/push import.
+#
+# Idempotent / safe to run concurrently or redeliver: every downstream write
+# is deduplicated by the Learning DB itself (evolution_production_verifications
+# has at most one VERIFIED row per patch run via a partial unique index;
+# evolution_outcomes has at most one terminal row per patch run the same
+# way; evolution_learnings has a UNIQUE patch_run_id). A second concurrent
+# sweep hitting an already-resolved run is a no-op, never a duplicate row.
+#
+# REQUIRED REPO SECRETS (same two as phase9-checks-poll.yml):
+#   ELVOID_PRO_BASE_URL, CRON_SECRET
+# The verify route fails CLOSED (401) when CRON_SECRET is not set on the
+# Vercel side, so CRON_SECRET must be present there too.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Phase 9 production verification sweep
+        run: |
+          if [ -z "${{ secrets.ELVOID_PRO_BASE_URL }}" ]; then
+            echo "ELVOID_PRO_BASE_URL secret is not set — see this workflow file's header comment."
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.ELVOID_PRO_BASE_URL }}/api/ai-performance/evolution/verify"
