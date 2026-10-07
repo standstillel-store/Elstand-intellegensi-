@@ -49,6 +49,18 @@ function file(filePath: string, content: string): GeneratedFile {
   check("3a denylisted path rejected even when in scope", result.ok === false, JSON.stringify(result));
 }
 
+// 3b. (Gap 1/Gap 2 hardening) the post-deploy measurement loop is denylisted
+// exactly like the rest of the pipeline machinery — a generated patch can
+// never touch the modules that decide whether its own change was verified,
+// improved, or learned from, even if (hypothetically) named in scope.
+{
+  const scopeWithPostDeploy = [...SCOPE, "lib/ai/evolutionVerification/verify.ts", "lib/ai/evolutionOutcome/evaluate.ts"];
+  const resultVerification = validateGeneratedFiles([file("lib/ai/evolutionVerification/verify.ts", "x")], scopeWithPostDeploy);
+  check("3b in-scope but denylisted: lib/ai/evolutionVerification/ is rejected", resultVerification.ok === false, JSON.stringify(resultVerification));
+  const resultOutcome = validateGeneratedFiles([file("lib/ai/evolutionOutcome/evaluate.ts", "x")], scopeWithPostDeploy);
+  check("3c in-scope but denylisted: lib/ai/evolutionOutcome/ is rejected", resultOutcome.ok === false, JSON.stringify(resultOutcome));
+}
+
 // 4. Path traversal.
 {
   const result = validateGeneratedFiles([file("../../etc/passwd", "x")], ["../../etc/passwd"]);

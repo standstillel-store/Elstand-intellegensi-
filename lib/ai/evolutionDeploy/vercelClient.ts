@@ -52,8 +52,12 @@ export async function findDeploymentByCommitSha(config: VercelConfig, commitSha:
       signal: controller.signal,
     });
     if (!res.ok) return { state: "UNKNOWN", deploymentId: null, url: null };
-    const json = (await res.json()) as { deployments?: readonly { uid: string; url: string; readyState: string; meta?: Record<string, string> }[] };
-    const match = (json.deployments ?? []).find((d) => d.meta?.githubCommitSha === commitSha);
+    const json = (await res.json()) as { deployments?: readonly { uid: string; url: string; readyState: string; target?: string | null; meta?: Record<string, string> }[] };
+    // Fail-closed on target: a commit SHA is not unique to production — a
+    // preview deployment (any branch pointing at the same commit) can share
+    // it. Only ever bind to target === "production"; never fall back to an
+    // untargeted or preview match.
+    const match = (json.deployments ?? []).find((d) => d.meta?.githubCommitSha === commitSha && d.target === "production");
     if (!match) return { state: "UNKNOWN", deploymentId: null, url: null };
     return { state: mapReadyState(match.readyState), deploymentId: match.uid, url: `https://${match.url}` };
   } catch {

@@ -57,8 +57,14 @@ const GLOBAL_DENYLIST_PATH_SUBSTRINGS: readonly string[] = [
   "lib/ai/evolutionGit/", // branch/commit/merge wrappers + GitHub client
   "lib/ai/evolutionDeploy/",
   "lib/ai/evolutionCoding/", // this guard and the generator itself
+  // Added (Gap 1/Gap 2 hardening): the post-deploy measurement loop must be
+  // as unreachable to self-coding as the pipeline it measures — a generated
+  // patch must never be able to rewrite what decides whether its own change
+  // was VERIFIED, IMPROVED, or learned from.
+  "lib/ai/evolutionVerification/", // DEPLOY_SUCCESS -> production verification sweep
+  "lib/ai/evolutionOutcome/", // verified deployment -> outcome -> learning
   "app/api/ai-performance/approvals/", // Telegram + deployment webhooks
-  "app/api/ai-performance/evolution/", // checks cron route
+  "app/api/ai-performance/evolution/", // checks/verify cron routes + command-center/build-info/lifecycle routes
   ".github/", // CI gate + schedulers
   "controlPolicy",
 ];
