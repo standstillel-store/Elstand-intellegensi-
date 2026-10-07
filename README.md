@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./public/tokens/els-logo.png" alt="ELSTAND coin logo" width="120" height="120" />
+</p>
+
 # ELSTAND Intelligence
 
 **A crypto market intelligence ecosystem** that turns macro, market, order-flow,
@@ -19,7 +23,7 @@ premise: raw data on its own isn't useful — it becomes useful once it's
 turned into *evidence*, weighed against other evidence, reasoned about, and
 traced through to an outcome you can evaluate afterward.
 
-ELSTAND aggregates macro data (FRED, Fear & Greed, economic calendar),
+ELSTAND aggregates macro data (Alpha Vantage as the primary economic source, FRED as a supporting source, Fear & Greed, economic calendar),
 market data (CoinGecko, Binance, GeckoTerminal), order flow, and external
 signals (news, whale transfers, DeFi TVL) into one evidence base. That
 evidence base feeds **ELVOID**, the layer responsible for turning evidence
@@ -61,6 +65,43 @@ membership, and the on-chain (BSC Testnet) token/wallet layer.
 
 ---
 
+## MVP / Core Vertical Slice
+
+The smallest end-to-end path that exists in the repository today — one cycle of the autonomous
+runtime (`lib/ai/autonomousRuntime/orchestrator.ts`) for one watchlist symbol:
+
+```
+Data → Evidence → Intelligence → ELVOID → Decision → Outcome → Evaluation / Learning
+```
+
+| Stage | What it does | Implementation |
+|---|---|---|
+| **Data** | Market, on-chain and news feeds, plus economic data where **Alpha Vantage is the primary economic source** and **FRED is a supporting source** (supporting data may confirm, never replace, the primary reading) | `lib/binance*`, `lib/economicData/*`, `lib/alchemy.ts` |
+| **Evidence** | Source-tagged evidence; unavailable data carries zero weight and is never treated as neutral; proxy data is capped | `lib/ai/oracle/confluence.ts`, `lib/ai/externalIntelligence/*` |
+| **Intelligence** | Multi-timeframe, regime, liquidity / order-flow, macro and event-impact context; external-evidence gate | `lib/ai/oracle/*`, `lib/ai/macroIntelligence`, `lib/ai/eventImpact` |
+| **ELVOID** | **Oracle → Cognitive Layer.** Confluence, contradiction, scenario, arbitration and risk are computed first; the Cognitive Layer then observes, forms hypotheses and resolves conflict state, read-only | `lib/ai/oracle/*`, `lib/ai/cognitive/*` |
+| **Decision** | Qualification → pre-entry validation → **`EXECUTE` / `WAIT` / `REJECT`**, in a fixed priority order with no default to `EXECUTE` | `lib/ai/decisionQualification`, `preEntryValidation`, `autonomousDecision/decide.ts` |
+| **Outcome** | Paper execution only for the autonomous runtime; the result goes to the paper journal and the isolated Learning DB | `lib/ai/autonomousExecution`, `lib/elvoid/paperTrader.ts`, `lib/ai/decisionOutcome` |
+| **Evaluation / Learning** | Per-decision evaluation → failure patterns → adaptive constraints → validation; decision memory is read on the next cycle | `lib/ai/decisionEvaluation`, `failurePatterns`, `adaptiveConstraint`, `learningValidation`, `decisionMemory` |
+
+**Status of the slice: IMPLEMENTED + E2E/RUNTIME EVIDENCE AVAILABLE.** Offline fixtures: 66 files,
+61 clean, 0 failures, 1,488 `PASS` lines, 5 BLOCKED by packages unavailable offline. Runtime evidence
+is observed in the AI Performance dashboard and is not stored in this repository; offline fixtures are
+not live end-to-end evidence. Details:
+[E2E verification](./docs/ELVOID_COGNITIVE_LAYER.md#27-e2e-verification).
+
+**Beyond the slice**
+
+| Capability | Status |
+|---|---|
+| Controlled evolution — gap detection → proposal → candidate → replay → validation → human approval (8.6.1–8.6.6) | IMPLEMENTED + PARTIALLY VERIFIED; end to end **EXPERIMENTAL** |
+| 8.6.7 Self-improvement / self-coding — an LLM may draft a patch, bounded by a scope guard, CI and a second human authorization; *mechanically executable after explicit human authorization*, not autonomous deployment | **EXPERIMENTAL** |
+| 8.7+ Adaptive / collective intelligence | **ROADMAP** |
+
+Roadmap, crosswalk and status legend: [`CHANGES.md`](./CHANGES.md).
+
+---
+
 ## Intelligence Ecosystem
 
 Components that are actually present in the repository, each contributing
@@ -68,7 +109,7 @@ evidence into ELVOID:
 
 | Component | Purpose | Input | Output |
 |---|---|---|---|
-| **Macro Intelligence** | Broad market regime context | FRED (DXY, M2), Fear & Greed, economic calendar | Macro bias/context tags |
+| **Macro Intelligence** | Broad market regime context | Alpha Vantage (primary economic source); FRED (supporting: DXY, M2), Fear & Greed, economic calendar | Macro bias/context tags |
 | **Quant / Market Intelligence** | Price, volume, and derivatives context | CoinGecko, Binance (spot/futures), GeckoTerminal | Confluence inputs, market-state evidence |
 | **Order Flow** | Footprint / CVD-style flow reads | Binance klines, order book, funding | Flow bias evidence |
 | **Web3 Intelligence** | On-chain activity | Alchemy (whale transfers), DefiLlama (stablecoin supply) | Whale/liquidity evidence |
@@ -108,7 +149,7 @@ An optional LLM narrative pass sits at the very end (Phase 7.9), turning
 the already-computed decision into a plain-language explanation — the LLM
 never determines the decision itself.
 
-Full stage-by-stage detail (Phases 7.5–8.2.9): see
+Full stage-by-stage detail (Phase 7 through controlled evolution 8.6.7): see
 [`docs/ELVOID_COGNITIVE_LAYER.md`](./docs/ELVOID_COGNITIVE_LAYER.md).
 
 ![ELVOID Cognitive Loop](./docs/assets/elvoid-cognitive-loop.svg)
@@ -144,7 +185,9 @@ dressed up as false precision.
 
 ## Learning From Outcomes
 
-**IMPLEMENTED**, wired end-to-end into the autonomous runtime:
+**IMPLEMENTED** and called from the autonomous runtime. Each stage is covered by offline fixtures and runtime
+evidence is observed in the AI Performance dashboard; the orchestrator-level path itself has no offline
+end-to-end test (its fixture is BLOCKED offline), so it is not claimed as end-to-end VERIFIED:
 
 ```
 Decision
@@ -187,7 +230,8 @@ verification.
 | On-chain membership (ELVOID PRO / ELSTAND PREMIUM) via `ELSTestnetPayment` | Gated access paid in ELS | IMPLEMENTED |
 | ELS token buy/sell, reward distributor, Bug Hunter escrow | Token utility on BSC Testnet | IMPLEMENTED |
 | LLM narrative pass over the final decision | Plain-language explanation of an already-computed decision | IMPLEMENTED (optional) |
-| Decision memory retrieval / autonomous-learning lifecycle wiring | Deeper self-improving learning loop | EXPERIMENTAL — present in code, scope needs verification before citing in a pitch |
+| Decision memory retrieval and learning-lifecycle classification (every cycle) | Feeds qualification; classifies whether a result enters learning on close | IMPLEMENTED |
+| Controlled self-evolution (gap → proposal → validation → human approval; 8.6.7 self-coding pipeline) | Proposes and gates changes to ELVOID itself; production change needs explicit human authorization | EXPERIMENTAL — no complete cycle demonstrated |
 | Cross-chain (beyond BSC) support | Wider Web3 reach | ROADMAP |
 
 ---
@@ -201,7 +245,8 @@ verification.
 | Alternative.me | Fear & Greed index | No |
 | GeckoTerminal | DEX volume, liquidity & FDV (ETH, BSC, Solana, Base, Arbitrum) | No |
 | DefiLlama | Stablecoin supply market-overview | No |
-| FRED (St. Louis Fed) | DXY (Broad USD Index proxy) & M2 money supply | Yes — free |
+| Alpha Vantage | Economic indicator observations — the **primary** economic data source | Yes (`ALPHA_VANTAGE_API_KEY`) |
+| FRED (St. Louis Fed) | Supporting source: DXY (Broad USD Index proxy) & M2 money supply | Yes — free |
 | Alchemy | Whale transfer feed (curated ERC-20 watchlist) | Yes — free tier |
 | NewsAPI.org | News feed, sentiment, "negative press" rugpull flag | Yes — free tier (paid/GNews recommended for production) |
 | ForexFactory calendar feed | Economic calendar (FOMC/CPI/NFP-style events) | No |
@@ -346,6 +391,7 @@ Full detail: [`CONTRACTS.md`](./CONTRACTS.md).
 - Cognitive Layer (observation, working memory, hypotheses, conflict resolution, decision context)
 - Decision Outcome Capture + isolated Learning Database
 - Decision Evaluation, Failure Pattern Detection, Adaptive Constraint Generation, Learning Validation — orchestrated as a single learning-refresh sequence
+- Decision memory retrieval and learning-lifecycle classification, read on every autonomous cycle
 - Autonomous background runtime (Vercel cron + GitHub Actions 15-minute heartbeat, lock-guarded against overlap)
 - Paper trading (journal, statistics)
 - Live trading via Binance Spot/Futures (Testnet or Live)
@@ -354,13 +400,15 @@ Full detail: [`CONTRACTS.md`](./CONTRACTS.md).
 - Optional LLM narrative pass over the final, already-computed decision
 
 **EXPERIMENTAL**
-- Decision memory retrieval and autonomous-learning lifecycle wiring — present in the codebase and referenced by the autonomous runtime, scope not yet independently verified end-to-end for this audit
+- Controlled self-evolution (8.6.x): the components and gates are implemented and fixture-tested, but no complete cycle (candidate → approval → self-code → regression → authorization → merge → deploy → production verification → outcome → learning) has been demonstrated; 8.6.7 self-coding is *mechanically executable after explicit human authorization*, not autonomous deployment
 - Vercel Hobby cron limitation means the daily platform cron alone would be insufficient; the GitHub Actions heartbeat is the real trigger in practice, worth understanding before assuming "runs every 15 minutes" out of the box on a fresh deploy
 
 **ROADMAP**
 - Mainnet deployment (all contracts currently BSC Testnet only)
 - Cross-chain support beyond BNB Smart Chain
 - Non-Vercel-Hobby-constrained scheduling for guaranteed full-watchlist coverage per tick
+- Post-deployment evaluation and evolution feedback loop (not implemented)
+- 8.7+ Adaptive / collective intelligence (concept only)
 
 ---
 
@@ -378,9 +426,10 @@ NEEDS VERIFICATION — no demo link or video found in this repository.
 
 ## Documentation
 
-- [`docs/ELVOID_COGNITIVE_LAYER.md`](./docs/ELVOID_COGNITIVE_LAYER.md) — full Oracle/Cognitive/Learning pipeline deep-dive
+- [`docs/ELVOID_COGNITIVE_LAYER.md`](./docs/ELVOID_COGNITIVE_LAYER.md) — technical deep-dive: evidence → decision → outcome → learning → controlled evolution, with E2E verification status
 - [`CONTRACTS.md`](./CONTRACTS.md) — deployed contract addresses (BSC Testnet)
-- [`CHANGES.md`](./CHANGES.md) — phase-by-phase change history
+- [`CHANGES.md`](./CHANGES.md) — long-form roadmap and engineering-evolution documentation (phase crosswalk, status ledger)
+- [`docs/changelog/ENGINEERING_DELTA_LOG.md`](./docs/changelog/ENGINEERING_DELTA_LOG.md) — historical per-phase engineering record
 
 ---
 

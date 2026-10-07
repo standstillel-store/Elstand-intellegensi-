@@ -18,7 +18,7 @@ export function LandingFooter() {
           </p>
           <div className="elv-footer-status mono">
             <span className="elv-footer-status-dot" />
-            ELVOID CORE — OPERATIONAL
+            ELVOID CORE — DECISION-INTELLIGENCE LAYER
           </div>
         </div>
 

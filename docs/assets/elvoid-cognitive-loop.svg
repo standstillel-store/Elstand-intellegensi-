@@ -10,7 +10,7 @@
   </defs>
   <rect width="620" height="620" fill="url(#bg3)"/>
   <text x="310" y="38" text-anchor="middle" fill="#c9a3f7" font-size="15" letter-spacing="2" font-weight="700">ELVOID COGNITIVE LOOP</text>
-  <text x="310" y="58" text-anchor="middle" fill="#77778a" font-size="9.5" letter-spacing="1">Phase 8.1+ — capture implemented today; scoring/learning stages are roadmap</text>
+  <text x="310" y="58" text-anchor="middle" fill="#77778a" font-size="9.5" letter-spacing="1">Phase 8.1+ — capture, evaluation, error analysis and learning implemented</text>
 
   <!-- circular arrangement of 6 nodes -->
   <!-- centers roughly on a circle radius 220 around (310,340) -->
@@ -26,17 +26,17 @@
     <!-- Evaluation: lower right -->
     <rect x="420" y="400" width="160" height="52" rx="7" fill="#17171c" stroke="#3fae7a" stroke-opacity="0.6"/>
     <text x="500" y="431" text-anchor="middle" fill="#8fcbaa" letter-spacing="1">EVALUATION</text>
-    <text x="500" y="446" text-anchor="middle" fill="#5a5a66" font-size="8.5">ROADMAP</text>
+    <text x="500" y="446" text-anchor="middle" fill="#5a5a66" font-size="8.5">IMPLEMENTED</text>
 
     <!-- Error Analysis: bottom -->
     <rect x="230" y="500" width="160" height="52" rx="7" fill="#17171c" stroke="#3fae7a" stroke-opacity="0.6"/>
     <text x="310" y="527" text-anchor="middle" fill="#8fcbaa" letter-spacing="1">ERROR ANALYSIS</text>
-    <text x="310" y="542" text-anchor="middle" fill="#5a5a66" font-size="8.5">ROADMAP</text>
+    <text x="310" y="542" text-anchor="middle" fill="#5a5a66" font-size="8.5">IMPLEMENTED</text>
 
     <!-- Learning: lower left -->
     <rect x="40" y="400" width="160" height="52" rx="7" fill="#1c1420" stroke="#a06bf0" stroke-width="1.2"/>
     <text x="120" y="431" text-anchor="middle" fill="#c9a3f7" letter-spacing="1">LEARNING</text>
-    <text x="120" y="446" text-anchor="middle" fill="#5a5a66" font-size="8.5">ROADMAP</text>
+    <text x="120" y="446" text-anchor="middle" fill="#5a5a66" font-size="8.5">IMPLEMENTED</text>
 
     <!-- Future Reasoning: upper left -->
     <rect x="40" y="220" width="160" height="52" rx="7" fill="#17171c" stroke="#4a4a56"/>

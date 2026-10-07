@@ -44,20 +44,54 @@ const NAV: { id: string; label: string }[] = [
 // Small building blocks
 // ---------------------------------------------------------------------------
 
-type Status = "IMPLEMENTED" | "EXPERIMENTAL" | "ROADMAP" | "DESIGN PRINCIPLE";
+type Status =
+  | "IMPLEMENTED"
+  | "VERIFIED"
+  | "PARTIALLY VERIFIED"
+  | "IMPLEMENTED + RUNTIME EVIDENCE"
+  | "EXPERIMENTAL"
+  | "ROADMAP"
+  | "BLOCKED"
+  | "NOT VERIFIED"
+  | "DESIGN PRINCIPLE";
+
+const STATUS_TITLE: Partial<Record<Status, string>> = {
+  VERIFIED: "Terbukti dan dapat direproduksi dari repository",
+  "PARTIALLY VERIFIED": "Sebagian perilaku terbukti dari bukti yang dapat direproduksi (umumnya fixture offline)",
+  "IMPLEMENTED + RUNTIME EVIDENCE":
+    "IMPLEMENTED + E2E/RUNTIME EVIDENCE AVAILABLE — bukti runtime diamati di dashboard AI Performance (dilaporkan pemilik, tidak tersimpan di repository), sehingga lebih lemah dari VERIFIED",
+  BLOCKED: "Pemeriksaan tidak dapat dijalankan (dependency tidak tersedia offline) — bukan pass, bukan fail",
+  "NOT VERIFIED": "Belum ada bukti, baik ya maupun tidak",
+};
 
 function StatusBadge({ status }: { status: Status }) {
   const style: Record<Status, string> = {
     IMPLEMENTED: "border-up/40 bg-up/10 text-up",
+    VERIFIED: "border-up/40 bg-up/10 text-up",
+    "PARTIALLY VERIFIED": "border-sky-400/40 bg-sky-400/10 text-sky-300",
+    "IMPLEMENTED + RUNTIME EVIDENCE": "border-up/40 bg-up/10 text-up",
     EXPERIMENTAL: "border-amber/40 bg-amber/10 text-amber",
     ROADMAP: "border-violet-400/40 bg-violet-400/10 text-violet-300",
+    BLOCKED: "border-down/40 bg-down/10 text-down",
+    "NOT VERIFIED": "border-line bg-bg-raised text-ink-muted",
     "DESIGN PRINCIPLE": "border-line bg-bg-raised text-ink-muted",
   };
   return (
     <span
+      title={STATUS_TITLE[status]}
       className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${style[status]}`}
     >
       {status}
+    </span>
+  );
+}
+
+function Badges({ statuses }: { statuses: Status[] }) {
+  return (
+    <span className="flex flex-wrap gap-1">
+      {statuses.map((st) => (
+        <StatusBadge key={st} status={st} />
+      ))}
     </span>
   );
 }
@@ -317,7 +351,7 @@ export function DocumentationView() {
             <Table
               head={["Komponen", "Tujuan", "Input", "Output"]}
               rows={[
-                ["Macro Context", "Konteks regime market secara luas", "FRED (DXY, M2), Fear & Greed, economic calendar", "Tag bias/konteks makro"],
+                ["Macro Context", "Konteks regime market secara luas", "Alpha Vantage (sumber ekonomi primer); FRED (pendukung: DXY, M2), Fear & Greed, economic calendar", "Tag bias/konteks makro"],
                 ["ELVOID Quant", "Konteks harga, volume, derivatif", "CoinGecko, Binance (spot/futures), GeckoTerminal", "Input confluence"],
                 ["Order Flow", "Pembacaan flow gaya footprint/CVD", "Binance klines, order book, funding", "Evidence bias flow"],
                 ["Intelligence Map", "Agregasi cross-source", "Semua sumber di atas", "Permukaan evidence terpadu untuk ELVOID"],
@@ -567,7 +601,7 @@ export function DocumentationView() {
               ]}
             />
             <p>
-              <StatusBadge status="IMPLEMENTED" /> Seluruh rantai ini di-sequence oleh{" "}
+              <StatusBadge status="IMPLEMENTED + RUNTIME EVIDENCE" /> Seluruh rantai ini di-sequence oleh{" "}
               <Code>lib/ai/autonomousRuntime/learningRefresh.ts</Code> dalam urutan tetap:{" "}
               <Code>recomputeFailurePatterns()</Code> → <Code>recomputeAdaptiveConstraints()</Code> →{" "}
               <Code>recomputeConstraintValidations()</Code>, dijaga lock yang sama dengan batch trading. Tidak ada
@@ -593,21 +627,91 @@ export function DocumentationView() {
                 adalah fungsi pure (nol DB/network/LLM/randomness), dipanggil live setiap cycle di orchestrator{" "}
                 <em>sebelum</em> tahap qualification/decision. Sinyal memory negatif membuat status keputusan{" "}
                 <Code>CONFLICTED</Code>, yang langsung berujung REJECT — tidak pernah menguatkan EXECUTE, selalu
-                fail-safe ke arah WAIT/REJECT. Untuk sub-komponen ini status paling akurat adalah{" "}
-                <StatusBadge status="IMPLEMENTED" />, bukan &ldquo;experimental&rdquo; secara umum seperti di
-                README — sementara scope penuh <em>autonomous-learning lifecycle</em> di luar retrieval ini tetap{" "}
-                <StatusBadge status="EXPERIMENTAL" />.
+                fail-safe ke arah WAIT/REJECT. Retrieval ini dan klasifikasi lifecycle pembelajaran (dipanggil setiap
+                cycle) berstatus <StatusBadge status="IMPLEMENTED + RUNTIME EVIDENCE" /> — bukti runtime diamati di
+                dashboard AI Performance (dilaporkan; tidak tersimpan di repository). Yang masih{" "}
+                <StatusBadge status="EXPERIMENTAL" /> adalah rantai <em>self-improving</em> di luar learning loop
+                ini — lihat{" "}
+                <a href="#self-evolution" className="text-amber hover:underline">Controlled Self-Evolution</a>.
               </li>
             </ul>
           </Section>
 
           <Section id="self-evolution" number="15" title="Controlled Self-Evolution">
-            <StatusBadge status="ROADMAP" />
-            <FlowDiagram steps={[{ label: "Monitor" }, { label: "Detect" }, { label: "Decide" }, { label: "Propose" }, { label: "Test" }, { label: "Protect" }, { label: "Approve" }]} />
             <p>
-              Fase ini (Phase 8.6 pada roadmap internal) belum aktif di sistem yang berjalan dan belum menghasilkan
-              efek apa pun pada keputusan trading hari ini. Prinsip desainnya: tidak ada direct self-modification
-              tanpa validation, regression testing, dan human approval.
+              <Badges statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} /> Komponen 8.6.1–8.6.6 sudah ada di source
+              dan diuji fixture offline. Secara end-to-end fase ini <StatusBadge status="EXPERIMENTAL" />: satu
+              siklus evolusi penuh dalam satu runtime kontinu belum terbukti. Output 8.6.1–8.6.6 berupa catatan dan
+              record, bukan kode — fase ini tidak mengubah keputusan trading hari ini.
+            </p>
+            <FlowDiagram steps={[{ label: "Monitor" }, { label: "Detect" }, { label: "Propose" }, { label: "Test / Replay" }, { label: "Protect" }, { label: "Approve" }, { label: "Evolve" }]} />
+            <Table
+              head={["Label", "Komponen (anchor di source)", "Status"]}
+              rows={[
+                ["8.6.1", "Novelty Detection + Self Performance Monitor — rule-based, tanpa embedding/LLM (lib/ai/noveltyDetection, selfPerformance)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["8.6.2", "Cognitive Gap Detection — 6 kategori, min. 5 kejadian per gap; P1 menambah population gap terpisah (lib/ai/cognitiveGap)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["8.6.3", "Reasoning Gap + Evolution Need — gate NO_EVOLUTION_NEEDED / INSUFFICIENT_EVIDENCE / MONITOR / EVOLUTION_WARRANTED (lib/ai/reasoningGap, evolutionNeed)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["8.6.4", "Evolution Proposal — template tetap per kategori, tanpa LLM; Self-Evaluation Summary (lib/ai/evolutionProposal, selfEvaluation)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["8.6.5", "Evolution Candidate + Replay — replikasi split-history (paruh lama vs baru), bukan eksekusi counterfactual (lib/ai/evolutionCandidate)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["8.6.6", "Validation + Regression Guard — 7 gate tetap, record append-only (lib/ai/evolutionValidation)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["8.6.7", "Human Approval via Telegram — satu approver (ID numerik), idempoten (lib/ai/evolutionApproval)", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["8.6.7", "Change Artifact → Patch Generation + scopeGuard → CI regression → otorisasi manusia → merge/deploy (code path)", <Badges key="s" statuses={["IMPLEMENTED", "EXPERIMENTAL"]} />],
+                ["—", "Evaluasi pasca-deployment / feedback loop evolusi", <Badges key="s" statuses={["ROADMAP", "NOT VERIFIED"]} />],
+                ["8.7+", "Adaptive / Collective Intelligence — konsep, belum ada kode", <StatusBadge key="s" status="ROADMAP" />],
+              ]}
+            />
+
+            <SubHead>8.6.7 — Controlled Self-Improvement / Self-Coding / Self-Evolution</SubHead>
+            <FlowDiagram
+              direction="vertical"
+              steps={[
+                { label: "NEED" },
+                { label: "PROPOSAL" },
+                { label: "CANDIDATE" },
+                { label: "VALIDATION" },
+                { label: "HUMAN_APPROVAL — Telegram" },
+                { label: "CHANGE_ARTIFACT" },
+                { label: "PATCH — LLM, dibatasi scopeGuard" },
+                { label: "TEST_REGRESSION — CI tsc + build" },
+                { label: "HUMAN_AUTHORIZATION — keputusan manusia kedua" },
+                { label: "MERGE_DEPLOY — mekanis, hanya setelah otorisasi" },
+              ]}
+            />
+            <Callout>
+              Patch boleh dihasilkan LLM, tetapi itu <strong className="text-ink">bukan</strong> mutasi produksi otonom
+              tanpa batas. <Code>controlPolicy.yaml</Code> memberi label <Code>MERGE_DEPLOY: autonomous</Code>, sementara
+              daftar <Code>neverAutonomous</Code> memuat <Code>production_merge</Code> dan{" "}
+              <Code>production_deploy</Code>; keduanya dicatat apa adanya dan tidak direkonsiliasi di file itu. Pembacaan
+              yang tepat: <em>mechanically executable after explicit human authorization</em> — bukan fully autonomous
+              production deployment.
+            </Callout>
+            <ul className="space-y-2">
+              <li>
+                <strong className="text-ink">Batasan historis.</strong> Sebelum commit <Code>7e12508</Code> (2026-09-28),
+                merge + deploy dapat terjadi tepat setelah code generation. Gate CI, otorisasi manusia kedua, dan trigger
+                database diperketat setelah itu; halaman ini menjelaskan model saat ini, bukan pipeline awal.
+              </li>
+              <li>
+                <strong className="text-ink">Label &ldquo;Phase 9&rdquo;.</strong> Identifier <Code>phase9</Code>,{" "}
+                <Code>scripts/phase9</Code>, <Code>elvoid/phase9/*</Code> dan workflow <Code>phase9-*</Code> adalah label
+                implementasi historis untuk 8.6.7. Tidak ada Phase 9 di roadmap; identifier tidak diubah.
+              </li>
+              <li>
+                <strong className="text-ink">Cakupan patch.</strong> Template proposal saat ini hanya menyebut empat file
+                sumber; hanya dua kategori gap yang menghasilkan scope patch yang tidak masuk denylist.
+              </li>
+              <li>
+                <strong className="text-ink">Verifikasi.</strong> Fixture offline mencakup approval (125 PASS), artifact (21),
+                coding (11), dan git/pipeline (12); fixture jalur otorisasi/CI-gate{" "}
+                <StatusBadge status="BLOCKED" /> offline (butuh <Code>js-yaml</Code>). Verifikasi produksi sebuah evolusi{" "}
+                <StatusBadge status="NOT VERIFIED" />; E2E evolusi penuh belum terbukti.
+              </li>
+            </ul>
+            <p className="text-xs text-ink-faint">
+              Detail teknis:{" "}
+              <a href="https://github.com/standstillel-store/Elstand-intellegensi-/blob/main/docs/ELVOID_COGNITIVE_LAYER.md" target="_blank" rel="noopener noreferrer" className="text-amber hover:underline">docs/ELVOID_COGNITIVE_LAYER.md</a>
+              {" "}· roadmap &amp; crosswalk:{" "}
+              <a href="https://github.com/standstillel-store/Elstand-intellegensi-/blob/main/CHANGES.md" target="_blank" rel="noopener noreferrer" className="text-amber hover:underline">CHANGES.md</a>.
             </p>
           </Section>
 
@@ -620,13 +724,19 @@ export function DocumentationView() {
                 ["Alternative.me", "Fear & Greed index", "Tidak"],
                 ["GeckoTerminal", "Volume DEX, liquidity & FDV (ETH, BSC, Solana, Base, Arbitrum)", "Tidak"],
                 ["DefiLlama", "Overview supply stablecoin", "Tidak"],
-                ["FRED (St. Louis Fed)", "DXY (proxy Broad USD Index) & M2 money supply", "Ya — gratis"],
+                ["Alpha Vantage", "Observasi indikator ekonomi — sumber ekonomi PRIMER", "Ya (ALPHA_VANTAGE_API_KEY)"],
+                ["FRED (St. Louis Fed)", "Sumber pendukung: DXY (proxy Broad USD Index) & M2 money supply", "Ya — gratis"],
                 ["Alchemy", "Feed whale transfer (watchlist ERC-20 terkurasi)", "Ya — free tier"],
                 ["NewsAPI.org", "Feed berita, sentimen, flag \"negative press\" rugpull", "Ya — free tier"],
                 ["ForexFactory (calendar feed)", "Economic calendar (event FOMC/CPI/NFP)", "Tidak"],
                 ["Binance Spot/Futures (Testnet/Live)", "Live trading — saldo, posisi, order, eksekusi", "Ya — free testnet key"],
               ]}
             />
+            <p className="text-xs text-ink-faint">
+              Hierarki data ekonomi: Alpha Vantage = sumber primer; FRED, ForexFactory, dan sumber lain = pendukung
+              yang boleh memperkaya atau mengonfirmasi, tidak pernah menggantikan atau mengungguli data primer.
+              Pembacaan primer yang hilang, basi, atau tidak berurutan membuat indikator itu UNAVAILABLE (fail-closed).
+            </p>
           </Section>
 
           <Section id="database" number="17" title="Database Architecture">
@@ -787,7 +897,9 @@ supabase/learning/       → schema ELVOID Learning DB
 contracts/                → source smart contract
 CONTRACTS.md              → daftar address contract terdeploy
 README.md                 → overview & status implementasi
-CHANGES.md                 → riwayat perubahan per fase`}</pre>
+CHANGES.md                 → roadmap panjang + riwayat evolusi engineering
+docs/ELVOID_COGNITIVE_LAYER.md → deep-dive teknis Cognitive Layer
+docs/changelog/ENGINEERING_DELTA_LOG.md → rekaman historis engineering per fase`}</pre>
             </div>
           </Section>
 
@@ -815,32 +927,53 @@ CHANGES.md                 → riwayat perubahan per fase`}</pre>
           </Section>
 
           <Section id="status" number="25" title="Implementation Status">
+            <ul className="space-y-1.5 text-xs text-ink-muted">
+              <li><StatusBadge status="IMPLEMENTED" /> kode ada dan terjangkau dari jalur runtime atau dapat dipanggil — tidak menyatakan kebenaran.</li>
+              <li><StatusBadge status="IMPLEMENTED + RUNTIME EVIDENCE" /> implemented, dan bukti runtime diamati di dashboard AI Performance (dilaporkan pemilik; tidak tersimpan di repository) — sengaja lebih lemah dari VERIFIED.</li>
+              <li><StatusBadge status="PARTIALLY VERIFIED" /> sebagian perilaku terbukti dari bukti yang dapat direproduksi (umumnya fixture offline).</li>
+              <li><StatusBadge status="EXPERIMENTAL" /> implemented, tetapi E2E dalam satu runtime kontinu belum terbukti.</li>
+              <li><StatusBadge status="ROADMAP" /> konsep/rencana, belum ada kode yang memadai.</li>
+              <li><StatusBadge status="BLOCKED" /> pemeriksaan tidak dapat dijalankan (dependency tidak tersedia offline) — bukan pass dan bukan fail.</li>
+              <li><StatusBadge status="NOT VERIFIED" /> belum ada bukti. <StatusBadge status="VERIFIED" /> hanya bila bukti dapat direproduksi dari repository.</li>
+            </ul>
             <Table
               head={["Komponen", "Status"]}
               rows={[
-                ["Agregasi data Macro / Market / Order Flow / Web3 / External", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["ELVOID PRO Oracle pipeline (confluence → grading → contradiction → scenario → arbitration → risk)", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["Cognitive Layer (observation, hypothesis, conflict resolution)", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["Decision Trace (infrastruktur, capture-only)", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["Decision Outcome Capture + Learning DB terisolasi", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["Decision Evaluation / Failure Pattern / Adaptive Constraint / Learning Validation", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["Decision Memory Retrieval (live per-cycle)", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["Autonomous background runtime (cron + heartbeat, lock, dedup)", <StatusBadge key="s" status="IMPLEMENTED" />],
+                ["Agregasi data Macro / Market / Order Flow / Web3 / External", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["ELVOID PRO Oracle pipeline (confluence → grading → contradiction → scenario → arbitration → risk)", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["Cognitive Layer (observation, hypothesis, conflict resolution)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["Decision Trace, Cognitive Trace, replay, causal graph, attribution (infrastruktur traceability)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["Decision Qualification → Pre-entry Validation → Autonomous Decision (EXECUTE / WAIT / REJECT)", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["Decision Outcome Capture + Learning DB terisolasi", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["Decision Evaluation / Failure Pattern / Adaptive Constraint / Learning Validation", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["Decision Memory Retrieval (live per-cycle)", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["Autonomous background runtime (cron + heartbeat, lock, dedup)", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
                 ["Paper trading (journal, statistik)", <StatusBadge key="s" status="IMPLEMENTED" />],
                 ["Live trading via Binance Spot/Futures", <StatusBadge key="s" status="IMPLEMENTED" />],
                 ["Membership on-chain via ELSTestnetPayment", <StatusBadge key="s" status="IMPLEMENTED" />],
                 ["ELS token, faucet, reward distributor, Bug Hunter escrow (BSC Testnet)", <StatusBadge key="s" status="IMPLEMENTED" />],
                 ["LLM narrative pass di atas keputusan final", <StatusBadge key="s" status="IMPLEMENTED" />],
-                ["Autonomous-learning lifecycle penuh (di luar retrieval)", <StatusBadge key="s" status="EXPERIMENTAL" />],
-                ["Controlled Self-Evolution (Phase 8.6)", <StatusBadge key="s" status="ROADMAP" />],
+                ["Alpha Vantage sebagai sumber ekonomi primer (FRED pendukung) + macro-ingestion lock", <StatusBadge key="s" status="IMPLEMENTED" />],
+                ["Community Intelligence (8.4.4) — belum ada sumber terintegrasi", <StatusBadge key="s" status="EXPERIMENTAL" />],
+                ["Controlled Evolution 8.6.1–8.6.6 (komponen dan gate)", <Badges key="s" statuses={["IMPLEMENTED", "PARTIALLY VERIFIED"]} />],
+                ["Controlled Evolution end-to-end (satu siklus penuh)", <StatusBadge key="s" status="EXPERIMENTAL" />],
+                ["8.6.7 Human Approval (Telegram)", <StatusBadge key="s" status="IMPLEMENTED + RUNTIME EVIDENCE" />],
+                ["8.6.7 Self-Coding: change artifact, patch generation + scopeGuard, CI regression, otorisasi manusia, merge/deploy", <Badges key="s" statuses={["IMPLEMENTED", "EXPERIMENTAL"]} />],
+                ["Verifikasi produksi sebuah evolusi", <StatusBadge key="s" status="NOT VERIFIED" />],
+                ["Evaluasi pasca-deployment / feedback loop evolusi", <Badges key="s" statuses={["ROADMAP", "NOT VERIFIED"]} />],
+                ["8.7+ Adaptive / Collective Intelligence", <StatusBadge key="s" status="ROADMAP" />],
                 ["Mainnet deployment", <StatusBadge key="s" status="ROADMAP" />],
                 ["Cross-chain di luar BNB Smart Chain", <StatusBadge key="s" status="ROADMAP" />],
               ]}
             />
             <p className="text-xs text-ink-faint">
-              Disusun dari README.md + audit langsung source code. Baris Decision Memory Retrieval disesuaikan dari
-              label README ("experimental" secara umum) berdasarkan bukti kode konkret — lihat{" "}
-              <a href="#learning" className="text-amber hover:underline">Learning Loop</a>.
+              Fixture offline: 66 file · 61 bersih · 0 FAIL · 1.488 baris PASS · 5 <StatusBadge status="BLOCKED" /> (4
+              butuh <Code>@supabase/supabase-js</Code>, 1 butuh <Code>js-yaml</Code>; termasuk{" "}
+              <Code>controlled-autonomy-and-economic</Code> dan <Code>autonomous-runtime</Code>). Fixture offline ≠
+              E2E produksi, dan BLOCKED tidak pernah dihitung sebagai PASS. Detail dan matriks verifikasi ada di
+              deep-dive Cognitive Layer; status mengikuti legenda di <Code>CHANGES.md</Code>. Sejak sinkronisasi ini,
+              README dan halaman ini memakai status Decision Memory yang sama (lihat{" "}
+              <a href="#learning" className="text-amber hover:underline">Learning Loop</a>).
             </p>
           </Section>
 
@@ -863,6 +996,9 @@ CHANGES.md                 → riwayat perubahan per fase`}</pre>
                 ["Decision Memory", "Riwayat keputusan yang di-retrieve live sebelum keputusan baru dibuat"],
                 ["Grade (NO_TRADE/B+/A/A+)", "Skala kualitas sinyal Oracle; A+ butuh dominant score ≥35 dan ≥3 cluster"],
                 ["RLS (Row Level Security)", "Kontrol akses baris Postgres — di sini diaktifkan tanpa public policy sama sekali"],
+                ["8.6.7", "Controlled Self-Improvement / Self-Coding / Self-Evolution. Identifier kode 'phase9' (scripts/phase9, elvoid/phase9/*, workflow phase9-*) adalah label historisnya; tidak ada Phase 9 di roadmap"],
+                ["Change Artifact", "Rekaman terkontrol (P4) yang menjadi masukan patch generation; dibuat hanya dari validation record VALID dengan approval hash yang cocok"],
+                ["scopeGuard", "Pemeriksa murni untuk patch hasil generate: path harus sama persis dengan affectedFiles; denylist path dan konten menang atas allowlist"],
                 ["ELS", "Token ERC-20 native ekosistem ELSTAND di BNB Smart Chain Testnet"],
               ]}
             />
@@ -870,19 +1006,16 @@ CHANGES.md                 → riwayat perubahan per fase`}</pre>
 
           <Section id="changelog" number="27" title="Changelog & Resources">
             <p>
-              <Code>CHANGES.md</Code> pada repository adalah canonical changelog/evolution record — riwayat
-              perubahan per fase.
+              <Code>CHANGES.md</Code> pada repository kini adalah dokumentasi roadmap panjang dan riwayat evolusi
+              engineering (crosswalk tiga sistem penamaan, status per fase, appendix UI/UX). Changelog per fase yang
+              lama dipulihkan sebagai rekaman historis.
             </p>
             <ul className="space-y-1.5">
-              <li>→ <Code>CHANGES.md</Code> — riwayat perubahan lengkap per fase</li>
+              <li>→ <a href="https://github.com/standstillel-store/Elstand-intellegensi-/blob/main/CHANGES.md" target="_blank" rel="noopener noreferrer" className="text-amber hover:underline">CHANGES.md</a> — roadmap panjang + engineering evolution</li>
+              <li>→ <a href="https://github.com/standstillel-store/Elstand-intellegensi-/blob/main/docs/ELVOID_COGNITIVE_LAYER.md" target="_blank" rel="noopener noreferrer" className="text-amber hover:underline">docs/ELVOID_COGNITIVE_LAYER.md</a> — deep-dive teknis Cognitive Layer, E2E dan verifikasi</li>
+              <li>→ <a href="https://github.com/standstillel-store/Elstand-intellegensi-/blob/main/docs/changelog/ENGINEERING_DELTA_LOG.md" target="_blank" rel="noopener noreferrer" className="text-amber hover:underline">docs/changelog/ENGINEERING_DELTA_LOG.md</a> — rekaman historis engineering per fase</li>
               <li>→ <Code>CONTRACTS.md</Code> — daftar address contract terdeploy</li>
             </ul>
-            <p className="text-xs text-ink-faint">
-              Catatan: README merujuk ke <Code>docs/ELVOID_COGNITIVE_LAYER.md</Code> sebagai deep-dive Cognitive
-              Layer, namun file tersebut {NOT_VERIFIED.toLowerCase()} ada di repository saat audit ini dilakukan —
-              detail Cognitive Layer di halaman ini diambil langsung dari komentar header source code (
-              <Code>lib/ai/cognitive/*</Code>) sebagai gantinya.
-            </p>
 
             <div className="grid gap-3 pt-2 sm:grid-cols-2">
               <a href="mailto:contact@elstand-intellegence.my.id" className="panel flex items-center gap-2.5 p-3 hover:border-amber/40">
