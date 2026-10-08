@@ -17,7 +17,7 @@
 // to.
 // ---------------------------------------------------------------------------
 
-import type { FailurePatternObservationInput, FailurePatternSource, FailurePatternEvidenceTag, FailurePatternEvaluationClass, FailurePatternCandidateWithoutTimestamp } from "./contracts";
+import type { FailurePatternObservationInput, FailurePatternSource, FailurePatternEvidenceTag, FailurePatternEvaluationClass, FailurePatternCandidateWithoutTimestamp, FailurePatternSide } from "./contracts";
 
 /** A group with fewer qualifying occurrences than this is excluded entirely — never persisted as a low-confidence row. */
 export const MIN_OCCURRENCE_COUNT = 5;
@@ -176,4 +176,27 @@ export function detectFailurePatternCandidates(observations: readonly FailurePat
   });
 
   return candidates;
+}
+
+/**
+ * Side-aware pattern isolation. Runs the EXACT SAME detector
+ * (`detectFailurePatternCandidates()` — same `MIN_OCCURRENCE_COUNT`, same
+ * temporal-spread rule, same confidence cap; nothing is re-implemented or
+ * loosened) over only the observations whose `side` equals `side`.
+ *
+ * A pooled LONG+SHORT group can reach `MIN_OCCURRENCE_COUNT` purely
+ * because the two directions' losses were added together, even though
+ * neither direction's own history would ever qualify. This function
+ * answers "does THIS direction's own history qualify as a pattern?" —
+ * observations from the opposite side, and observations whose side is
+ * unknown (`null`/absent), are never counted toward it. Because the
+ * observation set is a subset of the pooled one, the result is always a
+ * subset of what `detectFailurePatternCandidates()` returns for the full
+ * population: this can only ever REMOVE a candidate, never create one
+ * the side-blind detector would not.
+ *
+ * Pure, deterministic, never mutates `observations`.
+ */
+export function detectSideScopedFailurePatternCandidates(observations: readonly FailurePatternObservationInput[], side: FailurePatternSide): FailurePatternCandidateWithoutTimestamp[] {
+  return detectFailurePatternCandidates(observations.filter((observation) => observation.side === side));
 }

@@ -12,13 +12,88 @@
 // qualification (MIN_OCCURRENCE_COUNT / temporal-spread / confidence cap)
 // — patterns are filtered here ONLY by `source`, `symbol` (Phase 8.3.0.1
 // §7 — mirrors the experience filter's own optional-but-applied
-// convention), `since` (checked against `lastObservedAt` — added as a
-// bug fix, see this function's own doc comment below), and, optionally,
-// `evidenceTags`; every other field on a `FailurePatternCandidate`
-// passes through completely unmodified.
+// convention), `side` (side-aware isolation — see `scopePatternsToSide()`
+// below; when the query names a side, a pattern must independently
+// re-qualify on THAT side's own history using the same pure detector,
+// and its count/share/timestamp fields are then the side-scoped ones),
+// `since` (checked against `lastObservedAt` — added as a bug fix, see
+// this function's own doc comment below), and, optionally,
+// `evidenceTags`; with no `side` in the query, every field on a
+// `FailurePatternCandidate` passes through completely unmodified.
 // ---------------------------------------------------------------------------
 
+import { detectSideScopedFailurePatternCandidates } from "@/lib/ai/failurePatterns/detect";
+import type { FailurePatternObservationInput } from "@/lib/ai/failurePatterns/contracts";
 import type { DecisionMemoryQuery, DecisionMemoryJoinedRow, DecisionMemoryResult, FailurePatternCandidate } from "./contracts";
+
+/**
+ * Side-aware pattern isolation (read path). `failure_pattern_candidates`
+ * is a SIDE-BLIND aggregate — its identity is `(source, symbol,
+ * evidenceTag)`, so a group can reach `MIN_OCCURRENCE_COUNT` purely
+ * because LONG losses and SHORT losses were pooled together, and it then
+ * vetoed BOTH directions. Production audit (2026-10-08): of 189
+ * pattern-driven REJECTs, only 8 had >= MIN_OCCURRENCE_COUNT negative
+ * evaluations on their OWN side; 158 existed only because the opposite
+ * side's losses were pooled in, and 23 had zero same-side negatives.
+ *
+ * When the query names a `side`, a persisted pattern is therefore only
+ * returned if THAT side's own history independently re-qualifies it,
+ * using the very same pure detector and thresholds
+ * (`detectSideScopedFailurePatternCandidates()` — nothing is loosened or
+ * re-implemented). Properties:
+ *   - Can only REMOVE a pattern vs. the side-blind result, never add one:
+ *     the persisted row must still exist AND the side-scoped
+ *     re-qualification must pass. It never bypasses negative memory — a
+ *     genuinely same-side recurring failure still matches.
+ *   - Counts/shares/timestamps on the returned pattern are the
+ *     side-scoped ones (what actually justified the match); identity,
+ *     `version` and `computedAt` come from the persisted row.
+ *   - Opposite-side and unknown-side (`null`) experiences never count.
+ *   - Uses the FULL joined population for `source`/`symbol`/`side` — the
+ *     experience `since`/`limit` filters deliberately do not apply
+ *     (patterns are all-time aggregates; `since` is applied afterwards
+ *     against the side-scoped `lastObservedAt`).
+ *   - `query.side` omitted -> returned unchanged (explicit unscoped read).
+ */
+function scopePatternsToSide(query: DecisionMemoryQuery, joinedRows: readonly DecisionMemoryJoinedRow[], patterns: readonly FailurePatternCandidate[]): readonly FailurePatternCandidate[] {
+  const side = query.side;
+  if (side === undefined) return patterns;
+
+  const observations: FailurePatternObservationInput[] = [];
+  for (const row of joinedRows) {
+    if (row.evaluation === null) continue;
+    if (row.experience.source !== query.source) continue;
+    if (query.symbol !== undefined && row.experience.symbol !== query.symbol) continue;
+    if (row.experience.side !== side) continue;
+    observations.push({
+      source: row.experience.source,
+      symbol: row.experience.symbol,
+      side: row.experience.side,
+      sourceSignalId: row.experience.sourceSignalId,
+      evaluationClass: row.evaluation.evaluationClass,
+      evidenceTags: row.evaluation.evidence,
+      decisionTimestamp: row.experience.decisionTimestamp,
+    });
+  }
+
+  const scoped = new Map(detectSideScopedFailurePatternCandidates(observations, side).map((candidate) => [`${candidate.source}::${candidate.symbol}::${candidate.evidenceTag}`, candidate]));
+
+  const result: FailurePatternCandidate[] = [];
+  for (const pattern of patterns) {
+    const sideCandidate = scoped.get(`${pattern.source}::${pattern.symbol}::${pattern.evidenceTag}`);
+    if (!sideCandidate) continue;
+    result.push({
+      ...pattern,
+      dominantEvaluationClass: sideCandidate.dominantEvaluationClass,
+      occurrenceCount: sideCandidate.occurrenceCount,
+      dominantClassShare: sideCandidate.dominantClassShare,
+      confidence: sideCandidate.confidence,
+      firstObservedAt: sideCandidate.firstObservedAt,
+      lastObservedAt: sideCandidate.lastObservedAt,
+    });
+  }
+  return result;
+}
 
 /**
  * Filters and ranks a Learning DB population against a `DecisionMemoryQuery`.
@@ -115,7 +190,7 @@ export function retrieveDecisionMemory(query: DecisionMemoryQuery, joinedRows: r
   const matchedExperiences = limited.map((row) => row.experience);
   const matchedEvaluations = limited.filter((row): row is DecisionMemoryJoinedRow & { evaluation: NonNullable<DecisionMemoryJoinedRow["evaluation"]> } => row.evaluation !== null).map((row) => row.evaluation);
 
-  const matchedPatterns = patterns
+  const matchedPatterns = scopePatternsToSide(query, joinedRows, patterns)
     .filter((pattern) => pattern.source === query.source)
     // Freshness bound — see this function's own doc comment above for why
     // lastObservedAt (never computedAt/firstObservedAt) is the correct

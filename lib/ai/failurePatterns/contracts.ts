@@ -44,6 +44,14 @@ export type FailurePatternEvidenceTag = EvaluationEvidenceTag;
 export type FailurePatternEvaluationClass = EvaluationClass;
 
 /**
+ * Trade direction of the originating decision. Declared locally (a plain
+ * string-literal union, structurally identical to `SignalSide` in
+ * lib/elvoid/types.ts) rather than imported, so this module keeps its
+ * "zero imports from lib/elvoid/*" boundary (see detect.ts's header).
+ */
+export type FailurePatternSide = "LONG" | "SHORT";
+
+/**
  * One joined (decision_experiences x decision_evaluations) row, read by
  * repository.ts and fed into detect.ts's pure aggregation. `evidenceTags`
  * is the full `decision_evaluations.evidence` array for this decision —
@@ -60,6 +68,16 @@ export interface FailurePatternObservationInput {
    * or influence, another symbol's aggregate.
    */
   readonly symbol: string;
+  /**
+   * Side-aware pattern isolation — copied verbatim from the originating
+   * `decision_experiences.side` row. OPTIONAL and additive: the persisted,
+   * side-blind aggregate (`detectFailurePatternCandidates()`, which backs
+   * `failure_pattern_candidates`, adaptive constraints and the causal
+   * graph) never reads it. Only `detectSideScopedFailurePatternCandidates()`
+   * does, and an observation whose `side` is absent/`null` ("unknown-side")
+   * is never attributed to either LONG or SHORT there.
+   */
+  readonly side?: FailurePatternSide | null;
   readonly sourceSignalId: string;
   readonly evaluationClass: FailurePatternEvaluationClass;
   readonly evidenceTags: readonly FailurePatternEvidenceTag[];
