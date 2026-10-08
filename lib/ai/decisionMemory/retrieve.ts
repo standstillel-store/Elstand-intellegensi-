@@ -12,8 +12,10 @@
 // qualification (MIN_OCCURRENCE_COUNT / temporal-spread / confidence cap)
 // — patterns are filtered here ONLY by `source`, `symbol` (Phase 8.3.0.1
 // §7 — mirrors the experience filter's own optional-but-applied
-// convention), and, optionally, `evidenceTags`; every other field on a
-// `FailurePatternCandidate` passes through completely unmodified.
+// convention), `since` (checked against `lastObservedAt` — added as a
+// bug fix, see this function's own doc comment below), and, optionally,
+// `evidenceTags`; every other field on a `FailurePatternCandidate`
+// passes through completely unmodified.
 // ---------------------------------------------------------------------------
 
 import type { DecisionMemoryQuery, DecisionMemoryJoinedRow, DecisionMemoryResult, FailurePatternCandidate } from "./contracts";
@@ -48,10 +50,30 @@ import type { DecisionMemoryQuery, DecisionMemoryJoinedRow, DecisionMemoryResult
  *
  * Pattern filtering: `source` (mandatory), `symbol` (Phase 8.3.0.1 §7 —
  * applied when the query provides one, same convention as the experience
- * filter above), and, if provided, `evidenceTags` (a pattern's single
- * `evidenceTag` must be among the requested set) — nothing else. Ranked
- * by `confidence` (descending), then `evidenceTag` (ascending) for
- * determinism. Never capped by `limit`.
+ * filter above), `since` (if provided — see below), and, if provided,
+ * `evidenceTags` (a pattern's single `evidenceTag` must be among the
+ * requested set) — nothing else. Ranked by `confidence` (descending),
+ * then `evidenceTag` (ascending) for determinism. Never capped by
+ * `limit`.
+ *
+ * `since` on a pattern is checked against `lastObservedAt` — the latest
+ * `decisionTimestamp` among the occurrences that make up that pattern
+ * (contracts.ts's own definition), the same "how recent is the actual
+ * evidence" question `since` already answers for `matchedExperiences`/
+ * `matchedEvaluations` via `decisionTimestamp`. Deliberately never
+ * `computedAt` (just when `recomputeFailurePatterns()` last ran — a
+ * stale pattern re-persisted untouched still gets a fresh `computedAt`,
+ * which would defeat the point) and never `firstObservedAt` (would
+ * wrongly expire a pattern that is still actively recurring). Without
+ * this, a pattern that crossed Phase 8.1.2's one-time admission
+ * threshold (`occurrenceCount >= MIN_OCCURRENCE_COUNT`) stayed matched
+ * forever, regardless of age — silently defeating the freshness window
+ * every caller that passes `since` (e.g. the autonomous runtime's own
+ * `NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS`-day cutoff) already intends to
+ * apply. This is a bound on which rows are even eligible, same as the
+ * experience `since` filter — not a new occurrenceCount/confidence
+ * re-threshold of Phase 8.1.2's own qualification (checked again by
+ * fixture 14b below).
  *
  * Mutates nothing: `joinedRows`, `patterns`, and every object reachable
  * from them are read-only inputs — every array produced here (`filter`,
@@ -95,6 +117,12 @@ export function retrieveDecisionMemory(query: DecisionMemoryQuery, joinedRows: r
 
   const matchedPatterns = patterns
     .filter((pattern) => pattern.source === query.source)
+    // Freshness bound — see this function's own doc comment above for why
+    // lastObservedAt (never computedAt/firstObservedAt) is the correct
+    // field. Mirrors the experience filter's own `sinceTime !== null`
+    // no-op-when-absent convention exactly, so an unscoped (no `since`)
+    // read is completely unaffected.
+    .filter((pattern) => sinceTime === null || Date.parse(pattern.lastObservedAt) >= sinceTime)
     // Phase 8.3.0.1 §7 — SYMBOL ISOLATION. `FailurePatternCandidate` did
     // not carry a `symbol` field at all when this file was first written
     // (Phase 8.1.3) — pooling across every symbol was the only possible

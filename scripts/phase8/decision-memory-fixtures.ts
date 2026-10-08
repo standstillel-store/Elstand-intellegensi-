@@ -411,5 +411,90 @@ function query(overrides: Partial<DecisionMemoryQuery> & { source: DecisionSourc
   check("20d. Omitting query.symbol entirely is still a valid explicit unscoped read — both patterns returned, matching the experience filter's own long-standing optional-symbol convention", unscopedResult.matchedPatterns.length === 2, JSON.stringify(unscopedResult.matchedPatterns));
 }
 
+// ===========================================================================
+// 21-26 (root-cause fix regression). matchedPatterns must now honor
+// `since`, checked against `lastObservedAt` — the bug this block exists
+// to pin down: before the fix, every one of 21/22/23/24 below returned
+// the SAME (unfiltered) matchedPatterns regardless of `since`.
+// ===========================================================================
+
+// 21. A pattern whose lastObservedAt is within the since window -> still matches.
+{
+  const fresh = pattern({ evidenceTag: "HIGH_GRADE", lastObservedAt: "2026-10-02T00:00:00.000Z" });
+  const result = retrieveDecisionMemory(query({ source: "AI_SIGNAL", since: "2026-09-08T00:00:00.000Z" }), [], [fresh]);
+  check("21. Fresh pattern (lastObservedAt 2026-10-02) with since=2026-09-08 -> still matched", result.matchedPatterns.length === 1 && result.matchedPatterns[0].evidenceTag === "HIGH_GRADE", JSON.stringify(result.matchedPatterns));
+}
+
+// 22. A pattern whose lastObservedAt is before the since window -> ignored (the core bug fix).
+{
+  const stale = pattern({ evidenceTag: "HIGH_GRADE", lastObservedAt: "2026-07-01T00:00:00.000Z" });
+  const result = retrieveDecisionMemory(query({ source: "AI_SIGNAL", since: "2026-09-08T00:00:00.000Z" }), [], [stale]);
+  check("22. Stale pattern (lastObservedAt 2026-07-01, well before since=2026-09-08) -> excluded from matchedPatterns (THE bug this fix targets)", result.matchedPatterns.length === 0, JSON.stringify(result.matchedPatterns));
+}
+
+// 23. Mixed fresh + stale patterns -> only the fresh one matches.
+{
+  const freshPattern = pattern({ evidenceTag: "HIGH_GRADE", lastObservedAt: "2026-10-02T00:00:00.000Z" });
+  const stalePattern = pattern({ evidenceTag: "MODERATE_RISK_PRESENT", lastObservedAt: "2026-06-15T00:00:00.000Z" });
+  const result = retrieveDecisionMemory(query({ source: "AI_SIGNAL", since: "2026-09-08T00:00:00.000Z" }), [], [freshPattern, stalePattern]);
+  check("23. Mixed fresh/stale patterns -> only HIGH_GRADE (fresh) is returned, MODERATE_RISK_PRESENT (stale) is not", result.matchedPatterns.length === 1 && result.matchedPatterns[0].evidenceTag === "HIGH_GRADE", JSON.stringify(result.matchedPatterns));
+}
+
+// 24. Every candidate pattern stale -> matchedPatterns empty, matchedExperiences/matchedEvaluations unaffected.
+{
+  const stalePatterns = [pattern({ evidenceTag: "HIGH_GRADE", lastObservedAt: "2026-05-01T00:00:00.000Z" }), pattern({ evidenceTag: "MODERATE_RISK_PRESENT", lastObservedAt: "2026-06-01T00:00:00.000Z" })];
+  const freshRow = row({ sourceSignalId: "sig-24-fresh", decisionTimestamp: "2026-10-02T00:00:00.000Z" }, { sourceSignalId: "sig-24-fresh" });
+  const result = retrieveDecisionMemory(query({ source: "AI_SIGNAL", since: "2026-09-08T00:00:00.000Z" }), [freshRow], stalePatterns);
+  check(
+    "24. All candidate patterns stale -> matchedPatterns === [] while a fresh experience in the SAME call still passes its own (pre-existing) since filter unaffected",
+    result.matchedPatterns.length === 0 && result.matchedExperiences.length === 1 && result.matchedExperiences[0].sourceSignalId === "sig-24-fresh",
+    JSON.stringify(result)
+  );
+}
+
+// 25. Existing evaluation-memory (matchedExperiences/matchedEvaluations) since-filtering behavior is byte-identical to before this fix — re-run of fixture 7's exact scenario, now also carrying a pattern array, to prove the new pattern filter doesn't alter experience/evaluation filtering at all.
+{
+  const rows = [
+    row({ sourceSignalId: "sig-before", decisionTimestamp: "2026-01-01T23:59:59.999Z" }, { sourceSignalId: "sig-before" }),
+    row({ sourceSignalId: "sig-exact", decisionTimestamp: "2026-01-02T00:00:00.000Z" }, { sourceSignalId: "sig-exact" }),
+    row({ sourceSignalId: "sig-after", decisionTimestamp: "2026-01-02T00:00:00.001Z" }, { sourceSignalId: "sig-after" }),
+  ];
+  const result = retrieveDecisionMemory(query({ source: "AI_SIGNAL", since: "2026-01-02T00:00:00.000Z" }), rows, [pattern({ lastObservedAt: "2026-01-02T00:00:00.000Z" })]);
+  const ids = result.matchedExperiences.map((e) => e.sourceSignalId).sort();
+  check(
+    "25. matchedExperiences since-boundary behavior (inclusive >=) is unchanged from before this fix, even with a pattern array now present in the same call",
+    JSON.stringify(ids) === JSON.stringify(["sig-after", "sig-exact"]) && result.matchedEvaluations.length === 2 && result.matchedPatterns.length === 1,
+    JSON.stringify(result)
+  );
+}
+
+// 26. Reproduction of the audited SUI/BTC production shape — real field values from the 2026-10-07 failure_pattern_candidates audit, with a 30-day since cutoff (NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS, mirroring orchestrator.ts's own negativeMemorySince computation) evaluated from two different "now" points. This only exercises retrieve.ts's matchedPatterns output — it never calls qualify.ts/decide.ts and asserts no CONFLICTED/REJECT/WAIT/EXECUTE outcome, per instruction #5 (fix the stale-evidence source, don't force a decision outcome).
+{
+  const suiPatterns = [
+    pattern({ source: "ELVOID_PRO_ORACLE", symbol: "SUI", evidenceTag: "HIGH_GRADE", occurrenceCount: 5, dominantClassShare: 1, firstObservedAt: "2026-09-02T21:15:50.207Z", lastObservedAt: "2026-10-02T19:57:55.237Z" }),
+    pattern({ source: "ELVOID_PRO_ORACLE", symbol: "SUI", evidenceTag: "MODERATE_RISK_PRESENT", occurrenceCount: 5, dominantClassShare: 1, firstObservedAt: "2026-09-02T21:15:50.207Z", lastObservedAt: "2026-10-02T19:57:55.237Z" }),
+  ];
+  const btcPattern = pattern({ source: "ELVOID_PRO_ORACLE", symbol: "BTC", evidenceTag: "HIGH_GRADE", occurrenceCount: 5, dominantClassShare: 1, firstObservedAt: "2026-08-31T10:13:09.152Z", lastObservedAt: "2026-10-06T16:10:41.094Z" });
+
+  // 26a. "now" = shortly after the audit snapshot (2026-10-08) -> both patterns'
+  // lastObservedAt are still within the last 30 days -> still correctly matched.
+  // This is the honest, expected result: the fix removes the "never expires"
+  // bug, it does not fabricate staleness that isn't there yet.
+  const sinceNearNow = "2026-09-08T00:00:00.000Z"; // 2026-10-08 minus 30 days
+  const sui26a = retrieveDecisionMemory(query({ source: "ELVOID_PRO_ORACLE", symbol: "SUI", since: sinceNearNow }), [], suiPatterns);
+  const btc26a = retrieveDecisionMemory(query({ source: "ELVOID_PRO_ORACLE", symbol: "BTC", since: sinceNearNow }), [], btcPattern ? [btcPattern] : []);
+  check("26a. SUI/BTC patterns from the real 2026-10-07 audit snapshot are still within a 30-day window measured from shortly after the snapshot -> correctly still matched (fix does not fabricate staleness)", sui26a.matchedPatterns.length === 2 && btc26a.matchedPatterns.length === 1, JSON.stringify({ sui: sui26a.matchedPatterns, btc: btc26a.matchedPatterns }));
+
+  // 26b. "now" = 45 days after the audit snapshot, well past
+  // NEGATIVE_MEMORY_FRESHNESS_WINDOW_DAYS (30) with no new occurrences in
+  // between -> both symbols' patterns correctly age out. Before this fix,
+  // this case was IMPOSSIBLE — matchedPatterns would have stayed non-empty
+  // forever regardless of how much time passed.
+  const since45DaysLater = "2026-11-22T00:00:00.000Z"; // 2026-10-07 audit lastObservedAt + 45 days - 30 days window
+  const sui26b = retrieveDecisionMemory(query({ source: "ELVOID_PRO_ORACLE", symbol: "SUI", since: since45DaysLater }), [], suiPatterns);
+  const btc26b = retrieveDecisionMemory(query({ source: "ELVOID_PRO_ORACLE", symbol: "BTC", since: since45DaysLater }), [], btcPattern ? [btcPattern] : []);
+  check("26b. Same SUI/BTC patterns, evaluated from 'now' = 45 days after their lastObservedAt with no new occurrences -> correctly age out to matchedPatterns=[] (impossible before this fix)", sui26b.matchedPatterns.length === 0 && btc26b.matchedPatterns.length === 0, JSON.stringify({ sui: sui26b.matchedPatterns, btc: btc26b.matchedPatterns }));
+}
+
 console.log(failures === 0 ? `\n✓ ${passed}/${passed} Decision Memory fixtures passed.` : `\n${failures} Decision Memory fixture(s) FAILED (${passed} passed).`);
 if (failures > 0) process.exitCode = 1;
